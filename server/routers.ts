@@ -68,9 +68,13 @@ export const appRouter = router({
       }),
   }),
   performance: router({
-    overview: publicProcedure.query(async ({ ctx }) => {
+    overview: publicProcedure.input(z.object({
+      leagueCode: z.string().min(1).max(8).optional(),
+      season: z.string().min(1).max(12).optional(),
+      outcome: z.enum(["all", "H", "D", "A"]).optional(),
+    }).optional()).query(async ({ ctx, input }) => {
       try {
-        const overview = await getPerformanceOverview(ctx.req);
+        const overview = await getPerformanceOverview(ctx.req, input);
         if (!hasValidPerformanceOverview(overview)) throw new Error("績效資料驗證失敗。");
         return overview;
       } catch (error) {

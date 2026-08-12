@@ -16,8 +16,18 @@ export type PerformanceOverview = {
   method: string;
 };
 
-const assetPath = "/manus-storage/model_performance_dashboard_772ed8c9.json";
-let cachedOverview: PerformanceOverview | null = null;
+export type PerformanceFilterInput = { leagueCode?: string; season?: string; outcome?: string };
+export type PerformanceFilters = {
+  leagues: Array<{ code: string; label: string }>;
+  seasons: Array<{ code: string; label: string }>;
+  outcomes: Array<{ code: string; label: string }>;
+};
+
+type PerformancePayload = { filters: PerformanceFilters; segments: Record<string, Omit<PerformanceOverview, "method">>; method: string };
+export type FilteredPerformanceOverview = PerformanceOverview & { filters: PerformanceFilters; activeFilters: Required<PerformanceFilterInput> };
+
+const assetPath = "/manus-storage/model_performance_filters_85bb0b9d.json";
+let cachedPayload: PerformancePayload | null = null;
 
 function getOrigin(request: Request) {
   const forwardedProtocol = request.get("x-forwarded-proto")?.split(",")[0];
@@ -35,12 +45,15 @@ export function hasValidPerformanceOverview(value: PerformanceOverview) {
   return summaryOk && matrixOk && calibrationOk;
 }
 
-export async function getPerformanceOverview(request: Request): Promise<PerformanceOverview> {
-  if (cachedOverview) return cachedOverview;
+export async function getPerformanceOverview(request: Request, filter: PerformanceFilterInput = {}): Promise<FilteredPerformanceOverview> {
+  const activeFilters = { leagueCode: filter.leagueCode || "all", season: filter.season || "all", outcome: filter.outcome || "all" };
+  if (!cachedPayload) {
   const response = await fetch(`${getOrigin(request)}${assetPath}`);
   if (!response.ok) throw new Error(`績效資料載入失敗（${response.status}）。`);
-  const payload = await response.json() as PerformanceOverview;
-  if (!hasValidPerformanceOverview(payload)) throw new Error("績效資料格式驗證失敗。");
-  cachedOverview = payload;
-  return payload;
+    cachedPayload = await response.json() as PerformancePayload;
+  }
+  const key = `${activeFilters.leagueCode}|${activeFilters.season}|${activeFilters.outcome}`;
+  const segment = cachedPayload.segments[key];
+  if (!segment || !hasValidPerformanceOverview({ ...segment, method: cachedPayload.method })) throw new Error("績效資料格式驗證失敗或目前篩選沒有可用樣本。");
+  return { ...segment, method: cachedPayload.method, filters: cachedPayload.filters, activeFilters };
 }

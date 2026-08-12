@@ -23,7 +23,8 @@ describe("performance router", () => {
       method: "擴張式時間序列交叉驗證。",
     });
 
-    await expect(appRouter.createCaller(context).performance.overview()).resolves.toMatchObject({ summary: { validationMatches: 9101 } });
+    await expect(appRouter.createCaller(context).performance.overview({ leagueCode: "EPL", season: "2024-2025", outcome: "H" })).resolves.toMatchObject({ summary: { validationMatches: 9101 } });
+    expect(getPerformanceOverview).toHaveBeenCalledWith(context.req, { leagueCode: "EPL", season: "2024-2025", outcome: "H" });
   });
 
   it("maps performance asset failures to a visible procedure error", async () => {
