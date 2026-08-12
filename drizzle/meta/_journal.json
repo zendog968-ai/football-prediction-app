@@ -1,5 +1,13 @@
 {
   "version": "7",
   "dialect": "mysql",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1786557588975,
+      "tag": "0000_bent_dragon_man",
+      "breakpoints": true
+    }
+  ]
 }
