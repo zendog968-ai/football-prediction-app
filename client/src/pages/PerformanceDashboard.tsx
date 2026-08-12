@@ -4,13 +4,14 @@ import { AlertTriangle, BarChart3, ChevronLeft, CircleCheck, Gauge, Info, LineCh
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { trpc } from "@/lib/trpc";
 import { getSampleAdvisory } from "@/lib/sampleAdvisory";
+import MethodologySheet from "@/components/MethodologySheet";
 
 const COLORS = { home: "#24c99a", draw: "#94a3b8", away: "#f4c55a" };
 function percentage(value: number) { return `${(value * 100).toFixed(2)}%`; }
 function dateRange(start: string, end: string) { return `${start.replaceAll("-", ".")} — ${end.replaceAll("-", ".")}`; }
 
 function Header() {
-  return <header className="relative border-b border-white/10 bg-[#0a1520] text-white"><div className="absolute inset-0 opacity-20 [background-image:linear-gradient(rgba(255,255,255,.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.05)_1px,transparent_1px)] [background-size:42px_42px]" /><div className="relative mx-auto flex max-w-7xl items-center justify-between px-5 py-5 lg:px-8"><Link href="/" className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-2xl border border-amber-200/20 bg-amber-200/10 text-amber-200"><Trophy size={19} /></div><div><div className="font-serif text-xl tracking-wide">Aurelia Football</div><div className="text-[9px] font-bold uppercase tracking-[0.22em] text-slate-400">Model performance desk</div></div></Link><Link href="/" className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-300 transition hover:bg-white/10 sm:flex"><ChevronLeft size={13} />返回預測工作台</Link></div></header>;
+  return <header className="relative border-b border-white/10 bg-[#0a1520] text-white"><div className="absolute inset-0 opacity-20 [background-image:linear-gradient(rgba(255,255,255,.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.05)_1px,transparent_1px)] [background-size:42px_42px]" /><div className="relative mx-auto flex max-w-7xl items-center justify-between gap-3 px-5 py-5 lg:px-8"><Link href="/" className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-2xl border border-amber-200/20 bg-amber-200/10 text-amber-200"><Trophy size={19} /></div><div><div className="font-serif text-xl tracking-wide">Aurelia Football</div><div className="text-[9px] font-bold uppercase tracking-[0.22em] text-slate-400">Model performance desk</div></div></Link><div className="flex items-center gap-2"><MethodologySheet /><Link href="/" className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-300 transition hover:bg-white/10 sm:flex"><ChevronLeft size={13} />返回預測工作台</Link></div></div></header>;
 }
 
 function Kpi({ label, value, detail, tone, icon }: { label: string; value: string; detail: string; tone: "emerald" | "amber" | "slate"; icon: React.ReactNode }) {
