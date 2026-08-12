@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { Link } from "wouter";
 
 type Forecast = {
   prediction_as_of: string;
@@ -171,7 +172,7 @@ export default function Home() {
         <div className="absolute inset-0 opacity-20 [background-image:linear-gradient(rgba(255,255,255,.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.05)_1px,transparent_1px)] [background-size:42px_42px]" />
         <div className="relative mx-auto flex max-w-7xl items-center justify-between px-5 py-5 lg:px-8">
           <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-2xl border border-amber-200/20 bg-amber-200/10 text-amber-200"><Trophy size={19} /></div><div><div className="font-serif text-xl tracking-wide">Aurelia Football</div><div className="text-[9px] font-bold uppercase tracking-[0.22em] text-slate-400">Probability Studio</div></div></div>
-          <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-300 sm:flex"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />校準模型已載入</div>
+          <div className="flex items-center gap-3"><Link href="/performance" className="hidden items-center gap-2 rounded-full border border-amber-200/25 bg-amber-200/10 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-amber-100 transition hover:bg-amber-200/20 sm:flex"><BarChart3 size={13} />模型績效</Link><div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-300 md:flex"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />校準模型已載入</div></div>
         </div>
       </header>
 

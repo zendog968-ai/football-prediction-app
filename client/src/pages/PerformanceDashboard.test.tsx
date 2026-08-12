@@ -1,0 +1,54 @@
+// @vitest-environment jsdom
+import React from "react";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+
+vi.mock("@/lib/trpc", () => ({
+  trpc: {
+    performance: {
+      overview: {
+        useQuery: () => ({
+          data: {
+            summary: { validationMatches: 9101, accuracy: 0.511482, logLoss: 1.010341, folds: 5, validationStart: "2021-04-03", validationEnd: "2025-05-25" },
+            foldMetrics: [{ fold: 1, accuracy: 0.489874, logLoss: 1.030378, validationRows: 1827, validationStart: "2021-04-03", validationEnd: "2022-01-22" }],
+            confusionMatrix: { labels: ["主勝", "和局", "客勝"], rows: [{ actual: "主勝", values: [3106, 9, 873] }, { actual: "和局", values: [1486, 11, 835] }, { actual: "客勝", values: [1239, 4, 1538] }] },
+            calibration: [
+              { code: "H", label: "主勝", points: [{ bin: 0, predicted: 0.2, observed: 0.16, count: 400 }] },
+              { code: "D", label: "和局", points: [{ bin: 0, predicted: 0.2, observed: 0.18, count: 400 }] },
+              { code: "A", label: "客勝", points: [{ bin: 0, predicted: 0.2, observed: 0.19, count: 400 }] },
+            ],
+            classDistribution: [{ code: "H", label: "主勝", actualRate: 0.4382, meanPredictedRate: 0.4257 }, { code: "D", label: "和局", actualRate: 0.2562, meanPredictedRate: 0.2577 }, { code: "A", label: "客勝", actualRate: 0.3056, meanPredictedRate: 0.3166 }],
+            method: "擴張式時間序列交叉驗證。",
+          },
+          isLoading: false,
+          error: null,
+        }),
+      },
+    },
+  },
+}));
+
+import PerformanceDashboard from "./PerformanceDashboard";
+
+describe("PerformanceDashboard", () => {
+  afterEach(() => cleanup());
+
+  it("renders real-format validation KPI, calibration, confusion matrix and distribution data", () => {
+    render(<PerformanceDashboard />);
+    expect(screen.getByText("51.15%")).toBeTruthy();
+    expect(screen.getByText("1.010")).toBeTruthy();
+    expect(screen.getByText("9,101")).toBeTruthy();
+    expect(screen.getByText("概率校準曲線")).toBeTruthy();
+    expect(screen.getByText("混淆矩陣")).toBeTruthy();
+    expect(screen.getByText("3,106")).toBeTruthy();
+    expect(screen.getByText("類別機率對照")).toBeTruthy();
+  });
+});

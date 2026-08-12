@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { getLeagueMetadata, getPrediction, getTeams, hasValidProbabilityDistribution } from "./prediction";
+import { getPerformanceOverview, hasValidPerformanceOverview } from "./performance";
 import { publicProcedure, router } from "./_core/trpc";
 
 export const appRouter = router({
@@ -65,6 +66,20 @@ export const appRouter = router({
           });
         }
       }),
+  }),
+  performance: router({
+    overview: publicProcedure.query(async ({ ctx }) => {
+      try {
+        const overview = await getPerformanceOverview(ctx.req);
+        if (!hasValidPerformanceOverview(overview)) throw new Error("績效資料驗證失敗。");
+        return overview;
+      } catch (error) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: error instanceof Error ? error.message : "無法載入模型績效資料。",
+        });
+      }
+    }),
   }),
 
   // TODO: add feature routers here, e.g.
