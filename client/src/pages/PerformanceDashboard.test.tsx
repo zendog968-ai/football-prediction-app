@@ -13,6 +13,7 @@ class ResizeObserverMock {
 vi.stubGlobal("ResizeObserver", ResizeObserverMock);
 
 const overviewQuerySpy = vi.hoisted(() => vi.fn());
+const dashboardTestState = vi.hoisted(() => ({ sampleSize: 9101 }));
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
@@ -22,7 +23,7 @@ vi.mock("@/lib/trpc", () => ({
           overviewQuerySpy(input);
           return ({
           data: {
-            summary: { validationMatches: 9101, accuracy: 0.511482, logLoss: 1.010341, folds: 5, validationStart: "2021-04-03", validationEnd: "2025-05-25" },
+            summary: { validationMatches: dashboardTestState.sampleSize, accuracy: 0.511482, logLoss: 1.010341, folds: 5, validationStart: "2021-04-03", validationEnd: "2025-05-25" },
             foldMetrics: [{ fold: 1, accuracy: 0.489874, logLoss: 1.030378, validationRows: 1827, validationStart: "2021-04-03", validationEnd: "2022-01-22" }],
             confusionMatrix: { labels: ["主勝", "和局", "客勝"], rows: [{ actual: "主勝", values: [3106, 9, 873] }, { actual: "和局", values: [1486, 11, 835] }, { actual: "客勝", values: [1239, 4, 1538] }] },
             calibration: [
@@ -47,7 +48,7 @@ vi.mock("@/lib/trpc", () => ({
 import PerformanceDashboard from "./PerformanceDashboard";
 
 describe("PerformanceDashboard", () => {
-  afterEach(() => cleanup());
+  afterEach(() => { cleanup(); dashboardTestState.sampleSize = 9101; });
 
   it("renders real-format validation KPI, calibration, confusion matrix and distribution data", () => {
     render(<PerformanceDashboard />);
@@ -70,5 +71,14 @@ describe("PerformanceDashboard", () => {
     await user.selectOptions(screen.getByLabelText("主客場賽果"), "H");
 
     expect(overviewQuerySpy).toHaveBeenLastCalledWith({ leagueCode: "EPL", season: "2024-2025", outcome: "H" });
+  });
+
+  it("renders a low-sample warning and interpretation guardrail", () => {
+    dashboardTestState.sampleSize = 72;
+    render(<PerformanceDashboard />);
+
+    expect(screen.getByText("低樣本警示")).toBeTruthy();
+    expect(screen.getByText(/目前切面僅有 72 場折外預測/)).toBeTruthy();
+    expect(screen.getByText(/並非統計顯著性檢定/)).toBeTruthy();
   });
 });
