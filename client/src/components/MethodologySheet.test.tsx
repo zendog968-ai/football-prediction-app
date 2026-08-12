@@ -2,11 +2,12 @@
 import React from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it } from "vitest";
-import MethodologySheet from "./MethodologySheet";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import MethodologySheet, { getStoredReadingMode, READING_MODE_STORAGE_KEY } from "./MethodologySheet";
 
 describe("MethodologySheet", () => {
-  afterEach(() => cleanup());
+  beforeEach(() => localStorage.clear());
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
   it("opens an accessible methodology drawer and closes it again", async () => {
     const user = userEvent.setup();
@@ -34,5 +35,27 @@ describe("MethodologySheet", () => {
 
     await user.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("persists the selected reading mode and restores it after remount", async () => {
+    const user = userEvent.setup();
+    const firstRender = render(<MethodologySheet />);
+    await user.click(screen.getByRole("button", { name: "開啟方法學說明" }));
+    await user.click(screen.getByRole("radio", { name: "進階模式" }));
+    expect(localStorage.getItem(READING_MODE_STORAGE_KEY)).toBe("advanced");
+
+    firstRender.unmount();
+    render(<MethodologySheet />);
+    await user.click(screen.getByRole("button", { name: "開啟方法學說明" }));
+    expect(screen.getByRole("radio", { name: "進階模式" }).getAttribute("data-state")).toBe("on");
+    expect(screen.getByText("Train(t₁ … tₖ) → Test(tₖ₊₁ … tₙ)")).toBeTruthy();
+  });
+
+  it("falls back to beginner mode for invalid or unavailable storage", async () => {
+    localStorage.setItem(READING_MODE_STORAGE_KEY, "not-a-mode");
+    expect(getStoredReadingMode()).toBe("beginner");
+
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("storage unavailable"); });
+    expect(getStoredReadingMode()).toBe("beginner");
   });
 });
