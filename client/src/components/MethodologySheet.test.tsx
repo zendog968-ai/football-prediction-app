@@ -18,11 +18,19 @@ describe("MethodologySheet", () => {
     expect(screen.getByText("折外驗證與時間序列")).toBeTruthy();
     expect(screen.getByText("Log-Loss：機率分配是否合理")).toBeTruthy();
     expect(screen.getByText("樣本數警示與分組解讀")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "初學者模式" }).getAttribute("data-state")).toBe("on");
+    expect(screen.queryByText("Log-Loss = −(1 / N) × Σ log(pᵢ, yᵢ)")).toBeNull();
 
+    await user.click(screen.getByRole("radio", { name: "進階模式" }));
+    expect(screen.getByRole("radio", { name: "進階模式" }).getAttribute("data-state")).toBe("on");
     await user.click(screen.getByRole("button", { name: "Log-Loss：機率分配是否合理" }));
     expect(screen.getByText("Log-Loss = −(1 / N) × Σ log(pᵢ, yᵢ)")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "進階術語表" }));
     expect(screen.getByText("Dixon–Coles")).toBeTruthy();
+
+    await user.click(screen.getByRole("radio", { name: "初學者模式" }));
+    expect(screen.queryByText("Log-Loss = −(1 / N) × Σ log(pᵢ, yᵢ)")).toBeNull();
+    expect(screen.queryByText("Dixon–Coles")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog")).toBeNull();
