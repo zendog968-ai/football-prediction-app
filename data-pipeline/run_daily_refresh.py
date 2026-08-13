@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PIPELINE_DIR = PROJECT_ROOT / "data-pipeline"
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 OPEN_RESULTS_URL = "https://raw.githubusercontent.com/schochastics/football-data/master/data/results/games.parquet"
-LEAGUES = ("BRA1", "EPL", "LL", "BL", "SA", "L1", "MLS", "J1", "FIN1", "KOR1", "POR1", "MEX1", "AUS1", "UEL")
+LEAGUES = ("BRA1", "EPL", "LL", "BL", "SA", "L1", "MLS", "J1", "FIN1", "KOR1", "POR1", "MEX1", "AUS1", "UEL", "SUD", "LCUP")
 
 
 def run(command: list[str]) -> None:
@@ -73,6 +73,7 @@ def main() -> None:
 
     base_database = output / "football_data.db"
     domestic_database = output / "football_data_13_leagues.db"
+    europa_database = output / "football_data_europa.db"
     expanded_database = output / "football_data_expanded.db"
     parquet = output / "open_football_games.parquet"
     features = output / "training_features_expanded.csv"
@@ -88,10 +89,15 @@ def main() -> None:
     ])
     run([
         sys.executable, str(PIPELINE_DIR / "build_europa_league_db.py"), "--base-database", str(domestic_database),
-        "--open-results", str(parquet), "--output", str(expanded_database), *as_of_args,
+        "--open-results", str(parquet), "--output", str(europa_database), *as_of_args,
+    ])
+    run([
+        sys.executable, str(PIPELINE_DIR / "build_sudamericana_leagues_cup_db.py"), "--base-database", str(europa_database),
+        "--open-results", str(parquet), "--output", str(expanded_database), "--leagues-cup-raw-out", str(output / "leagues_cup_espn_snapshot.json"), *as_of_args,
     ])
     validation_cutoff = args.as_of or datetime.now(timezone.utc).date().isoformat()
     run([sys.executable, str(PIPELINE_DIR / "verify_europa_league_data.py"), "--database", str(expanded_database), "--as-of", validation_cutoff])
+    run([sys.executable, str(PIPELINE_DIR / "verify_cup_data.py"), "--database", str(expanded_database), "--as-of", validation_cutoff])
     run([sys.executable, str(PIPELINE_DIR / "verify_odds_data.py"), "--database", str(expanded_database)])
     result_sync_report = output / "result_sync_report.json"
     run([

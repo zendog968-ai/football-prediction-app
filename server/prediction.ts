@@ -14,7 +14,7 @@ const databasePath = path.join(runtimeDirectory, "football_data_expanded_with_cl
 const modelPath = path.join(runtimeDirectory, "soccer_predict_model_expanded.pkl");
 
 export const SUPPORTED_LEAGUE_CODES = new Set([
-  "BRA1", "EPL", "LL", "BL", "SA", "L1", "MLS", "J1", "FIN1", "KOR1", "POR1", "MEX1", "AUS1", "UEL",
+  "BRA1", "EPL", "LL", "BL", "SA", "L1", "MLS", "J1", "FIN1", "KOR1", "POR1", "MEX1", "AUS1", "UEL", "SUD", "LCUP",
 ]);
 
 export class PredictionScopeError extends Error {
@@ -84,6 +84,57 @@ export type EuropaOverview = {
 };
 
 let europaCache: { expiresAt: number; payload: EuropaOverview } | null = null;
+
+export type CupOverview = {
+  source: "ESPN public scoreboard";
+  retrievedAt: string;
+  season: string;
+  recentResults: EuropaMatch[];
+  upcomingFixtures: EuropaMatch[];
+};
+
+const CUP_SCOREBOARD_SLUGS: Record<"SUD" | "LCUP", string> = {
+  SUD: "conmebol.sudamericana",
+  LCUP: "concacaf.leagues.cup",
+};
+const cupCache = new Map<string, { expiresAt: number; payload: CupOverview }>();
+
+export async function getCupOverview(leagueCode: "SUD" | "LCUP"): Promise<CupOverview> {
+  const cached = cupCache.get(leagueCode);
+  if (cached && cached.expiresAt > Date.now()) return cached.payload;
+  const now = new Date().toISOString().slice(0, 10);
+  const season = now.slice(0, 4);
+  const sourceUrl = `https://site.api.espn.com/apis/site/v2/sports/soccer/${CUP_SCOREBOARD_SLUGS[leagueCode]}/scoreboard?dates=${season}&limit=500`;
+  const response = await fetch(sourceUrl, { headers: { "user-agent": "AureliaFootballResearch/1.0" } });
+  if (!response.ok) throw new Error(`盃賽公開賽程載入失敗（${response.status}）。`);
+  const payload = await response.json() as { events?: Array<Record<string, unknown>> };
+  if (!Array.isArray(payload.events)) throw new Error("盃賽公開賽程格式無效。");
+  const matches = payload.events.flatMap((event): EuropaMatch[] => {
+    const date = typeof event.date === "string" ? event.date : undefined;
+    const statusName = String((event.status as { type?: { name?: string } } | undefined)?.type?.name || "");
+    const competitors = ((event.competitions as Array<{ competitors?: Array<Record<string, unknown>> }> | undefined)?.[0]?.competitors) || [];
+    const home = competitors.find(row => row.homeAway === "home");
+    const away = competitors.find(row => row.homeAway === "away");
+    if (!date || !home || !away) return [];
+    const homeTeam = String((home.team as { displayName?: string } | undefined)?.displayName || "").trim();
+    const awayTeam = String((away.team as { displayName?: string } | undefined)?.displayName || "").trim();
+    if (!homeTeam || !awayTeam) return [];
+    const finished = statusName === "STATUS_FULL_TIME";
+    const homeGoals = finished ? Number(home.score) : null;
+    const awayGoals = finished ? Number(away.score) : null;
+    if (finished && (!Number.isInteger(homeGoals) || !Number.isInteger(awayGoals))) return [];
+    return [{ date, homeTeam, awayTeam, homeGoals, awayGoals, status: finished ? "FINISHED" : "UPCOMING", round: leagueCode === "SUD" ? "CONMEBOL Sudamericana" : "Leagues Cup" }];
+  });
+  const overview: CupOverview = {
+    source: "ESPN public scoreboard",
+    retrievedAt: new Date().toISOString(),
+    season,
+    recentResults: matches.filter(match => match.status === "FINISHED" && match.date.slice(0, 10) <= now).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6),
+    upcomingFixtures: matches.filter(match => match.status === "UPCOMING" && match.date.slice(0, 10) >= now).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 8),
+  };
+  cupCache.set(leagueCode, { expiresAt: Date.now() + 5 * 60_000, payload: overview });
+  return overview;
+}
 
 function europaTeamName(team: Record<string, unknown>) {
   const direct = team.internationalName;
@@ -184,7 +235,7 @@ export async function getLeagueMetadata(request: Request): Promise<LeagueMetadat
 export async function getTeams(request: Request, leagueCode: string): Promise<string[]> {
   const normalizedLeague = leagueCode.trim().toUpperCase();
   if (!SUPPORTED_LEAGUE_CODES.has(normalizedLeague)) {
-    throw new PredictionScopeError("超出模型範疇：目前只支援13個已驗證聯賽內的對戰；盃賽與未涵蓋聯賽不會輸出未校準機率。");
+    throw new PredictionScopeError("超出模型範疇：目前只支援16個已驗證資料範圍內的對戰；未涵蓋盃賽與聯賽不會輸出未校準機率。");
   }
   await ensureRuntimeAssets(request);
   const stdout = await runPython("list_teams.py", ["--database", databasePath, "--league", normalizedLeague]);

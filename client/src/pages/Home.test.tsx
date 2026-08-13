@@ -39,6 +39,8 @@ const expandedLeagueTeams = vi.hoisted(() => ({
   MEX1: ["Tigres UANL", "Guadalajara"],
   AUS1: ["Melbourne Victory", "Melbourne City FC"],
   UEL: ["Benfica", "Ferencváros"],
+  SUD: ["Santos FC", "Vasco Da Gama"],
+  LCUP: ["Seattle Sounders FC", "Guadalajara"],
 }));
 
 vi.mock("@/lib/trpc", () => ({
@@ -58,6 +60,8 @@ vi.mock("@/lib/trpc", () => ({
               { code: "MEX1", name: "Liga MX", first_date: "2020-01-11", last_date: "2024-12-16", match_count: 1599 },
               { code: "AUS1", name: "A-League Men", first_date: "2020-08-01", last_date: "2025-05-31", match_count: 852 },
               { code: "UEL", name: "UEFA Europa League", first_date: "2021-08-03", last_date: "2026-08-11", match_count: 910 },
+              { code: "SUD", name: "CONMEBOL Sudamericana", first_date: "2003-07-29", last_date: "2026-08-13", match_count: 2257 },
+              { code: "LCUP", name: "Leagues Cup", first_date: "2019-07-24", last_date: "2026-08-13", match_count: 203 },
             ],
             coverage: { firstDate: "2020-08-08", lastDate: "2025-05-25", lastUpdatedAt: "2026-08-13T00:00:00+00:00", model: "校準後 XGBoost 三分類模型", disclaimer: "僅使用歷史賽前資料。" },
           },
@@ -82,6 +86,20 @@ vi.mock("@/lib/trpc", () => ({
             season: "2026-2027",
             recentResults: [{ date: "2026-08-11", homeTeam: "Benfica", awayTeam: "Ferencváros", homeGoals: 2, awayGoals: 1, status: "FINISHED", round: "Qualifying" }],
             upcomingFixtures: [{ date: "2026-08-20", homeTeam: "Benfica", awayTeam: "Ferencváros", homeGoals: null, awayGoals: null, status: "UPCOMING", round: "Qualifying" }],
+          },
+          error: null,
+        }),
+      },
+      cup: {
+        useQuery: (input: { leagueCode: "SUD" | "LCUP" }) => ({
+          data: input.leagueCode === "SUD" ? {
+            source: "ESPN public scoreboard", retrievedAt: "2026-08-13T12:00:00Z", season: "2026",
+            recentResults: [{ date: "2026-08-12T22:00:00Z", homeTeam: "Santos FC", awayTeam: "Vasco Da Gama", homeGoals: 2, awayGoals: 1, status: "FINISHED", round: "Sudamericana" }],
+            upcomingFixtures: [{ date: "2026-08-20T22:00:00Z", homeTeam: "Santos FC", awayTeam: "Vasco Da Gama", homeGoals: null, awayGoals: null, status: "UPCOMING", round: "Sudamericana" }],
+          } : {
+            source: "ESPN public scoreboard", retrievedAt: "2026-08-13T12:00:00Z", season: "2026",
+            recentResults: [{ date: "2026-08-12T23:30:00Z", homeTeam: "Seattle Sounders FC", awayTeam: "Guadalajara", homeGoals: 2, awayGoals: 1, status: "FINISHED", round: "Leagues Cup" }],
+            upcomingFixtures: [{ date: "2026-08-20T23:30:00Z", homeTeam: "Seattle Sounders FC", awayTeam: "Guadalajara", homeGoals: null, awayGoals: null, status: "UPCOMING", round: "Leagues Cup" }],
           },
           error: null,
         }),
@@ -167,6 +185,8 @@ describe("Home prediction workflow", () => {
       expect(screen.getByRole("option", { name })).toBeTruthy();
     }
     expect(screen.getByRole("option", { name: "歐霸盃 · UEFA Europa League" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "南美球會盃 · CONMEBOL Sudamericana" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "北美聯賽盃 · Leagues Cup" })).toBeTruthy();
 
     await user.selectOptions(screen.getByLabelText("聯賽"), "J1");
     const homeInput = screen.getByLabelText("主隊");
@@ -183,7 +203,7 @@ describe("Home prediction workflow", () => {
     const checks = [
       ["MLS", "Atlan", "Atlanta United"], ["J1", "Kawa", "Kawasaki Frontale"],
       ["FIN1", "Hak", "Haka"], ["KOR1", "Daeg", "Daegu"], ["POR1", "AV", "AVS"],
-      ["MEX1", "Tigr", "Tigres UANL"], ["AUS1", "Melbourne V", "Melbourne Victory"], ["UEL", "Feren", "Ferencváros"],
+      ["MEX1", "Tigr", "Tigres UANL"], ["AUS1", "Melbourne V", "Melbourne Victory"], ["UEL", "Feren", "Ferencváros"], ["SUD", "Sant", "Santos FC"], ["LCUP", "Seatt", "Seattle Sounders FC"],
     ] as const;
 
     for (const [leagueCode, search, expected] of checks) {
@@ -207,6 +227,20 @@ describe("Home prediction workflow", () => {
     await user.click(screen.getByRole("button", { name: /Benfica vs Ferencváros.*帶入預測/ }));
     expect((screen.getByLabelText("主隊") as HTMLInputElement).value).toBe("Benfica");
     expect((screen.getByLabelText("客隊") as HTMLInputElement).value).toBe("Ferencváros");
+  });
+
+  it("shows both new cup boards and can load a calibrated Leagues Cup fixture into the prediction fields", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.selectOptions(screen.getByLabelText("聯賽"), "SUD");
+    expect(screen.getByTestId("cup-live-board")).toBeTruthy();
+    expect(screen.getByText("Santos FC 2–1 Vasco Da Gama")).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText("聯賽"), "LCUP");
+    expect(screen.getByText("Seattle Sounders FC 2–1 Guadalajara")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Seattle Sounders FC vs Guadalajara.*帶入預測/ }));
+    expect((screen.getByLabelText("主隊") as HTMLInputElement).value).toBe("Seattle Sounders FC");
+    expect((screen.getByLabelText("客隊") as HTMLInputElement).value).toBe("Guadalajara");
   });
 
   it("exposes labelled controls and clear loading and error states", async () => {
