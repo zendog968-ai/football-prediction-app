@@ -5,17 +5,13 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { Request } from "express";
+import { getReleaseAssets } from "./releaseAssets";
 
 const execFileAsync = promisify(execFile);
 const projectRoot = process.cwd();
 const runtimeDirectory = path.join(os.tmpdir(), "football-prediction-runtime-expanded-v2-odds");
 const databasePath = path.join(runtimeDirectory, "football_data_expanded_with_closing_odds.db");
 const modelPath = path.join(runtimeDirectory, "soccer_predict_model_expanded.pkl");
-
-const runtimeAssets = {
-  database: "/manus-storage/football_data_expanded_with_closing_odds_f47c25c4.db",
-  model: "/manus-storage/soccer_predict_model_expanded_0dc66f04.pkl",
-};
 
 export const SUPPORTED_LEAGUE_CODES = new Set([
   "BRA1", "EPL", "LL", "BL", "SA", "L1", "MLS", "J1", "FIN1", "KOR1", "POR1", "MEX1", "AUS1",
@@ -31,6 +27,7 @@ export class PredictionScopeError extends Error {
 }
 
 let runtimeReady: Promise<void> | null = null;
+let runtimeVersion: string | null = null;
 
 export type PredictionResult = {
   prediction_as_of: string;
@@ -85,19 +82,19 @@ async function downloadFile(sourceUrl: string, destination: string) {
 }
 
 async function ensureRuntimeAssets(request: Request) {
-  if (runtimeReady) return runtimeReady;
+  const assets = await getReleaseAssets(getOrigin(request));
+  if (runtimeReady && runtimeVersion === assets.version) return runtimeReady;
+  runtimeVersion = assets.version;
   runtimeReady = (async () => {
     await fs.mkdir(runtimeDirectory, { recursive: true });
-    const databaseExists = await fs.stat(databasePath).then(() => true).catch(() => false);
-    const modelExists = await fs.stat(modelPath).then(() => true).catch(() => false);
-    const origin = getOrigin(request);
-    if (!databaseExists) await downloadFile(`${origin}${runtimeAssets.database}`, databasePath);
-    if (!modelExists) await downloadFile(`${origin}${runtimeAssets.model}`, modelPath);
+    await downloadFile(assets.database, databasePath);
+    await downloadFile(assets.model, modelPath);
   })();
   try {
     await runtimeReady;
   } catch (error) {
     runtimeReady = null;
+    runtimeVersion = null;
     throw error;
   }
 }

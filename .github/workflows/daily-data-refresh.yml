@@ -1,0 +1,44 @@
+name: Aurelia daily football data refresh
+
+on:
+  schedule:
+    - cron: "15 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: aurelia-daily-data-refresh
+  cancel-in-progress: false
+
+jobs:
+  build-validate-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install reproducible Python dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      - name: Build and validate complete candidate release
+        run: python data-pipeline/run_daily_refresh.py --output-dir build/daily
+      - name: Retain audited candidate outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurelia-data-candidate-${{ github.run_id }}
+          path: |
+            build/daily/pipeline_status.json
+            build/daily/model/cross_validation_metrics.csv
+            build/daily/model/model_report_zh-TW.md
+            build/daily/smoke-*.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish only the validated versioned assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/publish_github_release.sh build/daily

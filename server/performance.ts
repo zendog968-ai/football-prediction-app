@@ -1,4 +1,5 @@
 import type { Request } from "express";
+import { getReleaseAssets } from "./releaseAssets";
 
 export type PerformanceOverview = {
   summary: {
@@ -26,8 +27,8 @@ export type PerformanceFilters = {
 type PerformancePayload = { filters: PerformanceFilters; segments: Record<string, Omit<PerformanceOverview, "method">>; method: string };
 export type FilteredPerformanceOverview = PerformanceOverview & { filters: PerformanceFilters; activeFilters: Required<PerformanceFilterInput> };
 
-const assetPath = "/manus-storage/model_performance_filters_expanded_8d3a1806.json";
 let cachedPayload: PerformancePayload | null = null;
+let cachedVersion: string | null = null;
 
 function getOrigin(request: Request) {
   const forwardedProtocol = request.get("x-forwarded-proto")?.split(",")[0];
@@ -47,10 +48,12 @@ export function hasValidPerformanceOverview(value: PerformanceOverview) {
 
 export async function getPerformanceOverview(request: Request, filter: PerformanceFilterInput = {}): Promise<FilteredPerformanceOverview> {
   const activeFilters = { leagueCode: filter.leagueCode || "all", season: filter.season || "all", outcome: filter.outcome || "all" };
-  if (!cachedPayload) {
-  const response = await fetch(`${getOrigin(request)}${assetPath}`);
+  const assets = await getReleaseAssets(getOrigin(request));
+  if (!cachedPayload || cachedVersion !== assets.version) {
+  const response = await fetch(assets.performance);
   if (!response.ok) throw new Error(`績效資料載入失敗（${response.status}）。`);
     cachedPayload = await response.json() as PerformancePayload;
+    cachedVersion = assets.version;
   }
   const key = `${activeFilters.leagueCode}|${activeFilters.season}|${activeFilters.outcome}`;
   const segment = cachedPayload.segments[key];
