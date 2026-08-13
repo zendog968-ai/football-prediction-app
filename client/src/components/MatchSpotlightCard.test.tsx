@@ -13,14 +13,11 @@ const match: SpotlightCardData = {
 };
 
 describe("MatchSpotlightCard", () => {
-  it("renders scenario probabilities and switches between score, factor and limitation views", async () => {
-    const user = userEvent.setup();
+  it("blocks uncalibrated cup probability figures and explains the inference boundary", async () => {
     render(<MatchSpotlightCard match={match} />);
-    expect(screen.getByText("43.81%")).toBeTruthy();
-    expect(screen.getByText("1–1")).toBeTruthy();
-    await user.click(screen.getByRole("tab", { name: "關鍵因素" }));
-    expect(screen.getByText("近期狀態偏向法林明高")).toBeTruthy();
-    await user.click(screen.getByRole("tab", { name: "資料限制" }));
-    expect(screen.getByText("情境機率，非即時校準模型")).toBeTruthy();
+    expect(screen.getByText("Out-of-Scope")).toBeTruthy();
+    expect(screen.getByText(/此盃賽不屬於目前校準模型/)).toBeTruthy();
+    expect(screen.queryByText("43.81%")).toBeNull();
+    expect(screen.queryByText("1–1")).toBeNull();
   });
 });

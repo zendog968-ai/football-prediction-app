@@ -17,6 +17,19 @@ const runtimeAssets = {
   model: "/manus-storage/soccer_predict_model_expanded_0dc66f04.pkl",
 };
 
+export const SUPPORTED_LEAGUE_CODES = new Set([
+  "BRA1", "EPL", "LL", "BL", "SA", "L1", "MLS", "J1", "FIN1", "KOR1", "POR1", "MEX1", "AUS1",
+]);
+
+export class PredictionScopeError extends Error {
+  readonly code = "OUT_OF_SCOPE";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "PredictionScopeError";
+  }
+}
+
 let runtimeReady: Promise<void> | null = null;
 
 export type PredictionResult = {
@@ -46,7 +59,13 @@ export type PredictionResult = {
 export type LeagueMetadata = {
   leagues: Array<{ code: string; name: string; first_date: string; last_date: string; match_count: number }>;
   teams: string[];
-  coverage: { firstDate: string; lastDate: string; model: string; disclaimer: string };
+  coverage: {
+    firstDate: string;
+    lastDate: string;
+    lastUpdatedAt: string | null;
+    model: string;
+    disclaimer: string;
+  };
 };
 
 function getOrigin(request: Request) {
@@ -99,9 +118,32 @@ export async function getLeagueMetadata(request: Request): Promise<LeagueMetadat
 }
 
 export async function getTeams(request: Request, leagueCode: string): Promise<string[]> {
+  const normalizedLeague = leagueCode.trim().toUpperCase();
+  if (!SUPPORTED_LEAGUE_CODES.has(normalizedLeague)) {
+    throw new PredictionScopeError("超出模型範疇：目前只支援13個已驗證聯賽內的對戰；盃賽與未涵蓋聯賽不會輸出未校準機率。");
+  }
   await ensureRuntimeAssets(request);
-  const stdout = await runPython("list_teams.py", ["--database", databasePath, "--league", leagueCode]);
+  const stdout = await runPython("list_teams.py", ["--database", databasePath, "--league", normalizedLeague]);
   return (JSON.parse(stdout) as LeagueMetadata).teams;
+}
+
+export function validateInferenceScope(
+  input: { leagueCode: string; homeTeam: string; awayTeam: string },
+  leagueTeams: string[],
+) {
+  const normalizedLeague = input.leagueCode.trim().toUpperCase();
+  if (!SUPPORTED_LEAGUE_CODES.has(normalizedLeague)) {
+    throw new PredictionScopeError("超出模型範疇：此聯賽未納入目前校準模型，系統不會產生未經校準的機率。 ");
+  }
+
+  const exactTeams = new Set(leagueTeams.map(team => team.trim().toLocaleLowerCase()));
+  const unavailable = [input.homeTeam, input.awayTeam]
+    .filter(team => !exactTeams.has(team.trim().toLocaleLowerCase()));
+  if (unavailable.length > 0) {
+    throw new PredictionScopeError(
+      `超出模型範疇：${unavailable.join("、")} 不屬於 ${normalizedLeague} 的已驗證聯賽資料。跨聯賽或盃賽對戰（例如自由盃、歐洲賽、聯盟盃）不會輸出未經校準的機率。`,
+    );
+  }
 }
 
 export async function getPrediction(
@@ -109,12 +151,15 @@ export async function getPrediction(
   input: { leagueCode: string; homeTeam: string; awayTeam: string }
 ): Promise<PredictionResult> {
   await ensureRuntimeAssets(request);
+  const normalizedLeague = input.leagueCode.trim().toUpperCase();
+  const leagueTeams = await getTeams(request, normalizedLeague);
+  validateInferenceScope({ ...input, leagueCode: normalizedLeague }, leagueTeams);
   const outputPath = path.join(runtimeDirectory, `prediction-${randomUUID()}.json`);
   try {
     await runPython("predict_upcoming.py", [
       "--home", input.homeTeam,
       "--away", input.awayTeam,
-      "--league", input.leagueCode,
+      "--league", normalizedLeague,
       "--database", databasePath,
       "--model", modelPath,
       "--json-out", outputPath,

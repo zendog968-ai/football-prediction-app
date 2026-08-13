@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasValidProbabilityDistribution, type PredictionResult } from "./prediction";
+import { hasValidProbabilityDistribution, PredictionScopeError, type PredictionResult, validateInferenceScope } from "./prediction";
 
 const validResult: PredictionResult = {
   prediction_as_of: "2025-05-25 20:00:01",
@@ -35,5 +35,32 @@ describe("prediction probability guard", () => {
       ...validResult,
       probabilities: { home_win: 0.48, draw: 0.27, away_win: 0.35 },
     })).toBe(false);
+  });
+});
+
+describe("prediction scope guard", () => {
+  it("permits an in-scope pair from one supported league", () => {
+    expect(() => validateInferenceScope(
+      { leagueCode: "EPL", homeTeam: "Arsenal", awayTeam: "Chelsea" },
+      ["Arsenal", "Chelsea", "Liverpool"],
+    )).not.toThrow();
+  });
+
+  it("rejects a cup or cross-league team before Python inference", () => {
+    expect(() => validateInferenceScope(
+      { leagueCode: "MLS", homeTeam: "Los Angeles FC", awayTeam: "Queretaro" },
+      ["Los Angeles FC", "Seattle Sounders"],
+    )).toThrow(PredictionScopeError);
+    expect(() => validateInferenceScope(
+      { leagueCode: "MLS", homeTeam: "Los Angeles FC", awayTeam: "Queretaro" },
+      ["Los Angeles FC", "Seattle Sounders"],
+    )).toThrow("超出模型範疇");
+  });
+
+  it("rejects a league outside the calibrated 13-league scope", () => {
+    expect(() => validateInferenceScope(
+      { leagueCode: "LIBERTADORES", homeTeam: "Palmeiras", awayTeam: "Penarol" },
+      [],
+    )).toThrow("未納入目前校準模型");
   });
 });

@@ -34,7 +34,7 @@ describe("prediction router", () => {
     vi.mocked(getLeagueMetadata).mockResolvedValue({
       leagues: [{ code: "EPL", name: "Premier League", first_date: "2020-09-12", last_date: "2025-05-25", match_count: 1900 }],
       teams: [],
-      coverage: { firstDate: "2020-08-08", lastDate: "2025-05-25", model: "校準後 XGBoost 三分類模型", disclaimer: "僅使用賽前資料。" },
+      coverage: { firstDate: "2020-08-08", lastDate: "2025-05-25", lastUpdatedAt: "2026-08-13T00:00:00+00:00", model: "校準後 XGBoost 三分類模型", disclaimer: "僅使用賽前資料。" },
     });
     vi.mocked(getTeams).mockResolvedValue(["Arsenal", "Chelsea"]);
     vi.mocked(getPrediction).mockResolvedValue(prediction);

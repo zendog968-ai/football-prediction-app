@@ -57,7 +57,7 @@ vi.mock("@/lib/trpc", () => ({
               { code: "MEX1", name: "Liga MX", first_date: "2020-01-11", last_date: "2024-12-16", match_count: 1599 },
               { code: "AUS1", name: "A-League Men", first_date: "2020-08-01", last_date: "2025-05-31", match_count: 852 },
             ],
-            coverage: { firstDate: "2020-08-08", lastDate: "2025-05-25", model: "校準後 XGBoost 三分類模型", disclaimer: "僅使用歷史賽前資料。" },
+            coverage: { firstDate: "2020-08-08", lastDate: "2025-05-25", lastUpdatedAt: "2026-08-13T00:00:00+00:00", model: "校準後 XGBoost 三分類模型", disclaimer: "僅使用歷史賽前資料。" },
           },
         }),
       },
@@ -210,5 +210,24 @@ describe("Home prediction workflow", () => {
     clearHome.focus();
     await user.keyboard("{Enter}");
     expect(homeInput.value).toBe("");
+  });
+
+  it("shows database update time and research-only model odds after a forecast", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    expect(screen.getByText(/資料庫最後更新/)).toBeTruthy();
+    await user.selectOptions(screen.getByRole("combobox"), "BRA1");
+    await user.click(screen.getByLabelText("主隊"));
+    await user.type(screen.getByLabelText("主隊"), "Palm");
+    await user.click(screen.getByRole("button", { name: /Palmeiras/ }));
+    await user.click(screen.getByLabelText("客隊"));
+    await user.type(screen.getByLabelText("客隊"), "Flam");
+    await user.click(screen.getByRole("button", { name: /Flamengo RJ/ }));
+    await user.click(screen.getByRole("button", { name: /開始分析這場對戰/ }));
+
+    const disclaimer = await screen.findByTestId("research-disclaimer");
+    expect(disclaimer.textContent).toContain("模型賠率 = 1 ÷ 機率");
+    expect(disclaimer.textContent).toContain("不計算或推薦 +EV 機會");
   });
 });

@@ -22,7 +22,7 @@ def main() -> None:
                 """
                 SELECT league_code AS code, league_name AS name,
                        MIN(match_date) AS first_date, MAX(match_date) AS last_date,
-                       COUNT(*) AS match_count
+                       MAX(fetched_at) AS last_updated_at, COUNT(*) AS match_count
                 FROM matches
                 GROUP BY league_code, league_name
                 ORDER BY CASE league_code
@@ -55,6 +55,7 @@ def main() -> None:
         "coverage": {
             "firstDate": min((league["first_date"] for league in leagues), default=None),
             "lastDate": max((league["last_date"] for league in leagues), default=None),
+            "lastUpdatedAt": max((league["last_updated_at"] for league in leagues if league["last_updated_at"]), default=None),
             "model": "校準後 XGBoost 三分類模型",
             "disclaimer": "預測只使用資料庫最後一場已完成比賽前可得的歷史資料；不包含即時傷停、先發、天氣或賠率。",
         },

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   ArrowRight,
+  BadgeInfo,
   BarChart3,
   BrainCircuit,
   ChevronDown,
@@ -54,6 +55,17 @@ function percent(value: number) {
 
 function dateLabel(value: string) {
   return new Intl.DateTimeFormat("zh-TW", { year: "numeric", month: "short", day: "numeric" }).format(new Date(`${value}T00:00:00`));
+}
+
+function timestampLabel(value: string | null | undefined) {
+  if (!value) return "未提供";
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return value;
+  return new Intl.DateTimeFormat("zh-TW", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(timestamp);
+}
+
+function modelOdds(value: number) {
+  return value > 0 ? (1 / value).toFixed(2) : "—";
 }
 
 function TeamSearch({
@@ -184,14 +196,14 @@ export default function Home() {
           <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-[0_18px_55px_rgba(15,23,42,0.07)] lg:p-8">
             <div className="flex items-start justify-between gap-4"><div><div className="mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-700"><Sparkles size={14} />賽前預測工作台</div><h1 className="max-w-xl font-serif text-4xl leading-[1.02] text-[#0d1d2a] sm:text-5xl">讓每一場對戰，
               <span className="text-emerald-700">更有依據。</span></h1></div><div className="hidden rounded-2xl bg-[#f5f0e6] p-3 text-amber-700 sm:block"><BrainCircuit size={23} /></div></div>
-            <p className="mt-5 max-w-xl text-sm leading-7 text-slate-500">先選定聯賽與對戰球隊。系統會重建最新可用賽前特徵，並以校準後的機器學習模型輸出三種結果機率。</p>
+            <p className="mt-5 max-w-xl text-sm leading-7 text-slate-500">先選定聯賽與對戰球隊。系統只分析13個已驗證聯賽內的對戰，並以校準後的機器學習模型輸出三種結果機率。</p>
 
             <div className="mt-8 grid gap-5">
               <div><label htmlFor="league-selector" className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400"><Target size={13} />聯賽</label><div className="relative"><select id="league-selector" value={leagueCode} onChange={event => setLeagueCode(event.target.value)} className="h-13 w-full appearance-none rounded-2xl border border-slate-200 bg-slate-50/70 px-4 pr-10 text-sm font-semibold text-slate-800 outline-none transition focus:border-amber-300 focus:bg-white"><option value="">選擇聯賽</option>{leaguesQuery.data?.leagues.map(league => <option key={league.code} value={league.code}>{leagueLabels[league.code] || league.name} · {league.name}</option>)}</select><ChevronDown size={17} className="pointer-events-none absolute right-4 top-4 text-slate-400" /></div></div>
               <div className="grid gap-5 sm:grid-cols-2"><TeamSearch label="主隊" value={homeTeam} onSelect={setHomeTeam} teams={teams} placeholder={teamsQuery.isLoading ? "載入球隊中…" : "搜尋主隊"} accent="emerald" /><TeamSearch label="客隊" value={awayTeam} onSelect={setAwayTeam} teams={teams} placeholder={teamsQuery.isLoading ? "載入球隊中…" : "搜尋客隊"} accent="gold" /></div>
             </div>
             {homeTeam && awayTeam && homeTeam === awayTeam && <p className="mt-4 text-xs font-medium text-rose-600">請選擇兩支不同的球隊。</p>}
-            {forecast.error && <p className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{forecast.error.message}</p>}
+            {forecast.error && <p className="mt-4 rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700"><strong>範疇驗證：</strong>{forecast.error.message}</p>}
             <button type="button" onClick={runForecast} disabled={!canPredict} className="mt-7 flex h-14 w-full items-center justify-center gap-3 rounded-2xl bg-[#0c1a25] text-sm font-bold tracking-[0.08em] text-white shadow-[0_12px_24px_rgba(12,26,37,.18)] transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-45 active:scale-[.985]">
               {forecast.isPending ? <><Loader2 size={18} className="animate-spin" />正在重建賽前特徵…</> : <><Activity size={18} />開始分析這場對戰 <ArrowRight size={17} /></>}
             </button>
@@ -202,7 +214,7 @@ export default function Home() {
             <div className="relative flex h-full flex-col">
               <div className="flex items-start justify-between gap-4"><div><div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-200"><BarChart3 size={14} />預測結果</div><h2 className="mt-3 font-serif text-3xl">{display ? `${display.home_team} vs ${display.away_team}` : "等待你的對戰組合"}</h2></div><div className="rounded-xl border border-white/10 bg-white/5 p-2 text-emerald-300"><ShieldCheck size={19} /></div></div>
               {display ? <div className="mt-7 grid gap-3"><ProbabilityCard label="主勝" team={display.home_team} value={display.probabilities.home_win} tone="emerald" /><ProbabilityCard label="和局" team="平局" value={display.probabilities.draw} tone="slate" /><ProbabilityCard label="客勝" team={display.away_team} value={display.probabilities.away_win} tone="amber" /></div> : <div className="my-auto py-10"><div className="grid h-18 w-18 place-items-center rounded-[1.5rem] border border-white/10 bg-white/[0.04] text-amber-200"><Target size={30} /></div><p className="mt-5 max-w-sm text-sm leading-7 text-slate-300">選定兩隊後，系統會展開校準後的賽果分佈與特徵訊號。</p><div className="mt-7 space-y-3 rounded-3xl border border-white/[0.07] bg-white/[0.025] p-4"><div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[.18em] text-slate-500"><span>Calibration field</span><span>H · D · A</span></div><div className="space-y-2.5">{[["主勝", "w-3/5", "bg-emerald-400"], ["和局", "w-[34%]", "bg-slate-400"], ["客勝", "w-[47%]", "bg-amber-300"]].map(([label, width, color]) => <div key={label} className="flex items-center gap-3"><span className="w-7 text-[10px] font-bold text-slate-500">{label}</span><div className="h-1 flex-1 overflow-hidden rounded-full bg-white/10"><div className={`h-full rounded-full ${width} ${color}`} /></div></div>)}</div></div></div>}
-              {display && <div className="mt-5 flex items-center gap-2 text-xs text-slate-400"><Clock3 size={14} />歷史資料截點：{display.prediction_as_of}</div>}
+              {display && <><div className="mt-5 flex items-center gap-2 text-xs text-slate-400"><Clock3 size={14} />歷史資料截點：{display.prediction_as_of}</div><div className="mt-4 rounded-2xl border border-amber-200/20 bg-amber-200/[0.06] p-4 text-xs leading-6 text-slate-300" data-testid="research-disclaimer"><div className="flex items-center gap-2 font-bold text-amber-100"><BadgeInfo size={14} />機率研究與模型賠率</div><p className="mt-2">模型賠率 = 1 ÷ 機率。主勝 {modelOdds(display.probabilities.home_win)}、和局 {modelOdds(display.probabilities.draw)}、客勝 {modelOdds(display.probabilities.away_win)}。</p><p className="mt-2 text-slate-400">此換算只用於學術與戰術研究，並非市場賠率、價值判斷或任何投注建議；平台不計算或推薦 +EV 機會。</p></div></>}
             </div>
           </div>
         </section>
@@ -221,9 +233,9 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="mt-8 rounded-[2rem] border border-amber-200/70 bg-[#fbf8f0] px-6 py-5 lg:px-8"><div className="flex flex-col gap-4 sm:flex-row sm:items-start"><div className="rounded-2xl bg-amber-200/50 p-3 text-amber-800"><Database size={20} /></div><div><div className="text-[10px] font-bold uppercase tracking-[.2em] text-amber-800">資料覆蓋與模型說明</div><p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">{leaguesQuery.data?.coverage.disclaimer || "正在確認資料覆蓋範圍…"}</p><div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold text-slate-500"><span>資料期間：{leaguesQuery.data?.coverage.firstDate ? `${dateLabel(leaguesQuery.data.coverage.firstDate)} — ${dateLabel(leaguesQuery.data.coverage.lastDate)}` : "載入中"}</span><span>模型：{leaguesQuery.data?.coverage.model || "載入中"}</span>{selectedLeague && <span>目前聯賽資料截止：{selectedLeague.last_date}</span>}</div></div></div></section>
+        <section className="mt-8 rounded-[2rem] border border-amber-200/70 bg-[#fbf8f0] px-6 py-5 lg:px-8"><div className="flex flex-col gap-4 sm:flex-row sm:items-start"><div className="rounded-2xl bg-amber-200/50 p-3 text-amber-800"><Database size={20} /></div><div><div className="text-[10px] font-bold uppercase tracking-[.2em] text-amber-800">資料覆蓋與模型說明</div><p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">{leaguesQuery.data?.coverage.disclaimer || "正在確認資料覆蓋範圍…"} 跨聯賽與盃賽不在校準範圍內，系統會拒絕輸出偽精確機率。</p><div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold text-slate-500"><span>資料期間：{leaguesQuery.data?.coverage.firstDate ? `${dateLabel(leaguesQuery.data.coverage.firstDate)} — ${dateLabel(leaguesQuery.data.coverage.lastDate)}` : "載入中"}</span><span>資料庫最後更新：{timestampLabel(leaguesQuery.data?.coverage.lastUpdatedAt)}</span><span>模型：{leaguesQuery.data?.coverage.model || "載入中"}</span>{selectedLeague && <span>目前聯賽資料截止：{selectedLeague.last_date}</span>}</div></div></div></section>
       </main>
-      <footer className="relative mt-6 border-t border-slate-200 px-5 py-7 text-center text-xs text-slate-400">Aurelia Football · 歷史資料驅動的賽前概率工具，不構成任何結果保證。</footer>
+      <footer className="relative mt-6 border-t border-slate-200 px-5 py-7 text-center text-xs leading-6 text-slate-400">Aurelia Football · 歷史資料驅動的賽前概率研究工具，不構成任何結果保證、投注建議或 +EV 判斷。</footer>
     </div>
   );
 }
