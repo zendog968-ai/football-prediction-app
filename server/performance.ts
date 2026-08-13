@@ -26,7 +26,7 @@ export type PerformanceFilters = {
 type PerformancePayload = { filters: PerformanceFilters; segments: Record<string, Omit<PerformanceOverview, "method">>; method: string };
 export type FilteredPerformanceOverview = PerformanceOverview & { filters: PerformanceFilters; activeFilters: Required<PerformanceFilterInput> };
 
-const assetPath = "/manus-storage/model_performance_filters_85bb0b9d.json";
+const assetPath = "/manus-storage/model_performance_filters_expanded_8d3a1806.json";
 let cachedPayload: PerformancePayload | null = null;
 
 function getOrigin(request: Request) {

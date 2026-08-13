@@ -30,6 +30,15 @@ const forecastResult = {
 
 const mutationSpy = vi.fn();
 const mockState = vi.hoisted(() => ({ teamsLoading: false, forecastError: null as { message: string } | null }));
+const expandedLeagueTeams = vi.hoisted(() => ({
+  MLS: ["Atlanta United", "Los Angeles Galaxy"],
+  J1: ["Kawasaki Frontale", "Urawa Reds"],
+  FIN1: ["Haka", "Gnistan"],
+  KOR1: ["Daegu", "Daejeon Hana Citizen"],
+  POR1: ["AVS", "Arouca"],
+  MEX1: ["Tigres UANL", "Guadalajara"],
+  AUS1: ["Melbourne Victory", "Melbourne City FC"],
+}));
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
@@ -40,13 +49,20 @@ vi.mock("@/lib/trpc", () => ({
             leagues: [
               { code: "BRA1", name: "Campeonato Brasileiro Série A", first_date: "2020-08-08", last_date: "2024-12-08", match_count: 1900 },
               { code: "EPL", name: "Premier League", first_date: "2020-09-12", last_date: "2025-05-25", match_count: 1900 },
+              { code: "MLS", name: "Major League Soccer", first_date: "2020-02-29", last_date: "2024-12-07", match_count: 2329 },
+              { code: "J1", name: "J1 League", first_date: "2020-02-21", last_date: "2024-12-08", match_count: 1679 },
+              { code: "FIN1", name: "Veikkausliiga", first_date: "2020-07-01", last_date: "2024-11-02", match_count: 795 },
+              { code: "KOR1", name: "K League 1", first_date: "2020-05-08", last_date: "2024-11-24", match_count: 1074 },
+              { code: "POR1", name: "Primeira Liga", first_date: "2020-09-18", last_date: "2025-05-17", match_count: 1530 },
+              { code: "MEX1", name: "Liga MX", first_date: "2020-01-11", last_date: "2024-12-16", match_count: 1599 },
+              { code: "AUS1", name: "A-League Men", first_date: "2020-08-01", last_date: "2025-05-31", match_count: 852 },
             ],
             coverage: { firstDate: "2020-08-08", lastDate: "2025-05-25", model: "校準後 XGBoost 三分類模型", disclaimer: "僅使用歷史賽前資料。" },
           },
         }),
       },
       teams: { useQuery: (input: { leagueCode: string }) => ({
-        data: { teams: input.leagueCode === "EPL" ? ["Arsenal", "Chelsea", "Liverpool"] : ["Flamengo RJ", "Palmeiras", "Santos"] },
+        data: { teams: input.leagueCode === "EPL" ? ["Arsenal", "Chelsea", "Liverpool"] : expandedLeagueTeams[input.leagueCode as keyof typeof expandedLeagueTeams] || ["Flamengo RJ", "Palmeiras", "Santos"] },
         isLoading: mockState.teamsLoading,
       }) },
       forecast: {
@@ -127,6 +143,42 @@ describe("Home prediction workflow", () => {
 
     expect(await screen.findByRole("button", { name: /Arsenal/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Palmeiras/ })).toBeNull();
+  });
+
+  it("shows all seven expanded leagues and provides the corresponding J1 team autocomplete", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    for (const name of ["美職 · Major League Soccer", "日職 · J1 League", "芬蘭聯賽 · Veikkausliiga", "韓職 · K League 1", "葡職 · Primeira Liga", "墨西哥聯賽 · Liga MX", "澳職 · A-League Men"]) {
+      expect(screen.getByRole("option", { name })).toBeTruthy();
+    }
+
+    await user.selectOptions(screen.getByLabelText("聯賽"), "J1");
+    const homeInput = screen.getByLabelText("主隊");
+    await user.click(homeInput);
+    await user.type(homeInput, "Kawa");
+    expect(await screen.findByRole("button", { name: /Kawasaki Frontale/ })).toBeTruthy();
+  });
+
+  it("returns a league-specific autocomplete result for every expanded league", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+    const leagueControl = screen.getByLabelText("聯賽");
+    const homeInput = screen.getByLabelText("主隊");
+    const checks = [
+      ["MLS", "Atlan", "Atlanta United"], ["J1", "Kawa", "Kawasaki Frontale"],
+      ["FIN1", "Hak", "Haka"], ["KOR1", "Daeg", "Daegu"], ["POR1", "AV", "AVS"],
+      ["MEX1", "Tigr", "Tigres UANL"], ["AUS1", "Melbourne V", "Melbourne Victory"],
+    ] as const;
+
+    for (const [leagueCode, search, expected] of checks) {
+      await user.selectOptions(leagueControl, leagueCode);
+      await user.click(homeInput);
+      await user.clear(homeInput);
+      await user.type(homeInput, search);
+      expect(await screen.findByRole("button", { name: new RegExp(expected) })).toBeTruthy();
+      await user.click(screen.getByRole("button", { name: new RegExp(expected) }));
+    }
   });
 
   it("exposes labelled controls and clear loading and error states", async () => {

@@ -65,8 +65,10 @@ def fetch_league_matches(database_path: Path, league_code: str) -> pd.DataFrame:
         )
     if matches.empty:
         raise ValueError(f"找不到聯賽代碼 {league_code} 的歷史賽事")
+    normalized_time = matches["match_time"].fillna("12:00:00").astype(str).replace({"": "12:00:00", "None": "12:00:00", "nan": "12:00:00", "NaT": "12:00:00"})
     matches["match_datetime"] = pd.to_datetime(
-        matches["match_date"].astype(str) + " " + matches["match_time"].astype(str),
+        matches["match_date"].astype(str) + " " + normalized_time,
+        format="mixed",
         errors="coerce",
     )
     if matches["match_datetime"].isna().any():

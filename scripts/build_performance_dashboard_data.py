@@ -16,7 +16,10 @@ CLASS_META = [
     (1, "D", "和局", "prob_draw"),
     (2, "A", "客勝", "prob_away_win"),
 ]
-LEAGUE_LABELS = {"BRA1": "巴甲", "EPL": "英超", "LL": "西甲", "BL": "德甲", "SA": "義甲", "L1": "法甲"}
+LEAGUE_LABELS = {
+    "BRA1": "巴甲", "EPL": "英超", "LL": "西甲", "BL": "德甲", "SA": "義甲", "L1": "法甲",
+    "MLS": "美職", "J1": "日職", "FIN1": "芬蘭聯賽", "KOR1": "韓職", "POR1": "葡職", "MEX1": "墨西哥聯賽", "AUS1": "澳職",
+}
 OUTCOME_OPTIONS = [
     {"code": "all", "label": "全部賽果"},
     {"code": "H", "label": "主隊勝出"},

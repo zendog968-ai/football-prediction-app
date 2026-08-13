@@ -312,8 +312,12 @@ def fetch_matches(database_path: Path) -> pd.DataFrame:
             """,
             connection,
         )
+    # 多個公開歷史來源只提供比賽日期而無開賽時間。以同日固定時間處理，讓同日賽事
+    # 先共同產生特徵、再共同更新歷史，較將它們任意排序為早晚開踢更保守。
+    normalized_time = dataframe["match_time"].fillna("12:00:00").astype(str).replace({"": "12:00:00", "None": "12:00:00", "nan": "12:00:00"})
     dataframe["match_datetime"] = pd.to_datetime(
-        dataframe["match_date"].astype(str) + " " + dataframe["match_time"].astype(str),
+        dataframe["match_date"].astype(str) + " " + normalized_time,
+        format="mixed",
         errors="coerce",
     )
     if dataframe["match_datetime"].isna().any():

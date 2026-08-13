@@ -8,13 +8,13 @@ import type { Request } from "express";
 
 const execFileAsync = promisify(execFile);
 const projectRoot = process.cwd();
-const runtimeDirectory = path.join(os.tmpdir(), "football-prediction-runtime");
-const databasePath = path.join(runtimeDirectory, "football_data.db");
-const modelPath = path.join(runtimeDirectory, "soccer_predict_model.pkl");
+const runtimeDirectory = path.join(os.tmpdir(), "football-prediction-runtime-expanded-v1");
+const databasePath = path.join(runtimeDirectory, "football_data_expanded.db");
+const modelPath = path.join(runtimeDirectory, "soccer_predict_model_expanded.pkl");
 
 const runtimeAssets = {
-  database: "/manus-storage/football_data_e2325ad1.db",
-  model: "/manus-storage/soccer_predict_model_600445d0.pkl",
+  database: "/manus-storage/football_data_expanded_b11d821f.db",
+  model: "/manus-storage/soccer_predict_model_expanded_0dc66f04.pkl",
 };
 
 let runtimeReady: Promise<void> | null = null;

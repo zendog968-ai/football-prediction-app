@@ -45,6 +45,7 @@ type HistoryItem = Forecast & { id: string; savedAt: number };
 const HISTORY_KEY = "aurelia-football-session-history";
 const leagueLabels: Record<string, string> = {
   BRA1: "巴甲", EPL: "英超", LL: "西甲", BL: "德甲", SA: "義甲", L1: "法甲",
+  MLS: "美職", J1: "日職", FIN1: "芬蘭聯賽", KOR1: "韓職", POR1: "葡職", MEX1: "墨西哥聯賽", AUS1: "澳職",
 };
 
 function percent(value: number) {
