@@ -21,6 +21,7 @@ import {
 import { trpc } from "@/lib/trpc";
 import { Link } from "wouter";
 import MatchSpotlightCard from "@/components/MatchSpotlightCard";
+import { calculateMarketResearch, type MarketOdds } from "@/lib/oddsResearch";
 
 type Forecast = {
   prediction_as_of: string;
@@ -66,6 +67,10 @@ function timestampLabel(value: string | null | undefined) {
 
 function modelOdds(value: number) {
   return value > 0 ? (1 / value).toFixed(2) : "—";
+}
+
+function signedPercent(value: number) {
+  return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
 }
 
 function TeamSearch({
@@ -149,10 +154,15 @@ function Metric({ label, home, away, formatter = (value: number) => value.toFixe
   return <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 py-3 text-sm"><span className="text-right font-semibold text-slate-800">{home === null ? "—" : formatter(home)}</span><span className="min-w-26 text-center text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{label}</span><span className="font-semibold text-slate-800">{away === null ? "—" : formatter(away)}</span></div>;
 }
 
+function OddsInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return <label className="block"><span className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.13em] text-slate-400">{label}</span><input aria-label={`${label}賠率`} type="number" inputMode="decimal" min="1.01" step="0.01" value={value} onChange={event => onChange(event.target.value)} placeholder="例如 2.10" className="h-10 w-full rounded-xl border border-white/10 bg-white/[.06] px-3 text-sm font-semibold text-white outline-none placeholder:text-slate-500 focus:border-amber-200/60" /></label>;
+}
+
 export default function Home() {
   const [leagueCode, setLeagueCode] = useState("BRA1");
   const [homeTeam, setHomeTeam] = useState("");
   const [awayTeam, setAwayTeam] = useState("");
+  const [marketOdds, setMarketOdds] = useState({ home: "", draw: "", away: "" });
   const [result, setResult] = useState<Forecast | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>(() => {
     try { return JSON.parse(sessionStorage.getItem(HISTORY_KEY) || "[]"); } catch { return []; }
@@ -169,7 +179,7 @@ export default function Home() {
   const spotlightQuery = trpc.spotlight.cruzeiroFlamengo.useQuery();
 
   useEffect(() => { sessionStorage.setItem(HISTORY_KEY, JSON.stringify(history)); }, [history]);
-  useEffect(() => { setHomeTeam(""); setAwayTeam(""); setResult(null); }, [leagueCode]);
+  useEffect(() => { setHomeTeam(""); setAwayTeam(""); setResult(null); setMarketOdds({ home: "", draw: "", away: "" }); }, [leagueCode]);
 
   const teams = teamsQuery.data?.teams || [];
   const selectedLeague = leaguesQuery.data?.leagues.find(league => league.code === leagueCode);
@@ -179,6 +189,11 @@ export default function Home() {
     forecast.mutate({ leagueCode, homeTeam, awayTeam });
   };
   const display = result;
+  const hasCompleteMarketOdds = [marketOdds.home, marketOdds.draw, marketOdds.away].every(value => value.trim() !== "" && Number.isFinite(Number(value)) && Number(value) > 1);
+  const marketResearch = display && hasCompleteMarketOdds ? calculateMarketResearch(
+    { home: display.probabilities.home_win, draw: display.probabilities.draw, away: display.probabilities.away_win },
+    { home: Number(marketOdds.home), draw: Number(marketOdds.draw), away: Number(marketOdds.away) } as MarketOdds,
+  ) : null;
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#f6f7f5] text-slate-900 selection:bg-amber-200">
@@ -214,7 +229,7 @@ export default function Home() {
             <div className="relative flex h-full flex-col">
               <div className="flex items-start justify-between gap-4"><div><div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-200"><BarChart3 size={14} />預測結果</div><h2 className="mt-3 font-serif text-3xl">{display ? `${display.home_team} vs ${display.away_team}` : "等待你的對戰組合"}</h2></div><div className="rounded-xl border border-white/10 bg-white/5 p-2 text-emerald-300"><ShieldCheck size={19} /></div></div>
               {display ? <div className="mt-7 grid gap-3"><ProbabilityCard label="主勝" team={display.home_team} value={display.probabilities.home_win} tone="emerald" /><ProbabilityCard label="和局" team="平局" value={display.probabilities.draw} tone="slate" /><ProbabilityCard label="客勝" team={display.away_team} value={display.probabilities.away_win} tone="amber" /></div> : <div className="my-auto py-10"><div className="grid h-18 w-18 place-items-center rounded-[1.5rem] border border-white/10 bg-white/[0.04] text-amber-200"><Target size={30} /></div><p className="mt-5 max-w-sm text-sm leading-7 text-slate-300">選定兩隊後，系統會展開校準後的賽果分佈與特徵訊號。</p><div className="mt-7 space-y-3 rounded-3xl border border-white/[0.07] bg-white/[0.025] p-4"><div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[.18em] text-slate-500"><span>Calibration field</span><span>H · D · A</span></div><div className="space-y-2.5">{[["主勝", "w-3/5", "bg-emerald-400"], ["和局", "w-[34%]", "bg-slate-400"], ["客勝", "w-[47%]", "bg-amber-300"]].map(([label, width, color]) => <div key={label} className="flex items-center gap-3"><span className="w-7 text-[10px] font-bold text-slate-500">{label}</span><div className="h-1 flex-1 overflow-hidden rounded-full bg-white/10"><div className={`h-full rounded-full ${width} ${color}`} /></div></div>)}</div></div></div>}
-              {display && <><div className="mt-5 flex items-center gap-2 text-xs text-slate-400"><Clock3 size={14} />歷史資料截點：{display.prediction_as_of}</div><div className="mt-4 rounded-2xl border border-amber-200/20 bg-amber-200/[0.06] p-4 text-xs leading-6 text-slate-300" data-testid="research-disclaimer"><div className="flex items-center gap-2 font-bold text-amber-100"><BadgeInfo size={14} />機率研究與模型賠率</div><p className="mt-2">模型賠率 = 1 ÷ 機率。主勝 {modelOdds(display.probabilities.home_win)}、和局 {modelOdds(display.probabilities.draw)}、客勝 {modelOdds(display.probabilities.away_win)}。</p><p className="mt-2 text-slate-400">此換算只用於學術與戰術研究，並非市場賠率、價值判斷或任何投注建議；平台不計算或推薦 +EV 機會。</p></div></>}
+              {display && <><div className="mt-5 flex items-center gap-2 text-xs text-slate-400"><Clock3 size={14} />歷史資料截點：{display.prediction_as_of}</div><div className="mt-4 rounded-2xl border border-amber-200/20 bg-amber-200/[0.06] p-4 text-xs leading-6 text-slate-300" data-testid="research-disclaimer"><div className="flex items-center gap-2 font-bold text-amber-100"><BadgeInfo size={14} />機率研究與模型賠率</div><p className="mt-2">模型賠率 = 1 ÷ 機率。主勝 {modelOdds(display.probabilities.home_win)}、和局 {modelOdds(display.probabilities.draw)}、客勝 {modelOdds(display.probabilities.away_win)}。</p><p className="mt-2 text-slate-400">下方市場賠率比較只供模型效能驗證與統計學研究，並非市場賠率推薦、價值判斷或任何投注與資金建議。</p></div></>}
             </div>
           </div>
         </section>
@@ -232,6 +247,8 @@ export default function Home() {
             {history.length ? <div className="mt-6 space-y-2">{history.map(item => <button type="button" key={item.id} onClick={() => setResult(item)} className={`w-full rounded-2xl border p-4 text-left transition hover:border-emerald-300 hover:bg-emerald-50/50 ${result && result.prediction_as_of === item.prediction_as_of && result.home_team === item.home_team ? "border-emerald-200 bg-emerald-50/60" : "border-slate-100 bg-slate-50/65"}`}><div className="flex items-start justify-between gap-4"><div><div className="text-sm font-bold text-slate-800">{item.home_team} <span className="px-1 text-slate-400">vs</span> {item.away_team}</div><div className="mt-1 text-[10px] font-bold uppercase tracking-[.14em] text-slate-400">{leagueLabels[item.league_code] || item.league_name}</div></div><div className="text-right text-xs leading-5 text-slate-500"><strong className="block text-emerald-700">{percent(item.probabilities.home_win)}</strong>主勝概率</div></div></button>)}</div> : <div className="mt-8 grid place-items-center rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center"><History size={25} className="text-slate-300" /><p className="mt-3 text-sm text-slate-500">本次 session 的查詢結果會留在這裡，方便快速回看與比較。</p></div>}
           </div>
         </section>
+
+        {display && <section className="mt-8 rounded-[2rem] border border-slate-700 bg-[#0a1520] p-6 text-white shadow-[0_14px_40px_rgba(15,23,42,0.13)] lg:p-8" data-testid="odds-research-module"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><div className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-200">Odds research</div><h2 className="mt-2 font-serif text-3xl">市場賠率與模型機率比較</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">輸入十進制市場賠率後，系統以 <strong className="text-white">EV = (模型機率 × 賠率) − 1</strong> 與 <strong className="text-white">隱含機率 = 1 ÷ 賠率</strong> 做統計比較。</p></div><div className="rounded-2xl border border-amber-200/20 bg-amber-200/[.07] px-3 py-2 text-xs leading-5 text-amber-100">僅供模型效能驗證<br />及統計學研究</div></div><div className="mt-6 grid gap-3 sm:grid-cols-3"><OddsInput label={`${display.home_team} 主勝`} value={marketOdds.home} onChange={value => setMarketOdds(current => ({ ...current, home: value }))} /><OddsInput label="和局" value={marketOdds.draw} onChange={value => setMarketOdds(current => ({ ...current, draw: value }))} /><OddsInput label={`${display.away_team} 客勝`} value={marketOdds.away} onChange={value => setMarketOdds(current => ({ ...current, away: value }))} /></div>{!hasCompleteMarketOdds && <p className="mt-3 text-xs text-slate-400">請輸入三個大於 1.00 的十進制賠率，以產生研究比較；無效或不完整值不會計算。</p>}{marketResearch && <div className="mt-6 grid gap-3 lg:grid-cols-3">{[{ label: `${display.home_team} 主勝`, probability: display.probabilities.home_win, research: marketResearch.home, tone: "emerald" }, { label: "和局", probability: display.probabilities.draw, research: marketResearch.draw, tone: "slate" }, { label: `${display.away_team} 客勝`, probability: display.probabilities.away_win, research: marketResearch.away, tone: "amber" }].map(({ label, probability, research, tone }) => research && <div key={label} className="rounded-2xl border border-white/10 bg-white/[.05] p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-[10px] font-bold uppercase tracking-[.14em] text-slate-400">{label}</div><div className="mt-2 text-sm text-slate-300">模型 {percent(probability)} · 市場隱含 {percent(research.impliedProbability)}</div></div>{research.isPositiveExpectedValue && <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${tone === "emerald" ? "bg-emerald-400/15 text-emerald-200" : tone === "amber" ? "bg-amber-200/15 text-amber-100" : "bg-slate-300/15 text-slate-100"}`}>+EV 統計標記</span>}</div><div className="mt-4 flex items-end justify-between"><span className="font-serif text-3xl text-white">{signedPercent(research.expectedValue)}</span><span className="text-xs text-slate-400">EV（研究）</span></div><div className="mt-3 text-xs text-slate-400">輸入賠率 {research.marketOdds.toFixed(2)} · 模型賠率 {Number.isFinite(research.modelOdds) ? research.modelOdds.toFixed(2) : "—"}</div></div>)}</div>}<p className="mt-5 rounded-2xl border border-amber-200/15 bg-amber-200/[.06] px-4 py-3 text-xs leading-6 text-slate-300">賠率與EV數據僅供模型效能驗證與統計學研究，不構成任何投注、資金或行動建議。正EV標記只表示此固定公式在輸入數值下的代數結果，並不預測或保證任何結果。</p></section>}
 
         <section className="mt-8 rounded-[2rem] border border-amber-200/70 bg-[#fbf8f0] px-6 py-5 lg:px-8"><div className="flex flex-col gap-4 sm:flex-row sm:items-start"><div className="rounded-2xl bg-amber-200/50 p-3 text-amber-800"><Database size={20} /></div><div><div className="text-[10px] font-bold uppercase tracking-[.2em] text-amber-800">資料覆蓋與模型說明</div><p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">{leaguesQuery.data?.coverage.disclaimer || "正在確認資料覆蓋範圍…"} 跨聯賽與盃賽不在校準範圍內，系統會拒絕輸出偽精確機率。</p><div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold text-slate-500"><span>資料期間：{leaguesQuery.data?.coverage.firstDate ? `${dateLabel(leaguesQuery.data.coverage.firstDate)} — ${dateLabel(leaguesQuery.data.coverage.lastDate)}` : "載入中"}</span><span>資料庫最後更新：{timestampLabel(leaguesQuery.data?.coverage.lastUpdatedAt)}</span><span>模型：{leaguesQuery.data?.coverage.model || "載入中"}</span>{selectedLeague && <span>目前聯賽資料截止：{selectedLeague.last_date}</span>}</div></div></div></section>
       </main>

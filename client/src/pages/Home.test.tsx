@@ -176,8 +176,9 @@ describe("Home prediction workflow", () => {
       await user.click(homeInput);
       await user.clear(homeInput);
       await user.type(homeInput, search);
-      expect(await screen.findByRole("button", { name: new RegExp(expected) })).toBeTruthy();
-      await user.click(screen.getByRole("button", { name: new RegExp(expected) }));
+      const teamOption = await screen.findByRole("button", { name: new RegExp(expected) });
+      expect(teamOption).toBeTruthy();
+      await user.click(teamOption);
     }
   });
 
@@ -228,6 +229,29 @@ describe("Home prediction workflow", () => {
 
     const disclaimer = await screen.findByTestId("research-disclaimer");
     expect(disclaimer.textContent).toContain("模型賠率 = 1 ÷ 機率");
-    expect(disclaimer.textContent).toContain("不計算或推薦 +EV 機會");
+    expect(disclaimer.textContent).toContain("只供模型效能驗證與統計學研究");
+  });
+
+  it("calculates EV research statistics only after three valid decimal odds are supplied", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.selectOptions(screen.getByRole("combobox"), "BRA1");
+    await user.click(screen.getByLabelText("主隊"));
+    await user.type(screen.getByLabelText("主隊"), "Palm");
+    await user.click(screen.getByRole("button", { name: /Palmeiras/ }));
+    await user.click(screen.getByLabelText("客隊"));
+    await user.type(screen.getByLabelText("客隊"), "Flam");
+    await user.click(screen.getByRole("button", { name: /Flamengo RJ/ }));
+    await user.click(screen.getByRole("button", { name: /開始分析這場對戰/ }));
+
+    expect(await screen.findByTestId("odds-research-module")).toBeTruthy();
+    expect(screen.getByText(/請輸入三個大於 1.00/)).toBeTruthy();
+    await user.type(screen.getByLabelText("Palmeiras 主勝賠率"), "2.50");
+    await user.type(screen.getByLabelText("和局賠率"), "3.50");
+    await user.type(screen.getByLabelText("Flamengo RJ 客勝賠率"), "4.00");
+
+    expect((await screen.findAllByText("+EV 統計標記")).length).toBeGreaterThan(0);
+    expect(screen.getByText(/賠率與EV數據僅供模型效能驗證與統計學研究/)).toBeTruthy();
   });
 });

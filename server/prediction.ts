@@ -8,12 +8,12 @@ import type { Request } from "express";
 
 const execFileAsync = promisify(execFile);
 const projectRoot = process.cwd();
-const runtimeDirectory = path.join(os.tmpdir(), "football-prediction-runtime-expanded-v1");
-const databasePath = path.join(runtimeDirectory, "football_data_expanded.db");
+const runtimeDirectory = path.join(os.tmpdir(), "football-prediction-runtime-expanded-v2-odds");
+const databasePath = path.join(runtimeDirectory, "football_data_expanded_with_closing_odds.db");
 const modelPath = path.join(runtimeDirectory, "soccer_predict_model_expanded.pkl");
 
 const runtimeAssets = {
-  database: "/manus-storage/football_data_expanded_b11d821f.db",
+  database: "/manus-storage/football_data_expanded_with_closing_odds_f47c25c4.db",
   model: "/manus-storage/soccer_predict_model_expanded_0dc66f04.pkl",
 };
 
