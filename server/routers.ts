@@ -5,6 +5,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { getLeagueMetadata, getPrediction, getTeams, hasValidProbabilityDistribution } from "./prediction";
 import { getPerformanceOverview, hasValidPerformanceOverview } from "./performance";
+import { cruzeiroFlamengoSpotlight, hasValidSpotlight } from "./spotlight";
 import { publicProcedure, router } from "./_core/trpc";
 
 export const appRouter = router({
@@ -83,6 +84,14 @@ export const appRouter = router({
           message: error instanceof Error ? error.message : "無法載入模型績效資料。",
         });
       }
+    }),
+  }),
+  spotlight: router({
+    cruzeiroFlamengo: publicProcedure.query(() => {
+      if (!hasValidSpotlight(cruzeiroFlamengoSpotlight)) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "焦點賽事情境資料驗證失敗。" });
+      }
+      return cruzeiroFlamengoSpotlight;
     }),
   }),
 

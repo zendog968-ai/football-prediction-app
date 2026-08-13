@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Link } from "wouter";
+import MatchSpotlightCard from "@/components/MatchSpotlightCard";
 
 type Forecast = {
   prediction_as_of: string;
@@ -152,6 +153,7 @@ export default function Home() {
       setHistory(current => [item, ...current.filter(existing => !(existing.home_team === item.home_team && existing.away_team === item.away_team && existing.league_code === item.league_code))].slice(0, 8));
     },
   });
+  const spotlightQuery = trpc.spotlight.cruzeiroFlamengo.useQuery();
 
   useEffect(() => { sessionStorage.setItem(HISTORY_KEY, JSON.stringify(history)); }, [history]);
   useEffect(() => { setHomeTeam(""); setAwayTeam(""); setResult(null); }, [leagueCode]);
@@ -203,6 +205,8 @@ export default function Home() {
             </div>
           </div>
         </section>
+
+        {spotlightQuery.data && <div className="mt-8"><MatchSpotlightCard match={spotlightQuery.data} /></div>}
 
         <section className="mt-8 grid gap-8 lg:grid-cols-[1.05fr_.95fr]">
           <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-[0_14px_40px_rgba(15,23,42,0.05)] lg:p-8">

@@ -57,6 +57,16 @@ vi.mock("@/lib/trpc", () => ({
         }),
       },
     },
+    spotlight: {
+      cruzeiroFlamengo: {
+        useQuery: () => ({
+          data: {
+            competition: "CONMEBOL Libertadores", stage: "十六強 · 首回合", kickoffLocal: "2026-08-12", venue: "Mineirão", homeTeam: "Cruzeiro", awayTeam: "Flamengo",
+            probabilities: { home: 0.2956, draw: 0.2663, away: 0.4381 }, expectedGoals: { home: 1.1, away: 1.4 }, scorelines: [{ score: "1–1", probability: 0.1264 }], totalGoals: { under25: 0.5438, over25: 0.4562, bothTeamsScore: 0.5026 }, factors: [], notice: "情境限制。", sources: [],
+          },
+        }),
+      },
+    },
   },
 }));
 
