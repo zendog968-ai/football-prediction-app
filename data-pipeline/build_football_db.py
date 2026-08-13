@@ -118,6 +118,12 @@ def nullable_float(value: Any) -> float | None:
         return None
 
 
+def valid_decimal_odds(value: Any) -> float | None:
+    """Return only valid decimal 1X2 odds; placeholders and malformed values stay NULL."""
+    number = nullable_float(value)
+    return number if number is not None and number > 1.0 else None
+
+
 def clean_team_name(value: Any) -> str:
     return " ".join(str(value).strip().split())
 
@@ -215,6 +221,11 @@ def extract_matches(
             if candidate_time and candidate_time.lower() != "nan":
                 match_time = candidate_time
 
+        home_odds = valid_decimal_odds(row[closing_home_odds_col]) if closing_home_odds_col else None
+        draw_odds = valid_decimal_odds(row[closing_draw_odds_col]) if closing_draw_odds_col else None
+        away_odds = valid_decimal_odds(row[closing_away_odds_col]) if closing_away_odds_col else None
+        complete_closing_odds = home_odds is not None and draw_odds is not None and away_odds is not None
+
         records.append(
             {
                 "match_id": match_id,
@@ -242,10 +253,10 @@ def extract_matches(
                 "away_yellow_cards": nullable_int(row[away_yellows_col]) if away_yellows_col else None,
                 "home_red_cards": nullable_int(row[home_reds_col]) if home_reds_col else None,
                 "away_red_cards": nullable_int(row[away_reds_col]) if away_reds_col else None,
-                "home_odds": nullable_float(row[closing_home_odds_col]) if closing_home_odds_col else None,
-                "draw_odds": nullable_float(row[closing_draw_odds_col]) if closing_draw_odds_col else None,
-                "away_odds": nullable_float(row[closing_away_odds_col]) if closing_away_odds_col else None,
-                "odds_source": "Football-Data market average closing 1X2" if closing_home_odds_col and closing_draw_odds_col and closing_away_odds_col else None,
+                "home_odds": home_odds,
+                "draw_odds": draw_odds,
+                "away_odds": away_odds,
+                "odds_source": "Football-Data market average closing 1X2" if complete_closing_odds else None,
                 "source_url": source_url,
                 "fetched_at": fetched_at,
             }
@@ -511,7 +522,13 @@ def scrape_all_matches(session: requests.Session, reference_date: date) -> list[
                     logging.info("  當季來源尚未提供可用檔案，略過：%s", source_url)
                     continue
                 raise
-            records = extract_matches(dataframe, league_code, league["name"], season, source_url)
+            try:
+                records = extract_matches(dataframe, league_code, league["name"], season, source_url)
+            except (SourceFetchError, ValueError, KeyError) as exc:
+                if season == current_european_season:
+                    logging.info("  當季來源尚未提供可用賽果，略過：%s (%s)", source_url, exc)
+                    continue
+                raise
             if not records:
                 if season == current_european_season:
                     logging.info("  當季尚無已完成賽果，略過：%s", season)
