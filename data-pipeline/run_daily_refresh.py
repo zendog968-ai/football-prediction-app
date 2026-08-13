@@ -93,6 +93,11 @@ def main() -> None:
     validation_cutoff = args.as_of or datetime.now(timezone.utc).date().isoformat()
     run([sys.executable, str(PIPELINE_DIR / "verify_europa_league_data.py"), "--database", str(expanded_database), "--as-of", validation_cutoff])
     run([sys.executable, str(PIPELINE_DIR / "verify_odds_data.py"), "--database", str(expanded_database)])
+    result_sync_report = output / "result_sync_report.json"
+    run([
+        sys.executable, str(PIPELINE_DIR / "daily_update.py"), "--database", str(expanded_database),
+        "--input-parquet", str(parquet), "--as-of", validation_cutoff, "--report-out", str(result_sync_report),
+    ])
     run([sys.executable, str(SCRIPTS_DIR / "build_match_features.py"), "--database", str(expanded_database), "--output", str(features)])
     run([sys.executable, str(PIPELINE_DIR / "train_soccer_predict_model.py"), "--input", str(features), "--output-dir", str(model_dir)])
     performance = output / "model_performance_filters.json"
@@ -114,6 +119,7 @@ def main() -> None:
             "performance": "model_performance_filters.json",
         },
         "validated_leagues": list(LEAGUES),
+        "completed_result_sync": json.loads(result_sync_report.read_text(encoding="utf-8")),
     }
     (output / "pipeline_status.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(manifest, ensure_ascii=False, indent=2))

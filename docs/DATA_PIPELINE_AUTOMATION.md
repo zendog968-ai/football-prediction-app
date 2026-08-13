@@ -2,42 +2,47 @@
 
 ## 現況與啟用邊界
 
-目前 Web 應用會顯示 SQLite 匯入資料中的 `Last Updated Timestamp`，並在單一暖執行個體內快取 SQLite 與校準模型檔。每日流程已定義於 `.github/workflows/daily-data-refresh.yml`，會在 UTC 03:15 執行，並可由 `workflow_dispatch` 人工觸發。只有當首次工作流程已成功完成並發布 `data-latest` 指標後，才可視為實際啟用。
+Web 應用會顯示 SQLite 匯入資料中的 **Last Updated Timestamp**，並在單一暖執行個體內快取 SQLite 與校準模型檔。每日流程定義於 `.github/workflows/daily-data-refresh.yml`，會在 **UTC 03:15** 執行，也可由 `workflow_dispatch` 人工觸發。
+
+結果來源為 `schochastics/football-data` 公開的 `games.parquet` 快照，授權為 **ODC-BY**。流程每次下載新的快照、記錄SHA-256、檢查其已完成賽果，並輸出 `result_sync_report.json`。這不是即時投注或HKJC資料介面；它只用於已完成賽事的可重現模型資料更新。
 
 > 資料更新必須同時更新 SQLite、賽前特徵、模型與績效資產；只更新比分而不重算 Elo／Dixon–Coles／模型會造成資料與推論狀態不一致。
 
-## 建議的每日流程
+## 每日流程
 
-每日 UTC 03:15 由 GitHub 工作流程觸發。排程不應直接修改正在服務中的 SQLite；應先在隔離執行環境生成完整候選版本，再以不可變版本化資產與最新指標進行原子切換。
+每日排程不會直接修改正在服務中的SQLite。它先在隔離執行環境生成完整候選版本，只有所有品質關卡通過後才以不可變版本化資產和最新指標原子切換。
 
 ```mermaid
 flowchart LR
-  A[每日 UTC 03:00 排程] --> B[下載來源賽果]
-  B --> C[清洗、去重、來源與時間戳稽核]
-  C --> D[建立候選 SQLite]
-  D --> E[重算 Elo、近況與 Dixon–Coles]
+  A[每日 UTC 03:15 排程] --> B[下載ODC-BY公開賽果快照]
+  B --> C[SHA-256版本、清洗、去重與差異稽核]
+  C --> D[建立候選SQLite並對齊已完成賽果]
+  D --> E[重算Elo、近況與Dixon-Coles]
   E --> F[重訓與時間序列校準]
-  F --> G[資料、特徵、模型、機率煙霧測試]
-  G -->|通過| H[上傳版本化資產與狀態檔]
-  G -->|失敗| I[保留上一版並發出失敗紀錄]
-  H --> J[部署使用新資產，顯示 Last Updated Timestamp]
+  F --> G[資料、特徵、模型、14範圍煙霧測試]
+  G -->|通過| H[上傳不可變Release資產與狀態檔]
+  G -->|失敗| I[保留上一版並保留失敗紀錄]
+  H --> J[服務讀取新資產並顯示更新時間]
 ```
 
 | 階段 | 必須產物 | 失敗處理 |
 |---|---|---|
-| 擷取與清洗 | 來源網址、擷取 UTC、去重統計、候選 `matches` | 不覆蓋既有 production 資產 |
+| 擷取與清洗 | 來源網址、快照SHA-256、擷取UTC、去重統計、`result_sync_report.json`、候選 `matches` | 不覆蓋既有production資產 |
+| 結果對齊 | 同比分確認、未匹配／歧義／衝突稽核列 | 衝突比數不靜默覆寫；阻擋發布或保留既有結果 |
 | 特徵 | `training_features_expanded.csv` 與特徵驗證結果 | 阻擋後續訓練 |
-| 模型 | `.pkl`、折外指標、校準／混淆矩陣資料 | 若資料洩漏檢查或品質門檻失敗則中止發布 |
-| 發布 | 版本化 SQLite、模型、績效 JSON、`pipeline_status.json` | 只在全部檔案已上傳後切換版本指標 |
-| 服務驗證 | 13 聯賽隊伍清單與端到端機率總和測試 | 回復上一個資產版本 |
+| 模型 | `.pkl`、折外指標、校準與混淆矩陣資料 | 若資料洩漏或品質門檻失敗則中止發布 |
+| 發布 | 版本化SQLite、模型、績效JSON、`pipeline_status.json` | 只在全部檔案上傳後切換版本指標 |
+| 服務驗證 | 14個已驗證資料範圍的隊伍清單與端到端機率總和測試 | 回退至上一個資產版本 |
+
+## 資料治理
+
+每日同步僅處理既有14個模型資料範圍中的已完成賽事。對齊採同聯賽、日期±1日、主客隊正規化後的精確比對；未匹配或多重匹配的資料只會記錄，不會自動擴張模型範圍。若候選SQLite已有最終比分而公開快照不同，流程將該筆記為衝突並拒絕覆寫。
+
+由於候選資料庫本身已經從同一版本化快照重建，正常情況下同步報告中的 `confirmed` 應為主要類別。報告仍存在，是為了驗證建置輸入、捕捉名稱對齊異常並讓每次模型重訓具有可稽核的資料版本證據。
 
 ## GitHub Actions 設置
 
-工作流程以 GitHub 內建 `GITHUB_TOKEN` 的 `contents: write` 權限建立不可變 `data-<UTC>-<commit>` Release，並只在資料、特徵、模型、績效與13聯賽煙霧測試都通過後，上傳 `data-latest/pipeline_status.json` 作為最後指標。網站最多每15分鐘檢查一次該指標；驗證失敗時會繼續使用先前 Release，若尚無成功 Release 則安全回退至既有受管模型資產。
-
-首次人工驗證已於 2026-08-13 成功完成：GitHub Actions 執行編號為 [`31694683058`](https://github.com/zendog968-ai/football-prediction-app/actions/runs/31694683058)，最新指標指向不可變版本 `data-20260813T114817Z-62b07c4`。該版本已驗證13個聯賽並發布 SQLite、校準模型及績效 JSON；公開儲存庫可讓部署端不持有GitHub憑證便下載這些資產。
-
-工作流程的 cron 使用六欄或五欄格式視執行平台而定；GitHub Actions 使用標準五欄 UTC 表示式，例如 `0 3 * * *`。每次執行都應可人工以 `workflow_dispatch` 觸發，以便先驗證資料品質與資產發布權限。
+工作流程以GitHub內建 `GITHUB_TOKEN` 的 `contents: write` 權限建立不可變 `data-<UTC>-<commit>` Release。每日候選版本會先執行結果同步單元測試，之後下載公開快照並建立SHA-256與差異報告；只有資料、結果對齊、特徵、模型、績效與14個資料範圍煙霧測試都通過後，才上傳 `data-latest/pipeline_status.json` 作為最後指標。
 
 ```yaml
 name: Aurelia daily football data refresh
@@ -46,37 +51,31 @@ on:
     - cron: "15 3 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  refresh:
+  build-validate-publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install reproducible Python dependencies
-        run: pip install -r requirements.txt
-      - name: Build and validate candidate assets
-        run: |
-          python football_database/build_football_db.py --database build/football_data.db
-          python football_database/build_expanded_leagues_db.py --base-database build/football_data.db --open-results build/open_football_games.parquet --output build/football_data_expanded.db
-          python football_database/build_match_features.py --database build/football_data_expanded.db --output build/training_features_expanded.csv
-          python football_database/train_soccer_predict_model.py --input build/training_features_expanded.csv --output-dir build/model_artifacts
-          python football_database/validate_expanded_leagues.py
-      - name: Publish only validated versioned assets
-        env:
+      - run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      - run: python -m unittest data-pipeline/test_daily_update.py
+      - run: python data-pipeline/run_daily_refresh.py --output-dir build/daily
+      - env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/publish_github_release.sh build
+        run: bash scripts/publish_github_release.sh build/daily
 ```
 
-實際發布封裝為 `scripts/publish_github_release.sh`：該腳本只接受已通過驗證的輸入、產生不可變版本名稱、寫入 UTC `generated_at` 與版本摘要，並在資料庫、模型及績效資產上傳成功後才更新 production 指標。`pipeline_status.json` 是唯一可變的最新版本指標，因此未完成候選版本不會被服務端採用。
+`scripts/publish_github_release.sh` 只接受已通過驗證的輸入，產生不可變版本名稱與UTC `generated_at`，並在資料庫、模型及績效資產上傳成功後才更新production指標。`pipeline_status.json` 是唯一可變的最新版本指標；未完成候選版本不會被服務端採用。網站最多每15分鐘檢查一次指標，驗證失敗則繼續使用先前Release；若尚無成功Release，會安全回退至既有受管模型資產。
 
-## Heartbeat 與應用程式責任分離
+## Heartbeat與應用程式責任分離
 
-網站內的每日觸發可透過受管 HTTP 排程呼叫 `/api/scheduled/*`，但 2 分鐘處理上限不適合在 production 請求內下載多源資料、重訓 XGBoost 並發布大型 SQLite／`.pkl`。因此，網站端適合做**狀態讀取、健康檢查與通知**；重型 ETL／訓練應在隔離的 CI 執行器完成。若日後使用受管 HTTP 排程，處理器必須驗證 cron 身分、具冪等性、以 2xx 回傳已處理或孤立任務，並透過版本化資產避免重試覆寫新版本。
+網站端適合做狀態讀取、健康檢查與通知。下載大型資料快照、建立SQLite、重訓XGBoost與發布資產等重型工作，必須在隔離CI執行器中完成；不應放進production請求或短時限排程處理器。
 
-## 所有權與驗收
+## 啟用驗收
 
-啟用前必須完成下列檢查：資料來源可用、GitHub 儲存庫已連接、工作流程具 `contents: write`、候選資產上傳成功、13 聯賽煙霧測試通過，且首頁的 `Last Updated Timestamp` 已反映新版本。只有這些條件皆成立時，才可對使用者宣稱「每日更新已啟用」。
+在對使用者宣稱「每日更新已啟用」前，必須確認公開快照可下載且已記錄SHA-256、同步測試與差異稽核通過、GitHub儲存庫已連接、工作流程具 `contents: write`、候選資產上傳成功、14個資料範圍煙霧測試通過，以及首頁的Last Updated Timestamp已反映新版本。
