@@ -65,6 +65,73 @@ export type LeagueMetadata = {
   };
 };
 
+type EuropaMatch = {
+  date: string;
+  homeTeam: string;
+  awayTeam: string;
+  homeGoals: number | null;
+  awayGoals: number | null;
+  status: "FINISHED" | "UPCOMING";
+  round: string;
+};
+
+export type EuropaOverview = {
+  source: "UEFA official match API";
+  retrievedAt: string;
+  season: string;
+  recentResults: EuropaMatch[];
+  upcomingFixtures: EuropaMatch[];
+};
+
+let europaCache: { expiresAt: number; payload: EuropaOverview } | null = null;
+
+function europaTeamName(team: Record<string, unknown>) {
+  const direct = team.internationalName;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  const translations = team.translations as { displayName?: Record<string, string> } | undefined;
+  return translations?.displayName?.EN?.trim() || "Unknown team";
+}
+
+export async function getEuropaOverview(): Promise<EuropaOverview> {
+  if (europaCache && europaCache.expiresAt > Date.now()) return europaCache.payload;
+  const now = new Date().toISOString().slice(0, 10);
+  const startYear = Number(now.slice(0, 4)) - (Number(now.slice(5, 7)) < 7 ? 1 : 0);
+  const seasonEndYear = startYear + 1;
+  const sourceUrl = `https://match.uefa.com/v5/matches?competitionId=14&seasonYear=${seasonEndYear}&limit=500&offset=0&order=ASC`;
+  const response = await fetch(sourceUrl, { headers: { "user-agent": "AureliaFootballResearch/1.0" } });
+  if (!response.ok) throw new Error(`UEFA官方歐霸盃賽程載入失敗（${response.status}）。`);
+  const rows = await response.json() as Array<Record<string, unknown>>;
+  if (!Array.isArray(rows)) throw new Error("UEFA官方歐霸盃賽程格式無效。");
+  const matches = rows.flatMap((row): EuropaMatch[] => {
+    const kickoff = row.kickOffTime as { date?: string } | undefined;
+    const home = (row.homeTeam || {}) as Record<string, unknown>;
+    const away = (row.awayTeam || {}) as Record<string, unknown>;
+    const status = row.status;
+    if (!kickoff?.date || home.isPlaceHolder || away.isPlaceHolder || (status !== "FINISHED" && status !== "UPCOMING")) return [];
+    const regular = (row.score as { regular?: { home?: number; away?: number } } | undefined)?.regular;
+    const round = ((row.round as { metaData?: { name?: string } } | undefined)?.metaData?.name) || "Europa League";
+    if (status === "FINISHED" && (!Number.isInteger(regular?.home) || !Number.isInteger(regular?.away))) return [];
+    return [{
+      date: kickoff.date,
+      homeTeam: europaTeamName(home),
+      awayTeam: europaTeamName(away),
+      homeGoals: status === "FINISHED" ? regular!.home! : null,
+      awayGoals: status === "FINISHED" ? regular!.away! : null,
+      status,
+      round,
+    }];
+  });
+  const payload: EuropaOverview = {
+    source: "UEFA official match API",
+    retrievedAt: new Date().toISOString(),
+    season: `${startYear}-${seasonEndYear}`,
+    recentResults: matches.filter(match => match.status === "FINISHED" && match.date <= now).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6),
+    upcomingFixtures: matches.filter(match => match.status === "UPCOMING" && match.date >= now).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 8),
+  };
+  europaCache = { expiresAt: Date.now() + 5 * 60_000, payload };
+  return payload;
+}
+
 function getOrigin(request: Request) {
   const forwardedProtocol = request.get("x-forwarded-proto")?.split(",")[0];
   const protocol = forwardedProtocol || request.protocol || "http";

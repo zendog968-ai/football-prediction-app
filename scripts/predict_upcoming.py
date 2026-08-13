@@ -250,6 +250,22 @@ def ordered_probabilities(model: Any, feature_frame: pd.DataFrame, class_to_id: 
     return probabilities
 
 
+def json_safe(value: Any) -> Any:
+    """Convert numpy scalars and non-finite diagnostics to strict JSON values."""
+    if isinstance(value, dict):
+        return {str(key): json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(item) for item in value]
+    if isinstance(value, (np.floating, float)):
+        number = float(value)
+        return number if np.isfinite(number) else None
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    return value
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="依資料庫最新歷史資料預測足球勝平負機率")
     parser.add_argument("--home", required=True, help="主隊名稱，例如 Flamengo")
@@ -346,7 +362,7 @@ def main() -> None:
     if args.json_out:
         output_path = Path(args.json_out).expanduser().resolve()
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=float), encoding="utf-8")
+        output_path.write_text(json.dumps(json_safe(payload), ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
         print(f"JSON輸出：{output_path}")
 
 

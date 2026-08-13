@@ -3,7 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { getLeagueMetadata, getPrediction, getTeams, hasValidProbabilityDistribution } from "./prediction";
+import { getEuropaOverview, getLeagueMetadata, getPrediction, getTeams, hasValidProbabilityDistribution } from "./prediction";
 import { getPerformanceOverview, hasValidPerformanceOverview } from "./performance";
 import { cruzeiroFlamengoSpotlight, hasValidSpotlight } from "./spotlight";
 import { publicProcedure, router } from "./_core/trpc";
@@ -67,6 +67,13 @@ export const appRouter = router({
           });
         }
       }),
+    europa: publicProcedure.query(async () => {
+      try {
+        return await getEuropaOverview();
+      } catch (error) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error instanceof Error ? error.message : "無法載入歐霸盃官方賽程。" });
+      }
+    }),
   }),
   performance: router({
     overview: publicProcedure.input(z.object({

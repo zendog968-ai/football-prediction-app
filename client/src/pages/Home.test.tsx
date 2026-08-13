@@ -74,6 +74,18 @@ vi.mock("@/lib/trpc", () => ({
           error: mockState.forecastError,
         }),
       },
+      europa: {
+        useQuery: () => ({
+          data: {
+            source: "UEFA official match API",
+            retrievedAt: "2026-08-13T12:00:00Z",
+            season: "2026-2027",
+            recentResults: [{ date: "2026-08-11", homeTeam: "Benfica", awayTeam: "Ferencváros", homeGoals: 2, awayGoals: 1, status: "FINISHED", round: "Qualifying" }],
+            upcomingFixtures: [{ date: "2026-08-20", homeTeam: "Benfica", awayTeam: "Ferencváros", homeGoals: null, awayGoals: null, status: "UPCOMING", round: "Qualifying" }],
+          },
+          error: null,
+        }),
+      },
     },
     spotlight: {
       cruzeiroFlamengo: {
@@ -183,6 +195,18 @@ describe("Home prediction workflow", () => {
       expect(teamOption).toBeTruthy();
       await user.click(teamOption);
     }
+  });
+
+  it("shows the official Europa League board and can load an eligible fixture into the prediction fields", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.selectOptions(screen.getByLabelText("聯賽"), "UEL");
+    expect(screen.getByTestId("europa-live-board")).toBeTruthy();
+    expect(screen.getByText("Benfica 2–1 Ferencváros")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Benfica vs Ferencváros.*帶入預測/ }));
+    expect((screen.getByLabelText("主隊") as HTMLInputElement).value).toBe("Benfica");
+    expect((screen.getByLabelText("客隊") as HTMLInputElement).value).toBe("Ferencváros");
   });
 
   it("exposes labelled controls and clear loading and error states", async () => {

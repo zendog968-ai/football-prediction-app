@@ -46,6 +46,13 @@ describe("prediction scope guard", () => {
     )).not.toThrow();
   });
 
+  it("permits an in-scope Europa League pair after the UEL data contract is published", () => {
+    expect(() => validateInferenceScope(
+      { leagueCode: "UEL", homeTeam: "Benfica", awayTeam: "Ferencváros" },
+      ["Benfica", "Ferencváros", "CSKA Sofia"],
+    )).not.toThrow();
+  });
+
   it("rejects a cup or cross-league team before Python inference", () => {
     expect(() => validateInferenceScope(
       { leagueCode: "MLS", homeTeam: "Los Angeles FC", awayTeam: "Queretaro" },
@@ -57,7 +64,7 @@ describe("prediction scope guard", () => {
     )).toThrow("超出模型範疇");
   });
 
-  it("rejects a league outside the calibrated 13-league scope", () => {
+  it("rejects a league outside the calibrated 14-scope data contract", () => {
     expect(() => validateInferenceScope(
       { leagueCode: "LIBERTADORES", homeTeam: "Palmeiras", awayTeam: "Penarol" },
       [],
