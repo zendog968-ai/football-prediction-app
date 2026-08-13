@@ -45,7 +45,8 @@ def allowed_date(match_date: pd.Timestamp, mode: str, reference_date: date) -> b
     if mode in {"calendar", "mexico"}:
         start = pd.Timestamp(year=reference_date.year - 5, month=1, day=1)
     else:
-        start = pd.Timestamp(year=reference_date.year - 5, month=8, day=1)
+        # 跨年聯賽須多回看一個曆年，才能在來源尚未提供當季時保留五個完整賽季。
+        start = pd.Timestamp(year=reference_date.year - 6, month=8, day=1)
     return start <= match_date <= pd.Timestamp(reference_date)
 
 
