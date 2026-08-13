@@ -14,7 +14,7 @@ const databasePath = path.join(runtimeDirectory, "football_data_expanded_with_cl
 const modelPath = path.join(runtimeDirectory, "soccer_predict_model_expanded.pkl");
 
 export const SUPPORTED_LEAGUE_CODES = new Set([
-  "BRA1", "EPL", "LL", "BL", "SA", "L1", "MLS", "J1", "FIN1", "KOR1", "POR1", "MEX1", "AUS1",
+  "BRA1", "EPL", "LL", "BL", "SA", "L1", "MLS", "J1", "FIN1", "KOR1", "POR1", "MEX1", "AUS1", "UEL",
 ]);
 
 export class PredictionScopeError extends Error {

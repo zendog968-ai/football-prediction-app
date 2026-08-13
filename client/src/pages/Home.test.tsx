@@ -38,6 +38,7 @@ const expandedLeagueTeams = vi.hoisted(() => ({
   POR1: ["AVS", "Arouca"],
   MEX1: ["Tigres UANL", "Guadalajara"],
   AUS1: ["Melbourne Victory", "Melbourne City FC"],
+  UEL: ["Benfica", "Ferencváros"],
 }));
 
 vi.mock("@/lib/trpc", () => ({
@@ -56,6 +57,7 @@ vi.mock("@/lib/trpc", () => ({
               { code: "POR1", name: "Primeira Liga", first_date: "2020-09-18", last_date: "2025-05-17", match_count: 1530 },
               { code: "MEX1", name: "Liga MX", first_date: "2020-01-11", last_date: "2024-12-16", match_count: 1599 },
               { code: "AUS1", name: "A-League Men", first_date: "2020-08-01", last_date: "2025-05-31", match_count: 852 },
+              { code: "UEL", name: "UEFA Europa League", first_date: "2021-08-03", last_date: "2026-08-11", match_count: 910 },
             ],
             coverage: { firstDate: "2020-08-08", lastDate: "2025-05-25", lastUpdatedAt: "2026-08-13T00:00:00+00:00", model: "校準後 XGBoost 三分類模型", disclaimer: "僅使用歷史賽前資料。" },
           },
@@ -152,6 +154,7 @@ describe("Home prediction workflow", () => {
     for (const name of ["美職 · Major League Soccer", "日職 · J1 League", "芬蘭聯賽 · Veikkausliiga", "韓職 · K League 1", "葡職 · Primeira Liga", "墨西哥聯賽 · Liga MX", "澳職 · A-League Men"]) {
       expect(screen.getByRole("option", { name })).toBeTruthy();
     }
+    expect(screen.getByRole("option", { name: "歐霸盃 · UEFA Europa League" })).toBeTruthy();
 
     await user.selectOptions(screen.getByLabelText("聯賽"), "J1");
     const homeInput = screen.getByLabelText("主隊");
@@ -168,7 +171,7 @@ describe("Home prediction workflow", () => {
     const checks = [
       ["MLS", "Atlan", "Atlanta United"], ["J1", "Kawa", "Kawasaki Frontale"],
       ["FIN1", "Hak", "Haka"], ["KOR1", "Daeg", "Daegu"], ["POR1", "AV", "AVS"],
-      ["MEX1", "Tigr", "Tigres UANL"], ["AUS1", "Melbourne V", "Melbourne Victory"],
+      ["MEX1", "Tigr", "Tigres UANL"], ["AUS1", "Melbourne V", "Melbourne Victory"], ["UEL", "Feren", "Ferencváros"],
     ] as const;
 
     for (const [leagueCode, search, expected] of checks) {

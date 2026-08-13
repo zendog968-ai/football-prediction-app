@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PIPELINE_DIR = PROJECT_ROOT / "data-pipeline"
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 OPEN_RESULTS_URL = "https://raw.githubusercontent.com/schochastics/football-data/master/data/results/games.parquet"
-LEAGUES = ("BRA1", "EPL", "LL", "BL", "SA", "L1", "MLS", "J1", "FIN1", "KOR1", "POR1", "MEX1", "AUS1")
+LEAGUES = ("BRA1", "EPL", "LL", "BL", "SA", "L1", "MLS", "J1", "FIN1", "KOR1", "POR1", "MEX1", "AUS1", "UEL")
 
 
 def run(command: list[str]) -> None:
@@ -72,6 +72,7 @@ def main() -> None:
     as_of_args = ["--as-of", args.as_of] if args.as_of else []
 
     base_database = output / "football_data.db"
+    domestic_database = output / "football_data_13_leagues.db"
     expanded_database = output / "football_data_expanded.db"
     parquet = output / "open_football_games.parquet"
     features = output / "training_features_expanded.csv"
@@ -83,8 +84,14 @@ def main() -> None:
     run([sys.executable, str(PIPELINE_DIR / "build_football_db.py"), "--database", str(base_database), *as_of_args])
     run([
         sys.executable, str(PIPELINE_DIR / "build_expanded_leagues_db.py"), "--base-database", str(base_database),
+        "--open-results", str(parquet), "--output", str(domestic_database), *as_of_args,
+    ])
+    run([
+        sys.executable, str(PIPELINE_DIR / "build_europa_league_db.py"), "--base-database", str(domestic_database),
         "--open-results", str(parquet), "--output", str(expanded_database), *as_of_args,
     ])
+    validation_cutoff = args.as_of or datetime.now(timezone.utc).date().isoformat()
+    run([sys.executable, str(PIPELINE_DIR / "verify_europa_league_data.py"), "--database", str(expanded_database), "--as-of", validation_cutoff])
     run([sys.executable, str(PIPELINE_DIR / "verify_odds_data.py"), "--database", str(expanded_database)])
     run([sys.executable, str(SCRIPTS_DIR / "build_match_features.py"), "--database", str(expanded_database), "--output", str(features)])
     run([sys.executable, str(PIPELINE_DIR / "train_soccer_predict_model.py"), "--input", str(features), "--output-dir", str(model_dir)])

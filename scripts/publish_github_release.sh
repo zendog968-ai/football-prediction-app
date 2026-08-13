@@ -18,16 +18,7 @@ gh release upload "${VERSION_TAG}" --clobber \
   "${BUILD_DIR}/model/soccer_predict_model.pkl#soccer_predict_model.pkl" \
   "${BUILD_DIR}/model_performance_filters.json#model_performance_filters.json"
 
-python3 - "${BUILD_DIR}/pipeline_status.json" "${VERSION_TAG}" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-payload = json.loads(path.read_text(encoding="utf-8"))
-payload["release_tag"] = sys.argv[2]
-path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-PY
+python3 data-pipeline/finalize_release_manifest.py --manifest "${BUILD_DIR}/pipeline_status.json" --release-tag "${VERSION_TAG}"
 
 if ! gh release view "${LATEST_TAG}" >/dev/null 2>&1; then
   gh release create "${LATEST_TAG}" --title "Aurelia Football current data pointer" --notes "Points to the latest fully validated immutable release."
