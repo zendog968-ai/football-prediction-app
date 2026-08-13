@@ -7,3 +7,4 @@ joblib
 pyarrow
 requests
 matplotlib
+tabulate
