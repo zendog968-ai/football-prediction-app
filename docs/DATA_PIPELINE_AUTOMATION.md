@@ -35,6 +35,8 @@ flowchart LR
 
 工作流程以 GitHub 內建 `GITHUB_TOKEN` 的 `contents: write` 權限建立不可變 `data-<UTC>-<commit>` Release，並只在資料、特徵、模型、績效與13聯賽煙霧測試都通過後，上傳 `data-latest/pipeline_status.json` 作為最後指標。網站最多每15分鐘檢查一次該指標；驗證失敗時會繼續使用先前 Release，若尚無成功 Release 則安全回退至既有受管模型資產。
 
+首次人工驗證已於 2026-08-13 成功完成：GitHub Actions 執行編號為 [`31694683058`](https://github.com/zendog968-ai/football-prediction-app/actions/runs/31694683058)，最新指標指向不可變版本 `data-20260813T114817Z-62b07c4`。該版本已驗證13個聯賽並發布 SQLite、校準模型及績效 JSON；公開儲存庫可讓部署端不持有GitHub憑證便下載這些資產。
+
 工作流程的 cron 使用六欄或五欄格式視執行平台而定；GitHub Actions 使用標準五欄 UTC 表示式，例如 `0 3 * * *`。每次執行都應可人工以 `workflow_dispatch` 觸發，以便先驗證資料品質與資產發布權限。
 
 ```yaml
