@@ -27,7 +27,8 @@ from build_football_db import compute_team_stats, insert_matches
 
 
 ODC_SOURCE_URL = "https://raw.githubusercontent.com/schochastics/football-data/master/data/results/games.parquet"
-ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/concacaf.leagues.cup/scoreboard"
+LCUP_ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/concacaf.leagues.cup/scoreboard"
+SUD_ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/conmebol.sudamericana/scoreboard"
 SUD_CODE = "SUD"
 LCUP_CODE = "LCUP"
 
@@ -107,23 +108,20 @@ def sudamericana_records(parquet: Path, as_of: date, fetched_at: str) -> list[di
     return records
 
 
-def fetch_leagues_cup_year(year: int) -> tuple[list[dict[str, Any]], str]:
-    response = requests.get(ESPN_URL, params={"dates": str(year), "limit": "500"}, timeout=30)
+def fetch_scoreboard_year(url: str, year: int, label: str) -> tuple[list[dict[str, Any]], str]:
+    response = requests.get(url, params={"dates": str(year), "limit": "500"}, timeout=30)
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload.get("events"), list):
-        raise RuntimeError(f"ESPN Leagues Cup {year} 回應缺少events清單")
+        raise RuntimeError(f"ESPN {label} {year} 回應缺少events清單")
     return payload["events"], str(response.url)
 
 
-def leagues_cup_records(as_of: date, fetched_at: str, raw_out: Path | None) -> list[dict[str, Any]]:
-    # 2020 was cancelled and 2022 did not stage the competition.  These years
-    # remain queried for auditability but cannot contribute finished matches.
-    years = range(2019, as_of.year + 1)
+def espn_finished_records(*, code: str, name: str, url: str, years: range, as_of: date, fetched_at: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     records: list[dict[str, Any]] = []
     raw_by_year: dict[str, Any] = {}
     for year in years:
-        events, source_url = fetch_leagues_cup_year(year)
+        events, source_url = fetch_scoreboard_year(url, year, name)
         raw_by_year[str(year)] = events
         for event in events:
             status = str(event.get("status", {}).get("type", {}).get("name", ""))
@@ -146,12 +144,28 @@ def leagues_cup_records(as_of: date, fetched_at: str, raw_out: Path | None) -> l
             if not home_team or not away_team or home_team == away_team:
                 continue
             record = base_record(
-                code=LCUP_CODE, name="Leagues Cup", season=str(played.year), match_date=played.date().isoformat(),
+                code=code, name=name, season=str(played.year), match_date=played.date().isoformat(),
                 match_time=played.strftime("%H:%M:%S"), home=home_team, away=away_team,
                 home_goals=home_goals, away_goals=away_goals, source_url=source_url, fetched_at=fetched_at,
             )
-            record["match_id"] = hashlib.sha256(f"LCUP|ESPN|{event.get('id')}".encode("utf-8")).hexdigest()[:32]
+            record["match_id"] = hashlib.sha256(f"{code}|ESPN|{event.get('id')}".encode("utf-8")).hexdigest()[:32]
             records.append(record)
+    return records, raw_by_year
+
+
+def current_sudamericana_records(as_of: date, fetched_at: str, raw_out: Path | None) -> list[dict[str, Any]]:
+    records, raw = espn_finished_records(code=SUD_CODE, name="CONMEBOL Sudamericana", url=SUD_ESPN_URL, years=range(as_of.year, as_of.year + 1), as_of=as_of, fetched_at=fetched_at)
+    if raw_out:
+        raw_out.parent.mkdir(parents=True, exist_ok=True)
+        raw_out.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+    return records
+
+
+def leagues_cup_records(as_of: date, fetched_at: str, raw_out: Path | None) -> list[dict[str, Any]]:
+    # 2020 was cancelled and 2022 did not stage the competition.  These years
+    # remain queried for auditability but cannot contribute finished matches.
+    years = range(2019, as_of.year + 1)
+    records, raw_by_year = espn_finished_records(code=LCUP_CODE, name="Leagues Cup", url=LCUP_ESPN_URL, years=years, as_of=as_of, fetched_at=fetched_at)
     if raw_out:
         raw_out.parent.mkdir(parents=True, exist_ok=True)
         raw_out.write_text(json.dumps(raw_by_year, ensure_ascii=False), encoding="utf-8")
@@ -181,13 +195,18 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--as-of", help="UTC cutoff YYYY-MM-DD")
     parser.add_argument("--leagues-cup-raw-out", type=Path)
+    parser.add_argument("--sudamericana-raw-out", type=Path)
     args = parser.parse_args()
     as_of = date.fromisoformat(args.as_of) if args.as_of else datetime.now(timezone.utc).date()
     if not args.base_database.exists() or not args.open_results.exists():
         raise FileNotFoundError("找不到基礎資料庫或ODC-BY公開賽果快照")
     shutil.copy2(args.base_database, args.output)
     fetched_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    records = [*sudamericana_records(args.open_results, as_of, fetched_at), *leagues_cup_records(as_of, fetched_at, args.leagues_cup_raw_out)]
+    records = [
+        *sudamericana_records(args.open_results, as_of, fetched_at),
+        *current_sudamericana_records(as_of, fetched_at, args.sudamericana_raw_out),
+        *leagues_cup_records(as_of, fetched_at, args.leagues_cup_raw_out),
+    ]
     with sqlite3.connect(args.output) as connection:
         connection.execute("DELETE FROM team_stats")
         insert_matches(connection, records)

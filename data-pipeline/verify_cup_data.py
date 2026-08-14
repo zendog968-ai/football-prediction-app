@@ -40,7 +40,7 @@ def main() -> None:
     sources = {code: set() for code in ("SUD", "LCUP")}
     for code, source_url in source_rows:
         sources[code].add(str(source_url))
-    if len(sources["SUD"]) != 1 or not next(iter(sources["SUD"])).startswith("https://raw.githubusercontent.com/schochastics/"):
+    if not sources["SUD"] or not all(url.startswith(("https://raw.githubusercontent.com/schochastics/", "https://site.api.espn.com/apis/site/v2/sports/soccer/conmebol.sudamericana/scoreboard")) for url in sources["SUD"]):
         raise RuntimeError(f"Sudamericana來源不正確：{sources['SUD']}")
     if not sources["LCUP"] or not all(url.startswith("https://site.api.espn.com/apis/site/v2/sports/soccer/concacaf.leagues.cup/scoreboard") for url in sources["LCUP"]):
         raise RuntimeError(f"Leagues Cup來源不正確：{sources['LCUP']}")

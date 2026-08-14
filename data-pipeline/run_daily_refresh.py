@@ -93,7 +93,7 @@ def main() -> None:
     ])
     run([
         sys.executable, str(PIPELINE_DIR / "build_sudamericana_leagues_cup_db.py"), "--base-database", str(europa_database),
-        "--open-results", str(parquet), "--output", str(expanded_database), "--leagues-cup-raw-out", str(output / "leagues_cup_espn_snapshot.json"), *as_of_args,
+        "--open-results", str(parquet), "--output", str(expanded_database), "--leagues-cup-raw-out", str(output / "leagues_cup_espn_snapshot.json"), "--sudamericana-raw-out", str(output / "sudamericana_espn_snapshot.json"), *as_of_args,
     ])
     validation_cutoff = args.as_of or datetime.now(timezone.utc).date().isoformat()
     run([sys.executable, str(PIPELINE_DIR / "verify_europa_league_data.py"), "--database", str(expanded_database), "--as-of", validation_cutoff])
