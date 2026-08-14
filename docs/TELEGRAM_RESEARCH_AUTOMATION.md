@@ -23,6 +23,8 @@
 
 可隨時傳送`/status`（群組可使用`/status@BotUsername`）查閱本聊天的訂閱狀態、三個Heartbeat任務啟用數、API-Football方案及**今日剩餘／總額度**。若供應商無法讀取，Bot會明確標示資料暫時不可用，而不填補或推測額度。`/stop`具可重複性：未訂閱或已停止時會回覆目前狀態，不會改寫其他聊天的訂閱資料。
 
+`/help`會列出`/start`、`/status`、`/stop`與`/help`的用途及研究限制。日間／晚間摘要在同一fixture、同一博彩公司及同一市場有至少兩個有效快照且盤口選項未改變時，會以Unicode火花線呈現「初盤 → 最新盤」的簡易價格走勢；若只累積到一筆快照，將顯示「初盤基準建立中」。若讓球或大小球線已變更，系統只會揭示線位變動，不會把不同線位繪製成同一價格序列。
+
 Webhook只接受Telegram的`X-Telegram-Bot-Api-Secret-Token`，常數時間比對失敗會回傳403。Bot Token、Webhook Secret與API-Football Key均只在伺服器端秘密管理中讀取；`/status`只回覆方案、啟用狀態與剩餘額度，從不傳送任何憑證。
 
 ## 排程

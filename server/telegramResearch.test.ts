@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { describeMarketMovement, formatTelegramStatus, normalizeTelegramCommand, RESEARCH_SCHEDULES, settlementForScores, verifyApiFootballReadiness } from "./telegramResearch";
+import { describeMarketMovement, formatTelegramStatus, normalizeTelegramCommand, renderOddsTrend, RESEARCH_SCHEDULES, settlementForScores, TELEGRAM_HELP_MESSAGE, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -33,6 +33,14 @@ describe("Telegram研究排程", () => {
 });
 
 describe("Telegram系統指令", () => {
+  it("/help列出全部可用的訂閱及研究指令", () => {
+    expect(TELEGRAM_HELP_MESSAGE).toContain("/start");
+    expect(TELEGRAM_HELP_MESSAGE).toContain("/status");
+    expect(TELEGRAM_HELP_MESSAGE).toContain("/stop");
+    expect(TELEGRAM_HELP_MESSAGE).toContain("/help");
+    expect(TELEGRAM_HELP_MESSAGE).toContain("並非投注或資金建議");
+  });
+
   it("顯示訂閱、任務與不暴露憑證的API剩餘額度", () => {
     const message = formatTelegramStatus({
       subscriptionActive: true,
@@ -75,6 +83,13 @@ describe("Telegram系統指令", () => {
 });
 
 describe("盤路與資料品質閘門", () => {
+  it("僅以多個有效的真實價格快照繪製簡易走勢圖", () => {
+    expect(renderOddsTrend([1.86, 1.91, 1.95])).toMatch(/1\.86 → 1\.95 \(\+0\.09\)/);
+    expect(renderOddsTrend([1.9, 1.9])).toContain("▅▅");
+    expect(renderOddsTrend([1.9])).toBeNull();
+    expect(renderOddsTrend([1.9, 0])).toBeNull();
+  });
+
   it("分別呈現初盤基準建立中與同一博彩公司初盤至最新盤變動", () => {
     expect(describeMarketMovement({ marketName: "Asian Handicap", selection: "Home -0.5", decimalOdds: 1.9, capturedAt: new Date() })).toBe("初盤基準建立中");
     expect(describeMarketMovement({ marketName: "Goals Over/Under", selection: "Over 2.5", decimalOdds: 1.82, capturedAt: new Date(), openingSelection: "Over 2.5", openingOdds: 1.95, openingCapturedAt: new Date("2026-08-14T00:00:00Z") })).toBe("初盤 Over 2.5 @1.95 → 最新 Over 2.5 @1.82");

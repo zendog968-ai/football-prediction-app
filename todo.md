@@ -178,3 +178,7 @@
 - [x] 盤點Telegram webhook現有/start與/stop流程、Heartbeat任務及API-Football status回應欄位，定義/status回覆契約。
 - [x] 實作Telegram /status系統狀態、三個排程啟用狀態與API-Football剩餘用量回覆，並補強/stop退訂可稽核處理。
 - [x] 補上Telegram指令處理測試、型別檢查、正式建置與發布，通知使用者測試/status及/stop（59項測試通過）。
+- [x] 盤點現有Telegram指令、盤口快照時間序列與可用市場欄位，定義/help與走勢圖摘要的研究資料契約。
+- [x] 實作Telegram /help 指令，列出/start、/status、/stop及研究通知限制。
+- [x] 以已保存的同一fixture、同一博彩公司及同一市場快照繪製簡易盤口走勢圖摘要，資料不足時明確略過而不推測。
+- [x] 補上/help及走勢圖摘要測試，完成型別檢查、正式建置與發布，通知使用者測試新功能（61項測試通過）。

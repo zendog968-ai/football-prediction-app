@@ -66,6 +66,7 @@ type MarketContext = {
   openingSelection?: string;
   openingOdds?: number;
   openingCapturedAt?: Date;
+  trendSummary?: string;
 };
 
 type Candidate = {
@@ -102,6 +103,17 @@ export const RESEARCH_SCHEDULES: Array<{ kind: ScheduleKind; cron: string; path:
   { kind: "day_digest", cron: "0 0 3 * * *", path: "/api/scheduled/research-day", description: "每日11:00香港時間日間研究摘要" },
   { kind: "evening_digest", cron: "0 30 10 * * *", path: "/api/scheduled/research-evening", description: "每日18:30香港時間晚間研究摘要" },
 ];
+
+export const TELEGRAM_HELP_MESSAGE = [
+  "Aurelia Football｜指令說明",
+  "",
+  "/start — 啟用研究通知。",
+  "/status — 查閱訂閱狀態、Heartbeat任務與API剩餘額度。",
+  "/stop — 停止研究通知；可隨時以/start重新啟用。",
+  "/help — 顯示本指令說明。",
+  "",
+  "研究摘要只使用已驗證資料，並可能附上同一盤口的初盤至最新快照走勢圖；資料不足或盤口線變更時不會推測。所有內容只供模型與戰術研究，並非投注或資金建議。",
+].join("\n");
 
 function requireSecret(value: string, label: string): string {
   if (!value) throw new Error(`${label}尚未設定。`);
@@ -326,8 +338,14 @@ async function resolveCandidate(request: Request, leagueCode: string, fixtureId:
   const marketContext = ["Asian Handicap", "Goals Over/Under"].flatMap<MarketContext>(marketName => {
     const latest = snapshotRows.find(snapshot => snapshot.marketName === marketName);
     if (!latest) return [];
-    const sameMarketBookmaker = snapshotRows.filter(snapshot => snapshot.marketName === marketName && snapshot.bookmakerId === latest.bookmakerId);
-    const opening = sameMarketBookmaker.at(-1);
+    const sameMarketBookmaker = snapshotRows
+      .filter(snapshot => snapshot.marketName === marketName && snapshot.bookmakerId === latest.bookmakerId)
+      .sort((a, b) => a.capturedAt.getTime() - b.capturedAt.getTime());
+    const opening = sameMarketBookmaker[0];
+    const sameSelection = sameMarketBookmaker.every(snapshot => snapshot.selection === latest.selection);
+    const trendSummary = sameSelection
+      ? renderOddsTrend(sameMarketBookmaker.map(snapshot => Number(snapshot.decimalOdds))) ?? undefined
+      : `盤口線已由 ${opening?.selection ?? "未知"} 調整至 ${latest.selection}，不以不同線位繪製同一價格走勢。`;
     return [{
       marketName,
       selection: latest.selection,
@@ -338,6 +356,7 @@ async function resolveCandidate(request: Request, leagueCode: string, fixtureId:
         openingOdds: Number(opening.decimalOdds),
         openingCapturedAt: opening.capturedAt,
       } : {}),
+      ...(trendSummary ? { trendSummary } : {}),
     }];
   });
   return { fixtureId, leagueCode, homeTeam: home, awayTeam: away, kickoffAt: details.kickoffAt, prediction, marketContext };
@@ -348,13 +367,27 @@ export function describeMarketMovement(item: MarketContext): string {
   return `初盤 ${item.openingSelection} @${item.openingOdds.toFixed(2)} → 最新 ${item.selection} @${item.decimalOdds.toFixed(2)}`;
 }
 
+export function renderOddsTrend(values: number[]): string | null {
+  if (values.length < 2 || values.some(value => !Number.isFinite(value) || value <= 1)) return null;
+  const floor = Math.min(...values);
+  const ceiling = Math.max(...values);
+  const glyphs = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+  const line = ceiling === floor
+    ? values.map(() => "▅").join("")
+    : values.map(value => glyphs[Math.round((value - floor) / (ceiling - floor) * (glyphs.length - 1))]!).join("");
+  const start = values[0]!;
+  const end = values.at(-1)!;
+  const delta = end - start;
+  return `${line} ${start.toFixed(2)} → ${end.toFixed(2)} (${delta >= 0 ? "+" : ""}${delta.toFixed(2)})`;
+}
+
 function formatCandidate(candidate: Candidate): string {
   const lean = candidate.prediction.lean;
   const risk = lean.risk_level === "low" ? "低" : lean.risk_level === "medium" ? "中等" : "高";
   const reasons = lean.reasons.slice(0, 2).join(" ");
   const limitation = lean.limitations[0] ? ` 限制：${lean.limitations[0]}` : "";
   const markets = candidate.marketContext.length > 0
-    ? `盤口快照：${candidate.marketContext.map(item => `${item.marketName} ${describeMarketMovement(item)}`).join("；")}。`
+    ? `盤口快照：${candidate.marketContext.map(item => `${item.marketName} ${describeMarketMovement(item)}${item.trendSummary ? `\n走勢圖：${item.trendSummary}` : ""}`).join("；")}。`
     : "盤口快照：目前沒有可用的亞洲讓球／大小球資料。";
   return [
     `${candidate.homeTeam} vs ${candidate.awayTeam}`,
@@ -499,6 +532,8 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     await db.insert(telegramSubscriptions).values({ chatId: String(chatId), displayName, isActive: true, stoppedAt: null })
       .onDuplicateKeyUpdate({ set: { displayName, isActive: true, stoppedAt: null } });
     await sendTelegramMessage(String(chatId), "Aurelia Football研究通知已啟用。你會收到經資料品質檢核的研究摘要與賽後統計；回覆 /stop 可停止通知。所有內容僅供研究，並非投注或資金建議。");
+  } else if (text === "/help") {
+    await sendTelegramMessage(String(chatId), TELEGRAM_HELP_MESSAGE);
   } else if (text === "/status") {
     await sendTelegramMessage(String(chatId), await telegramStatusForChat(String(chatId)));
   } else if (text === "/stop") {

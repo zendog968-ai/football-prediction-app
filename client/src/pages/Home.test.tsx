@@ -222,7 +222,6 @@ describe("Home prediction workflow", () => {
     const user = userEvent.setup();
     render(<Home />);
     const leagueControl = screen.getByLabelText("聯賽");
-    const homeInput = screen.getByLabelText("主隊");
     const checks = [
       ["MLS", "Atlan", "Atlanta United"], ["J1", "Kawa", "Kawasaki Frontale"],
       ["FIN1", "Hak", "Haka"], ["KOR1", "Daeg", "Daegu"], ["POR1", "AV", "AVS"],
@@ -231,6 +230,7 @@ describe("Home prediction workflow", () => {
 
     for (const [leagueCode, search, expected] of checks) {
       await user.selectOptions(leagueControl, leagueCode);
+      const homeInput = screen.getByLabelText("主隊");
       await user.click(homeInput);
       await user.clear(homeInput);
       await user.type(homeInput, search);
