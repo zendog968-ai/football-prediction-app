@@ -44,6 +44,15 @@ function fallbackAssets(origin: string): ReleaseAssets {
   };
 }
 
+function isPublishedRelease(assets: ReleaseAssets): boolean {
+  return /^data-[A-Za-z0-9._-]+$/.test(assets.version);
+}
+
+export function __resetReleaseAssetsCacheForTests(): void {
+  cachedAssets = null;
+  cacheExpiresAt = 0;
+}
+
 export async function getReleaseAssets(origin: string): Promise<ReleaseAssets> {
   if (cachedAssets && Date.now() < cacheExpiresAt) return cachedAssets;
   try {
@@ -61,6 +70,10 @@ export async function getReleaseAssets(origin: string): Promise<ReleaseAssets> {
       generatedAt: manifest.generated_at,
     };
   } catch {
+    if (cachedAssets && isPublishedRelease(cachedAssets)) {
+      cacheExpiresAt = Date.now() + REFRESH_INTERVAL_MS;
+      return cachedAssets;
+    }
     cachedAssets = fallbackAssets(origin);
   }
   cacheExpiresAt = Date.now() + REFRESH_INTERVAL_MS;

@@ -12,7 +12,7 @@ from pathlib import Path
 
 PIPELINE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(PIPELINE_DIR))
-from daily_update import SOURCE_LABEL, SourceResult, ensure_sync_schema, reconcile  # noqa: E402
+from daily_update import SOURCE_LABEL, SourceResult, ensure_sync_schema, evaluate_quality_gate, reconcile  # noqa: E402
 
 
 def build_database() -> sqlite3.Connection:
@@ -90,6 +90,32 @@ class DailyResultSyncTests(unittest.TestCase):
         self.assertEqual(stats["unmatched"], 1)
         self.assertEqual(matches, 0)
         self.assertEqual(tuple(audit), ("unmatched",))
+
+    def test_quality_gate_allows_the_verified_unmatched_tolerance(self) -> None:
+        decision = evaluate_quality_gate({
+            "source_finished": 100,
+            "confirmed": 96,
+            "updated": 0,
+            "unmatched": 4,
+            "ambiguous": 0,
+            "conflict": 0,
+        })
+        self.assertTrue(decision["passed"])
+        self.assertEqual(decision["unmatched_ratio"], 0.04)
+
+    def test_quality_gate_blocks_conflict_ambiguity_and_excess_unmatched_rows(self) -> None:
+        decision = evaluate_quality_gate({
+            "source_finished": 100,
+            "confirmed": 93,
+            "updated": 0,
+            "unmatched": 5,
+            "ambiguous": 1,
+            "conflict": 1,
+        })
+        self.assertFalse(decision["passed"])
+        self.assertTrue(any("歧義" in failure for failure in decision["failures"]))
+        self.assertTrue(any("衝突" in failure for failure in decision["failures"]))
+        self.assertTrue(any("未對齊比例" in failure for failure in decision["failures"]))
 
 
 if __name__ == "__main__":

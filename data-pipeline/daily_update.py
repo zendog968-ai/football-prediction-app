@@ -29,6 +29,7 @@ SOURCE_URL = "https://raw.githubusercontent.com/schochastics/football-data/maste
 SOURCE_LABEL = "schochastics/football-data games.parquet (ODC-BY)"
 INTERNATIONAL_TARGETS = {"UEFA EL": ("UEL", "UEFA Europa League", "split")}
 STOP_WORDS = {"fc", "cf", "afc", "pfc", "sc", "club", "the"}
+DEFAULT_MAX_UNMATCHED_RATIO = 0.04
 
 
 class ResultSyncError(RuntimeError):
@@ -197,6 +198,37 @@ def reconcile(connection: sqlite3.Connection, records: list[SourceResult], snaps
     return stats
 
 
+def evaluate_quality_gate(stats: dict[str, int], max_unmatched_ratio: float = DEFAULT_MAX_UNMATCHED_RATIO) -> dict[str, Any]:
+    """Return an auditable pass/fail decision before model rebuild or release."""
+    source_finished = stats.get("source_finished", 0)
+    unmatched = stats.get("unmatched", 0)
+    ambiguous = stats.get("ambiguous", 0)
+    conflict = stats.get("conflict", 0)
+    matched = stats.get("confirmed", 0) + stats.get("updated", 0)
+    accounted = matched + unmatched + ambiguous + conflict
+    unmatched_ratio = unmatched / source_finished if source_finished else 1.0
+    failures: list[str] = []
+    if source_finished <= 0:
+        failures.append("source_finished 必須大於0")
+    if accounted != source_finished:
+        failures.append(f"稽核計數不守恆：accounted={accounted}, source_finished={source_finished}")
+    if matched <= 0:
+        failures.append("沒有任何已確認或更新的已完成賽果")
+    if ambiguous:
+        failures.append(f"存在{ambiguous}筆歧義對齊")
+    if conflict:
+        failures.append(f"存在{conflict}筆比分衝突")
+    if unmatched_ratio > max_unmatched_ratio:
+        failures.append(f"未對齊比例{unmatched_ratio:.4%}超過門檻{max_unmatched_ratio:.4%}")
+    return {
+        "passed": not failures,
+        "max_unmatched_ratio": max_unmatched_ratio,
+        "unmatched_ratio": unmatched_ratio,
+        "matched": matched,
+        "failures": failures,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Sync ODC-BY public completed results into an Aurelia candidate SQLite database")
     parser.add_argument("--database", type=Path, required=True)
@@ -204,7 +236,10 @@ def main() -> int:
     parser.add_argument("--as-of", help="UTC cutoff YYYY-MM-DD; defaults to today")
     parser.add_argument("--report-out", type=Path, required=True)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--max-unmatched-ratio", type=float, default=DEFAULT_MAX_UNMATCHED_RATIO)
     args = parser.parse_args()
+    if not 0 <= args.max_unmatched_ratio < 1:
+        raise ResultSyncError("max-unmatched-ratio 必須介乎0（含）與1（不含）")
     if not args.database.exists():
         raise ResultSyncError(f"找不到候選資料庫：{args.database}")
     as_of = date.fromisoformat(args.as_of) if args.as_of else datetime.now(timezone.utc).date()
@@ -215,6 +250,7 @@ def main() -> int:
         stats = reconcile(connection, records, snapshot_sha, args.dry_run)
         if not args.dry_run:
             connection.commit()
+    quality_gate = evaluate_quality_gate(stats, args.max_unmatched_ratio)
     report = {
         "source": SOURCE_LABEL,
         "source_url": SOURCE_URL,
@@ -222,10 +258,13 @@ def main() -> int:
         "as_of": as_of.isoformat(),
         "dry_run": args.dry_run,
         "stats": stats,
+        "quality_gate": quality_gate,
     }
     args.report_out.parent.mkdir(parents=True, exist_ok=True)
     args.report_out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))
+    if not quality_gate["passed"]:
+        raise ResultSyncError(f"每日結果同步品質閘門失敗：{'；'.join(quality_gate['failures'])}")
     return 0
 
 

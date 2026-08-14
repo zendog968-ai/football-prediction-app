@@ -10,7 +10,7 @@ HKJC公開網站使用的背景GraphQL服務位於 `https://info.cld.hkjc.com/gr
 
 ## 資料治理
 
-目前每日更新採用原已使用、具ODC-BY授權的 `schochastics/football-data` `games.parquet` 公開賽果快照。每日流程將它保存為版本化輸入、計算SHA-256、產生逐筆對齊／衝突稽核，且只對既有14個模型範圍的已完成賽事重建Elo、近況、Dixon–Coles與校準模型；未對齊、歧義或比分衝突的資料不會靜默覆寫或擴張模型範圍。
+目前每日更新採用原已使用、具ODC-BY授權的 `schochastics/football-data` `games.parquet` 公開賽果快照。每日流程將它保存為版本化輸入、計算SHA-256、產生逐筆對齊／衝突稽核；ODC-BY對齊涵蓋14個兼容範圍，而南美球會盃與北美聯賽盃以既有盃賽建置器補充，完整發布仍須通過16個資料範圍的驗證。結果同步的歧義、比分衝突或超過4%的未對齊比例會阻擋重訓與發布；不會靜默覆寫或擴張模型範圍。完整候選來源比較見 [`docs/RESULT_SOURCE_DECISION.md`](../../docs/RESULT_SOURCE_DECISION.md)。
 
 ## 參考
 

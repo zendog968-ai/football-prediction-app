@@ -104,6 +104,10 @@ def main() -> None:
         sys.executable, str(PIPELINE_DIR / "daily_update.py"), "--database", str(expanded_database),
         "--input-parquet", str(parquet), "--as-of", validation_cutoff, "--report-out", str(result_sync_report),
     ])
+    completed_result_sync = json.loads(result_sync_report.read_text(encoding="utf-8"))
+    quality_gate = completed_result_sync.get("quality_gate", {})
+    if not quality_gate.get("passed"):
+        raise RuntimeError(f"結果同步品質閘門未通過：{quality_gate.get('failures', [])}")
     run([sys.executable, str(SCRIPTS_DIR / "build_match_features.py"), "--database", str(expanded_database), "--output", str(features)])
     run([sys.executable, str(PIPELINE_DIR / "train_soccer_predict_model.py"), "--input", str(features), "--output-dir", str(model_dir)])
     performance = output / "model_performance_filters.json"
@@ -125,7 +129,7 @@ def main() -> None:
             "performance": "model_performance_filters.json",
         },
         "validated_leagues": list(LEAGUES),
-        "completed_result_sync": json.loads(result_sync_report.read_text(encoding="utf-8")),
+        "completed_result_sync": completed_result_sync,
     }
     (output / "pipeline_status.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
