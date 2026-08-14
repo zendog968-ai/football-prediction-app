@@ -13,6 +13,7 @@ export type CachedUpcomingFixture = {
   recommendation: string | null;
   confidence: number;
   predictionUpdatedAt: string | null;
+  hasPrediction: boolean;
 };
 
 export type SupabaseUpcomingCache = {
@@ -87,6 +88,7 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
         recommendation: typeof prediction?.recommendation === "string" ? prediction.recommendation : null,
         confidence: Math.max(0, Math.min(5, Number(prediction?.confidence) || 0)),
         predictionUpdatedAt: typeof prediction?.updated_at === "string" ? prediction.updated_at : null,
+        hasPrediction: !!prediction && homeWin !== null && draw !== null && awayWin !== null,
       }];
     }).sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime());
     const lastSyncAt = fixtures.map(row => typeof row.updated_at === "string" ? row.updated_at : null).filter(Boolean).sort().at(-1) ?? null;
