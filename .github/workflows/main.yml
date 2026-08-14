@@ -32,14 +32,33 @@ jobs:
           cache: pip
           cache-dependency-path: supabase-sync/requirements.txt
       - run: pip install -r requirements.txt
-      - name: Run licensed data sync
+      - name: Run licensed data sync with retry
+        id: sync
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: |
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            python main.py --dry-run
-          else
-            python main.py
-          fi
+          set +e
+          mode=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then mode="--dry-run"; fi
+          for attempt in 1 2 3; do
+            echo "Sync attempt ${attempt}/3"
+            python main.py ${mode} --report-out sync-report.json
+            status=$?
+            if [ "$status" -eq 0 ]; then exit 0; fi
+            if [ "$attempt" -lt 3 ]; then sleep $((attempt * 20)); fi
+          done
+          exit "$status"
+      - name: Send research summary to Telegram
+        if: ${{ success() && inputs.dry_run != true }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scripts/telegram_alert.py --kind success --report sync-report.json
+      - name: Send failure alert to Telegram
+        if: ${{ failure() }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scripts/telegram_alert.py --kind failure --detail "GitHub Actions sync failed after three attempts. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

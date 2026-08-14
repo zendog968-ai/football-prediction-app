@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import sys
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -26,6 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--date", help="UTC fixture date in YYYY-MM-DD; defaults to today and tomorrow")
     parser.add_argument("--dry-run", action="store_true", help="Fetch and calculate but do not write Supabase")
     parser.add_argument("--max-fixtures", type=int, help="Override the safe per-run fixture cap")
+    parser.add_argument("--report-out", help="Write a non-secret JSON run report for optional notifications")
     return parser.parse_args()
 
 
@@ -40,7 +42,7 @@ def unique_fixtures(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
-def run() -> dict[str, int]:
+def run() -> dict[str, Any]:
     args = parse_args()
     settings = Settings.from_env()
     if args.max_fixtures:
@@ -56,6 +58,7 @@ def run() -> dict[str, int]:
 
     store = None if args.dry_run else SupabaseStore.from_settings(settings)
     counts = {"fixtures": 0, "odds_snapshots": 0, "ai_predictions": 0, "prediction_skipped": 0}
+    summaries: list[dict[str, Any]] = []
     now = datetime.now(UTC)
     for raw_fixture in fixtures:
         fixture_row = normalize_fixture(raw_fixture, now)
@@ -82,12 +85,28 @@ def run() -> dict[str, int]:
         if store:
             store.upsert_predictions([prediction.to_row()])
         counts["ai_predictions"] += 1
+        summaries.append({
+            "league": fixture_row.get("league_name") or "Unknown league",
+            "home_team": fixture_row["home_team"],
+            "away_team": fixture_row["away_team"],
+            "score": prediction.most_likely_score,
+            "lean": prediction.research_lean,
+            "stars": prediction.evidence_stars,
+        })
 
     LOGGER.info("Sync complete: %s", counts)
-    print(json.dumps(counts, ensure_ascii=False))
-    return counts
+    report = {"generated_at": now.isoformat(), "dry_run": args.dry_run, "counts": counts, "predictions": sorted(summaries, key=lambda item: item["stars"], reverse=True)}
+    if args.report_out:
+        with open(args.report_out, "w", encoding="utf-8") as handle:
+            json.dump(report, handle, ensure_ascii=False, indent=2)
+    print(json.dumps(report, ensure_ascii=False))
+    return report
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    run()
+    try:
+        run()
+    except Exception:
+        LOGGER.exception("Sync failed")
+        sys.exit(1)

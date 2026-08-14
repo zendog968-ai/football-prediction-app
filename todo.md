@@ -196,3 +196,7 @@
 - [x] 安全設定使用者新提供的Supabase Secret Key，完成REST授權驗證與最小fixtures寫入／讀回，且未暴露任何Key。
 - [x] 以既有Supabase fixtures、odds_snapshots與ai_predictions欄位契約調整Python同步映射，不重建或破壞使用者現有資料表。
 - [x] 使用真實API-Football fixture完成Supabase最小寫入及讀回驗證（fixture 1490376），確認資料表相容後可啟用完整每小時同步。
+- [x] 核對GitHub Actions main.yml的觸發、dry_run輸入、最小權限與Secrets契約，定義安全的手動乾跑步驟。
+- [x] 為Python同步加入Telegram研究型成功摘要與失敗警報，僅從GitHub Secrets讀取Bot Token及Chat ID。
+- [x] 為GitHub Actions同步步驟加入最多三次、具退避間隔的重試，失敗後維持非零結束並傳送警報。
+- [x] 補上工作流程與通知契約測試、完成建置驗證；待使用者於GitHub設定Telegram Chat ID後執行手動乾跑驗證。

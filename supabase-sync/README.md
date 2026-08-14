@@ -14,6 +14,7 @@
 | `football_sync/supabase_store.py` | Supabase上傳與去重。 |
 | `schema.sql` | 三張Supabase資料表與索引。 |
 | `.github/workflows/main.yml` | 每小時GitHub Actions同步。 |
+| `football_sync/telegram.py` | 可選的Telegram研究摘要及失敗警報。 |
 
 ## Supabase資料表
 
@@ -64,8 +65,14 @@ python main.py
 | `API_FOOTBALL_KEY` | API-Football伺服器端金鑰。 |
 | `SUPABASE_URL` | Supabase專案URL。 |
 | `SUPABASE_SECRET_KEY` | 已輪換的server-only Supabase Secret Key。 |
+| `TELEGRAM_BOT_TOKEN` | 可選。Telegram Bot Token，只供GitHub Actions伺服器端使用。 |
+| `TELEGRAM_CHAT_ID` | 可選。接收研究摘要與失敗警報的私人Chat ID。 |
 
-工作流程使用`0 * * * *`在每小時第0分鐘排程，並提供`workflow_dispatch`乾跑選項。GitHub說明指出排程只會在工作流程檔位於預設分支時觸發；首次部署可先從Actions介面以乾跑模式人工觸發。[2]
+工作流程使用`0 * * * *`在每小時第0分鐘排程，並提供`workflow_dispatch`乾跑選項。同步步驟遇到暫時性API連線失敗時最多重試三次，等待20秒、40秒後才進行下一次；三次都失敗會以非零狀態結束並嘗試發送Telegram警報。成功同步在非乾跑情境可選擇發送最多兩場的研究型模型摘要。GitHub說明指出排程只會在工作流程檔位於預設分支時觸發；首次部署可先從Actions介面以乾跑模式人工觸發。[2]
+
+### 手動乾跑
+
+進入GitHub儲存庫的 **Actions**，選擇 **Football Supabase Sync**，點選 **Run workflow**，保持預設分支為`main`並勾選`dry_run`，最後按 **Run workflow**。乾跑會抓取及計算但不寫入Supabase，亦不發送成功摘要；若遇到三次都無法恢復的錯誤，工作流程仍會在已設定Telegram Secrets時發送警報。需要取得私人Chat ID時，可在私人Bot聊天使用可信的Telegram ID查詢工具；不要將Bot Token或Chat ID貼進Git或聊天。
 
 ## 資料與模型限制
 
