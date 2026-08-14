@@ -8,6 +8,7 @@ import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { handleScheduledResearch, handleTelegramWebhook } from "../telegramResearch";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -36,6 +37,16 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);
   registerOAuthRoutes(app);
+  // External Telegram updates are authenticated with Telegram's webhook secret.
+  app.post("/api/integrations/telegram/webhook", (req, res) => {
+    void handleTelegramWebhook(req, res).catch(error => {
+      res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    });
+  });
+  // Heartbeat callbacks authenticate their cron identity inside the handler.
+  app.post("/api/scheduled/research-settlement", (req, res) => void handleScheduledResearch(req, res, "settlement"));
+  app.post("/api/scheduled/research-day", (req, res) => void handleScheduledResearch(req, res, "day_digest"));
+  app.post("/api/scheduled/research-evening", (req, res) => void handleScheduledResearch(req, res, "evening_digest"));
   // tRPC API
   app.use(
     "/api/trpc",

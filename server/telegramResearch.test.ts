@@ -1,0 +1,52 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { describeMarketMovement, RESEARCH_SCHEDULES, settlementForScores, verifyApiFootballReadiness } from "./telegramResearch";
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("研究型盤口結算", () => {
+  it("正確結算全盤亞洲讓球與大小球，不把走盤算作勝或負", () => {
+    expect(settlementForScores("Asian Handicap", "Home -0.5", 2, 1)).toBe("win");
+    expect(settlementForScores("Asian Handicap", "Away +0", 1, 1)).toBe("push");
+    expect(settlementForScores("Goals Over/Under", "Over 2.5", 2, 1)).toBe("win");
+    expect(settlementForScores("Goals Over/Under", "Under 2.5", 2, 1)).toBe("loss");
+  });
+
+  it("正確處理四分之一讓球的半贏與半輸", () => {
+    expect(settlementForScores("Asian Handicap", "Home -0.25", 1, 1)).toBe("half_loss");
+    expect(settlementForScores("Asian Handicap", "Home +0.25", 1, 1)).toBe("half_win");
+  });
+
+  it("拒絕未記錄完整格式的市場資料，避免杜撰結算", () => {
+    expect(settlementForScores("Asian Handicap", "Home to win", 2, 1)).toBe("void");
+    expect(settlementForScores("Unknown", "Over 2.5", 3, 0)).toBe("void");
+  });
+});
+
+describe("Telegram研究排程", () => {
+  it("以UTC六欄位cron對應香港時間10:30、11:00及18:30", () => {
+    expect(RESEARCH_SCHEDULES).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "settlement", cron: "0 30 2 * * *", path: "/api/scheduled/research-settlement" }),
+      expect.objectContaining({ kind: "day_digest", cron: "0 0 3 * * *", path: "/api/scheduled/research-day" }),
+      expect.objectContaining({ kind: "evening_digest", cron: "0 30 10 * * *", path: "/api/scheduled/research-evening" }),
+    ]));
+  });
+});
+
+describe("盤路與資料品質閘門", () => {
+  it("分別呈現初盤基準建立中與同一博彩公司初盤至最新盤變動", () => {
+    expect(describeMarketMovement({ marketName: "Asian Handicap", selection: "Home -0.5", decimalOdds: 1.9, capturedAt: new Date() })).toBe("初盤基準建立中");
+    expect(describeMarketMovement({ marketName: "Goals Over/Under", selection: "Over 2.5", decimalOdds: 1.82, capturedAt: new Date(), openingSelection: "Over 2.5", openingOdds: 1.95, openingCapturedAt: new Date("2026-08-14T00:00:00Z") })).toBe("初盤 Over 2.5 @1.95 → 最新 Over 2.5 @1.82");
+  });
+
+  it("在API-Football帳戶未啟用時停止於健康閘門，不再請求任何聯賽盤口", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ response: { subscription: { active: false }, requests: { limit_day: 0 } }, errors: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(verifyApiFootballReadiness()).rejects.toThrow("研究摘要已安全停止");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/status");
+  });
+});

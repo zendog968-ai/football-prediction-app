@@ -6,7 +6,8 @@ import { systemRouter } from "./_core/systemRouter";
 import { getCupOverview, getEuropaOverview, getLeagueMetadata, getPrediction, getTeams, hasValidProbabilityDistribution } from "./prediction";
 import { getPerformanceOverview, hasValidPerformanceOverview } from "./performance";
 import { cruzeiroFlamengoSpotlight, hasValidSpotlight } from "./spotlight";
-import { publicProcedure, router } from "./_core/trpc";
+import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { configureTelegramWebhook, ensureResearchSchedules, getResearchNotificationStatus } from "./telegramResearch";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -106,6 +107,23 @@ export const appRouter = router({
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "焦點賽事情境資料驗證失敗。" });
       }
       return cruzeiroFlamengoSpotlight;
+    }),
+  }),
+  telegramResearch: router({
+    status: protectedProcedure.query(async () => getResearchNotificationStatus()),
+    configureWebhook: protectedProcedure.mutation(async ({ ctx }) => {
+      try {
+        return await configureTelegramWebhook(ctx.req);
+      } catch (error) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "無法設定Telegram webhook。" });
+      }
+    }),
+    enableSchedules: protectedProcedure.mutation(async ({ ctx }) => {
+      try {
+        return await ensureResearchSchedules(ctx.req);
+      } catch (error) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "無法啟用研究排程。" });
+      }
     }),
   }),
 

@@ -38,6 +38,8 @@ const forecastResult = {
 };
 
 const mutationSpy = vi.fn();
+const telegramWebhookSpy = vi.fn();
+const telegramSchedulesSpy = vi.fn();
 const mockState = vi.hoisted(() => ({ teamsLoading: false, forecastError: null as { message: string } | null }));
 const expandedLeagueTeams = vi.hoisted(() => ({
   MLS: ["Atlanta United", "Los Angeles Galaxy"],
@@ -115,6 +117,22 @@ vi.mock("@/lib/trpc", () => ({
         }),
       },
     },
+    telegramResearch: {
+      status: {
+        useQuery: () => ({
+          data: { activeSubscribers: 1, schedules: [{ kind: "settlement", isEnabled: true, taskUid: "task-settlement", lastError: null }] },
+          error: null,
+          isFetching: false,
+          refetch: vi.fn(),
+        }),
+      },
+      configureWebhook: {
+        useMutation: () => ({ mutate: telegramWebhookSpy, isPending: false, error: null }),
+      },
+      enableSchedules: {
+        useMutation: () => ({ mutate: telegramSchedulesSpy, isPending: false, error: null }),
+      },
+    },
   },
 }));
 
@@ -126,6 +144,8 @@ describe("Home prediction workflow", () => {
   beforeEach(() => {
     sessionStorage.clear();
     mutationSpy.mockClear();
+    telegramWebhookSpy.mockClear();
+    telegramSchedulesSpy.mockClear();
     mockState.teamsLoading = false;
     mockState.forecastError = null;
   });
@@ -334,6 +354,16 @@ describe("Home prediction workflow", () => {
     expect(transparency.textContent).toContain("data-20260813T224404Z-86a3231");
     expect(transparency.textContent).toContain("北美聯賽盃");
     expect(transparency.textContent).toContain("已完場樣本");
+  });
+
+  it("renders the Telegram research operations card with research-only guardrails", () => {
+    render(<Home />);
+    const operations = screen.getByTestId("telegram-research-settings");
+    expect(operations.textContent).toContain("研究通知與盤口監控");
+    expect(operations.textContent).toContain("10:30、11:00及18:30");
+    expect(operations.textContent).toContain("並非投注或資金建議");
+    expect(screen.getByRole("button", { name: "設定Webhook" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "啟用排程" })).toBeTruthy();
   });
 
   it("calculates EV research statistics only after three valid decimal odds are supplied", async () => {
