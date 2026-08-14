@@ -198,6 +198,7 @@ export default function Home() {
   const europaQuery = trpc.prediction.europa.useQuery(undefined, { enabled: leagueCode === "UEL" });
   const cupQuery = trpc.prediction.cup.useQuery({ leagueCode: leagueCode === "SUD" ? "SUD" : "LCUP" }, { enabled: leagueCode === "SUD" || leagueCode === "LCUP" });
   const spotlightQuery = trpc.spotlight.cruzeiroFlamengo.useQuery();
+  const supabaseUpcomingQuery = trpc.prediction.upcomingCache.useQuery(undefined, { refetchInterval: 30_000, refetchOnWindowFocus: true });
   const notificationStatusQuery = trpc.telegramResearch.status.useQuery(undefined, { enabled: false, retry: false });
   const configureTelegramWebhook = trpc.telegramResearch.configureWebhook.useMutation({ onSuccess: () => notificationStatusQuery.refetch() });
   const enableResearchSchedules = trpc.telegramResearch.enableSchedules.useMutation({ onSuccess: () => notificationStatusQuery.refetch() });
@@ -269,6 +270,11 @@ export default function Home() {
         </section>
 
         {spotlightQuery.data && <div className="mt-8"><MatchSpotlightCard match={spotlightQuery.data} /></div>}
+
+        <section className="mt-8 rounded-[2rem] border border-violet-100 bg-violet-50/60 p-6 shadow-[0_14px_40px_rgba(15,23,42,0.04)] lg:p-8" data-testid="supabase-cache-board">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.2em] text-violet-700"><Database size={14} />Supabase cache</div><h2 className="mt-2 font-serif text-3xl text-[#0d1d2a]">未來24小時同步研究快取</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">頁面優先讀取伺服器端Supabase快取，並每30秒自動重新核對。只有已同步賽事與已保存研究模型會顯示；快取不可用時不以舊資料推測。</p></div><div className="rounded-2xl border border-violet-200 bg-white px-4 py-3 text-xs leading-5 text-slate-600"><strong className="block text-violet-800">同步狀態</strong>{supabaseUpcomingQuery.isLoading ? "載入快取中…" : supabaseUpcomingQuery.data?.available ? `已同步｜${timestampLabel(supabaseUpcomingQuery.data.loadedAt)}` : "快取暫時不可用"}</div></div>
+          {supabaseUpcomingQuery.data?.available && supabaseUpcomingQuery.data.fixtures.length > 0 ? <div className="mt-5 grid gap-3 lg:grid-cols-2">{supabaseUpcomingQuery.data.fixtures.slice(0, 4).map(item => <article key={item.fixtureId} className="rounded-2xl border border-violet-100 bg-white p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-[10px] font-bold uppercase tracking-[.14em] text-violet-600">{item.leagueName}</div><h3 className="mt-1 text-sm font-bold text-slate-800">{item.homeTeam} vs {item.awayTeam}</h3><p className="mt-1 text-xs text-slate-500">{timestampLabel(item.eventTime)}</p></div><span className="rounded-full bg-violet-100 px-2.5 py-1 text-[10px] font-bold text-violet-800">{"⭐".repeat(item.confidence) || "資料不足"}</span></div><div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs"><span className="rounded-xl bg-emerald-50 px-2 py-2 text-emerald-800">🟢 {percent(item.homeWin)}</span><span className="rounded-xl bg-amber-50 px-2 py-2 text-amber-800">🟡 {percent(item.draw)}</span><span className="rounded-xl bg-rose-50 px-2 py-2 text-rose-800">🔴 {percent(item.awayWin)}</span></div><p className="mt-3 text-xs text-slate-600">最可能比分：{item.predictedScore || "資料不足"}｜{item.recommendation || "研究傾向資料不足"}</p></article>)}</div> : <p className="mt-5 rounded-2xl border border-dashed border-violet-200 bg-white/70 p-4 text-sm leading-6 text-slate-500">{supabaseUpcomingQuery.data?.available ? "未來24小時暫無具同步模型資料的賽事。" : supabaseUpcomingQuery.data?.reason || "快取資料確認中。"}</p>}
+        </section>
 
         <section className="mt-8 grid gap-8 lg:grid-cols-[1.05fr_.95fr]">
           <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-[0_14px_40px_rgba(15,23,42,0.05)] lg:p-8">

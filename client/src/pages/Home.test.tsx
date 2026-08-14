@@ -106,6 +106,17 @@ vi.mock("@/lib/trpc", () => ({
           error: null,
         }),
       },
+      upcomingCache: {
+        useQuery: () => ({
+          data: {
+            source: "Supabase cache",
+            loadedAt: "2026-08-15T10:00:00Z",
+            available: true,
+            fixtures: [{ fixtureId: 9001, leagueName: "MLS", eventTime: "2026-08-15T20:00:00Z", homeTeam: "Cache Home", awayTeam: "Cache Away", homeWin: 0.62, draw: 0.21, awayWin: 0.17, predictedScore: "2-1", recommendation: "研究傾向：主勝", confidence: 4, predictionUpdatedAt: "2026-08-15T10:00:00Z" }],
+          },
+          isLoading: false,
+        }),
+      },
     },
     spotlight: {
       cruzeiroFlamengo: {
@@ -174,6 +185,14 @@ describe("Home prediction workflow", () => {
     expect(screen.getByTestId("lean-summary").textContent).toContain("高風險");
     expect(screen.getByTestId("lean-summary").textContent).toContain("Dixon–Coles資料不足");
     expect(JSON.parse(sessionStorage.getItem("aurelia-football-session-history") || "[]")).toHaveLength(1);
+  });
+
+  it("優先顯示Supabase快取的未來24小時研究資料與機率色彩標示", () => {
+    render(<Home />);
+    expect(screen.getByTestId("supabase-cache-board").textContent).toContain("Supabase cache");
+    expect(screen.getByText("Cache Home vs Cache Away")).toBeTruthy();
+    expect(screen.getByTestId("supabase-cache-board").textContent).toContain("🟢 62.0%");
+    expect(screen.getByTestId("supabase-cache-board").textContent).toContain("⭐⭐⭐⭐");
   });
 
   it("clears stored session history", async () => {

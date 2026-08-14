@@ -8,6 +8,7 @@ import { getPerformanceOverview, hasValidPerformanceOverview } from "./performan
 import { cruzeiroFlamengoSpotlight, hasValidSpotlight } from "./spotlight";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { configureTelegramWebhook, ensureResearchSchedules, getResearchNotificationStatus } from "./telegramResearch";
+import { getSupabaseUpcomingCache } from "./supabaseCache";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -82,6 +83,7 @@ export const appRouter = router({
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error instanceof Error ? error.message : "無法載入盃賽公開賽程。" });
       }
     }),
+    upcomingCache: publicProcedure.query(async () => getSupabaseUpcomingCache()),
   }),
   performance: router({
     overview: publicProcedure.input(z.object({

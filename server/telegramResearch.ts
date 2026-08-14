@@ -15,6 +15,7 @@ import { ENV } from "./_core/env";
 import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
 import { sdk } from "./_core/sdk";
 import { getPrediction, getTeams, type PredictionResult } from "./prediction";
+import { getSupabaseUpcomingCache, type CachedUpcomingFixture } from "./supabaseCache";
 
 export type ResearchWindow = "day" | "evening" | "settlement";
 export type ScheduleKind = "settlement" | "day_digest" | "evening_digest";
@@ -112,11 +113,45 @@ export const TELEGRAM_HELP_MESSAGE = [
   "/start — 啟用研究通知。",
   "/status — 查閱訂閱狀態、Heartbeat任務與API剩餘額度。",
   "/trend <fixture ID> 或 /trend 主隊 vs 客隊 — 查詢已保存盤口走勢。",
+  "/upcoming — 查詢未來24小時內已同步、證據充分的研究賽事。",
+  "/report — 顯示最新24小時研究摘要（與/upcoming相同）。",
   "/stop — 停止研究通知；可隨時以/start重新啟用。",
   "/help — 顯示本指令說明。",
   "",
   "研究摘要只使用已驗證資料，並可能附上同一盤口的初盤至最新快照走勢圖；資料不足或盤口線變更時不會推測。所有內容只供模型與戰術研究，並非投注或資金建議。",
 ].join("\n");
+
+export function probabilityBars(values: { homeWin: number; draw: number; awayWin: number }): string {
+  const bar = (probability: number) => "█".repeat(Math.round(probability * 10)) + "░".repeat(Math.max(0, 10 - Math.round(probability * 10)));
+  return [
+    `🟢 主勝 ${bar(values.homeWin)} ${(values.homeWin * 100).toFixed(1)}%`,
+    `🟡 和局 ${bar(values.draw)} ${(values.draw * 100).toFixed(1)}%`,
+    `🔴 客勝 ${bar(values.awayWin)} ${(values.awayWin * 100).toFixed(1)}%`,
+  ].join("\n");
+}
+
+export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[]): string {
+  const qualified = fixtures.filter(item => item.confidence >= 3).slice(0, 2);
+  if (!qualified.length) return "未來24小時暫無已同步且證據充分的研究賽事。資料不足時不會推測或列出方向。";
+  return [
+    "Aurelia Football｜未來24小時研究摘要",
+    "",
+    ...qualified.map((item, index) => [
+      `${index + 1}. ${item.leagueName}｜${item.homeTeam} vs ${item.awayTeam}`,
+      `開賽：${new Date(item.eventTime).toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong", hour12: false })}`,
+      probabilityBars({ homeWin: item.homeWin, draw: item.draw, awayWin: item.awayWin }),
+      `最可能比分：${item.predictedScore || "資料不足"}｜${item.recommendation || "研究傾向資料不足"}｜證據 ${"⭐".repeat(item.confidence) || "資料不足"}`,
+    ].join("\n")).flatMap((entry, index) => index === 0 ? [entry] : ["", entry]),
+    "",
+    "只使用已同步的研究資料；並非投注或資金建議。",
+  ].join("\n");
+}
+
+async function telegramUpcoming(): Promise<string> {
+  const cached = await getSupabaseUpcomingCache();
+  if (!cached.available) return "Supabase研究快取暫時不可用；系統不會以舊資料或推測值替代，請稍後再試。";
+  return formatCachedUpcoming(cached.fixtures);
+}
 
 function requireSecret(value: string, label: string): string {
   if (!value) throw new Error(`${label}尚未設定。`);
@@ -496,7 +531,8 @@ function formatCandidate(candidate: Candidate): string {
   return [
     `${candidate.homeTeam} vs ${candidate.awayTeam}`,
     `開賽：${candidate.kickoffAt.toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong", hour12: false })}`,
-    `數據傾向：${lean.label}（${(lean.probability * 100).toFixed(1)}%）；風險：${risk}。`,
+    probabilityBars({ homeWin: candidate.prediction.probabilities.home_win, draw: candidate.prediction.probabilities.draw, awayWin: candidate.prediction.probabilities.away_win }),
+    `數據傾向：${lean.label}（${(lean.probability * 100).toFixed(1)}%）；風險：${risk}｜證據 ${"⭐".repeat(lean.risk_level === "low" ? 5 : lean.risk_level === "medium" ? 3 : 1)}。`,
     markets,
     `${reasons}${limitation}`,
   ].join("\n");
@@ -647,6 +683,8 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     await sendTelegramMessage(String(chatId), TELEGRAM_HELP_MESSAGE);
   } else if (text === "/trend") {
     await sendTelegramMessage(String(chatId), await telegramTrendForRequest(message?.text));
+  } else if (text === "/upcoming" || text === "/report") {
+    await sendTelegramMessage(String(chatId), await telegramUpcoming());
   } else if (text === "/status") {
     await sendTelegramMessage(String(chatId), await telegramStatusForChat(String(chatId)));
   } else if (text === "/stop") {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assessMarketAnomaly, describeMarketMovement, formatTelegramStatus, normalizeTelegramCommand, parseTrendRequest, renderOddsTrend, RESEARCH_SCHEDULES, settlementForScores, TELEGRAM_HELP_MESSAGE, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, formatCachedUpcoming, formatTelegramStatus, normalizeTelegramCommand, parseTrendRequest, probabilityBars, renderOddsTrend, RESEARCH_SCHEDULES, settlementForScores, TELEGRAM_HELP_MESSAGE, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -37,9 +37,35 @@ describe("Telegram系統指令", () => {
     expect(TELEGRAM_HELP_MESSAGE).toContain("/start");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/status");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/trend");
+    expect(TELEGRAM_HELP_MESSAGE).toContain("/upcoming");
+    expect(TELEGRAM_HELP_MESSAGE).toContain("/report");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/stop");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/help");
     expect(TELEGRAM_HELP_MESSAGE).toContain("並非投注或資金建議");
+  });
+
+  it("以視覺化主和客長條及星級呈現已同步的未來研究資料", () => {
+    const bars = probabilityBars({ homeWin: 0.62, draw: 0.21, awayWin: 0.17 });
+    expect(bars).toContain("🟢 主勝");
+    expect(bars).toContain("🟡 和局");
+    expect(bars).toContain("🔴 客勝");
+    const message = formatCachedUpcoming([{
+      fixtureId: 101,
+      leagueName: "MLS",
+      eventTime: "2026-08-15T20:00:00Z",
+      homeTeam: "Example Home",
+      awayTeam: "Example Away",
+      homeWin: 0.62,
+      draw: 0.21,
+      awayWin: 0.17,
+      predictedScore: "2-1",
+      recommendation: "研究傾向：主勝",
+      confidence: 4,
+      predictionUpdatedAt: "2026-08-15T10:00:00Z",
+    }]);
+    expect(message).toContain("Example Home vs Example Away");
+    expect(message).toContain("⭐⭐⭐⭐");
+    expect(message).toContain("並非投注或資金建議");
   });
 
   it("顯示訂閱、任務與不暴露憑證的API剩餘額度", () => {
