@@ -51,6 +51,17 @@ export type PredictionResult = {
     dc_expected_home_goals: number | null;
     dc_expected_away_goals: number | null;
   };
+  lean: PredictionLean;
+};
+
+export type PredictionLean = {
+  outcome: "home_win" | "draw" | "away_win";
+  label: string;
+  team: string;
+  probability: number;
+  risk_level: "low" | "medium" | "high";
+  reasons: string[];
+  limitations: string[];
 };
 
 export type LeagueMetadata = {
@@ -262,6 +273,40 @@ export async function getTeams(request: Request, leagueCode: string): Promise<st
   return (JSON.parse(stdout) as LeagueMetadata).teams;
 }
 
+export function deriveResearchLean(
+  result: Pick<PredictionResult, "home_team" | "away_team" | "probabilities" | "diagnostics" | "selected_features">,
+): PredictionLean {
+  const candidates = [
+    { outcome: "home_win" as const, label: "主勝傾向", team: result.home_team, probability: result.probabilities.home_win },
+    { outcome: "draw" as const, label: "和局傾向", team: "和局", probability: result.probabilities.draw },
+    { outcome: "away_win" as const, label: "客勝傾向", team: result.away_team, probability: result.probabilities.away_win },
+  ].sort((left, right) => right.probability - left.probability);
+  const selected = candidates[0]!;
+  const runnerUp = candidates[1]!;
+  const margin = selected.probability - runnerUp.probability;
+  const feature = result.selected_features;
+  const reasons = [`校準三分類模型中${selected.label}的機率最高（${(selected.probability * 100).toFixed(1)}%）。`];
+  if (Math.abs(feature.elo_diff_pre) >= 1) {
+    const strongerTeam = feature.elo_diff_pre >= 0 ? result.home_team : result.away_team;
+    reasons.push(`賽前Elo方向偏向${strongerTeam}（差距${Math.abs(feature.elo_diff_pre).toFixed(1)}）。`);
+  }
+  const formGap = feature.home_recent5_win_rate - feature.away_recent5_win_rate;
+  if (Math.abs(formGap) >= 0.05) {
+    const strongerFormTeam = formGap >= 0 ? result.home_team : result.away_team;
+    reasons.push(`近五場勝率方向偏向${strongerFormTeam}（差距${(Math.abs(formGap) * 100).toFixed(1)}個百分點）。`);
+  }
+  const limitations: string[] = [];
+  if (!result.diagnostics.dc_available) limitations.push("Dixon–Coles資料不足；Lean只反映已校準的勝平負機率，不延伸為隊伍專屬入球結論。");
+  if (result.diagnostics.historical_matches_used < 300) limitations.push(`可用歷史樣本為${result.diagnostics.historical_matches_used}場，屬低樣本情境。`);
+  if (margin < 0.08) limitations.push(`最高與次高機率只相差${(margin * 100).toFixed(1)}個百分點，方向辨識度有限。`);
+  const risk_level: PredictionLean["risk_level"] = limitations.length > 0
+    ? "high"
+    : margin < 0.15 || result.diagnostics.historical_matches_used < 1000
+      ? "medium"
+      : "low";
+  return { ...selected, risk_level, reasons, limitations };
+}
+
 export function validateInferenceScope(
   input: { leagueCode: string; homeTeam: string; awayTeam: string },
   leagueTeams: string[],
@@ -299,7 +344,8 @@ export async function getPrediction(
       "--model", modelPath,
       "--json-out", outputPath,
     ]);
-    return JSON.parse(await fs.readFile(outputPath, "utf8")) as PredictionResult;
+    const prediction = JSON.parse(await fs.readFile(outputPath, "utf8")) as Omit<PredictionResult, "lean">;
+    return { ...prediction, lean: deriveResearchLean(prediction) };
   } finally {
     await fs.unlink(outputPath).catch(() => undefined);
   }

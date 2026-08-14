@@ -14,8 +14,8 @@ const forecastResult = {
   diagnostics: {
     historical_matches_used: 1900,
     latest_historical_match: "2024-12-08 19:00:00",
-    dc_history_match_count: 380,
-    dc_available: true,
+    dc_history_match_count: 0,
+    dc_available: false,
   },
   selected_features: {
     home_elo_pre: 1625.1,
@@ -25,6 +25,15 @@ const forecastResult = {
     away_recent5_win_rate: 0.6,
     dc_expected_home_goals: 1.57,
     dc_expected_away_goals: 1.04,
+  },
+  lean: {
+    outcome: "home_win" as const,
+    label: "主勝傾向",
+    team: "Palmeiras",
+    probability: 0.4462,
+    risk_level: "high" as const,
+    reasons: ["校準三分類模型中主勝傾向的機率最高（44.6%）。", "賽前Elo方向偏向Palmeiras（差距21.5）。"],
+    limitations: ["Dixon–Coles資料不足；Lean只反映已校準的勝平負機率，不延伸為隊伍專屬入球結論。"],
   },
 };
 
@@ -141,6 +150,9 @@ describe("Home prediction workflow", () => {
     expect(mutationSpy).toHaveBeenCalledWith({ leagueCode: "BRA1", homeTeam: "Palmeiras", awayTeam: "Flamengo RJ" });
     expect((await screen.findAllByText("44.6%")).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Palmeiras vs Flamengo RJ")).toBeTruthy();
+    expect(screen.getByTestId("lean-summary").textContent).toContain("主勝傾向 · Palmeiras");
+    expect(screen.getByTestId("lean-summary").textContent).toContain("高風險");
+    expect(screen.getByTestId("lean-summary").textContent).toContain("Dixon–Coles資料不足");
     expect(JSON.parse(sessionStorage.getItem("aurelia-football-session-history") || "[]")).toHaveLength(1);
   });
 

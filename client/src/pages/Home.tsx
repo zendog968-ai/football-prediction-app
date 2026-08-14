@@ -40,6 +40,15 @@ type Forecast = {
     dc_expected_home_goals: number | null;
     dc_expected_away_goals: number | null;
   };
+  lean?: {
+    outcome: "home_win" | "draw" | "away_win";
+    label: string;
+    team: string;
+    probability: number;
+    risk_level: "low" | "medium" | "high";
+    reasons: string[];
+    limitations: string[];
+  };
 };
 
 type HistoryItem = Forecast & { id: string; savedAt: number };
@@ -150,6 +159,15 @@ function ProbabilityCard({ label, team, value, tone }: { label: string; team: st
   );
 }
 
+function LeanSummary({ lean }: { lean: NonNullable<Forecast["lean"]> }) {
+  const risk = lean.risk_level === "high"
+    ? { label: "高風險", className: "border-rose-200/25 bg-rose-300/10 text-rose-100" }
+    : lean.risk_level === "medium"
+      ? { label: "中等風險", className: "border-amber-200/25 bg-amber-200/10 text-amber-100" }
+      : { label: "較低風險", className: "border-emerald-200/25 bg-emerald-300/10 text-emerald-100" };
+  return <section className="rounded-3xl border border-emerald-300/25 bg-emerald-400/[0.08] p-5" data-testid="lean-summary"><div className="flex items-start justify-between gap-3"><div><div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.18em] text-emerald-200"><Sparkles size={14} />數據傾向（Lean）</div><h3 className="mt-2 font-serif text-2xl text-white">{lean.label} · {lean.team}</h3><p className="mt-1 text-xs text-emerald-100/80">最高校準機率：{percent(lean.probability)}</p></div><span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-bold ${risk.className}`}>{risk.label}</span></div><ul className="mt-4 space-y-1.5 text-xs leading-5 text-slate-200">{lean.reasons.slice(0, 3).map(reason => <li key={reason}>• {reason}</li>)}</ul>{lean.limitations.length > 0 && <div className="mt-4 rounded-2xl border border-white/10 bg-black/10 px-3 py-2 text-xs leading-5 text-slate-300">{lean.limitations.join(" ")}</div>}<p className="mt-4 text-[11px] leading-5 text-slate-400">Lean是最高校準機率的研究方向，並非投注、資金或結果保證。</p></section>;
+}
+
 function Metric({ label, home, away, formatter = (value: number) => value.toFixed(0) }: { label: string; home: number | null; away: number | null; formatter?: (value: number) => string }) {
   return <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 py-3 text-sm"><span className="text-right font-semibold text-slate-800">{home === null ? "—" : formatter(home)}</span><span className="min-w-26 text-center text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{label}</span><span className="font-semibold text-slate-800">{away === null ? "—" : formatter(away)}</span></div>;
 }
@@ -233,7 +251,7 @@ export default function Home() {
             <div className="relative flex h-full flex-col">
               <div className="flex items-start justify-between gap-4"><div><div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-200"><BarChart3 size={14} />預測結果</div><h2 className="mt-3 font-serif text-3xl">{display ? `${display.home_team} vs ${display.away_team}` : "等待你的對戰組合"}</h2></div><div className="rounded-xl border border-white/10 bg-white/5 p-2 text-emerald-300"><ShieldCheck size={19} /></div></div>
               {display ? <div className="mt-7 grid gap-3"><ProbabilityCard label="主勝" team={display.home_team} value={display.probabilities.home_win} tone="emerald" /><ProbabilityCard label="和局" team="平局" value={display.probabilities.draw} tone="slate" /><ProbabilityCard label="客勝" team={display.away_team} value={display.probabilities.away_win} tone="amber" /></div> : <div className="my-auto py-10"><div className="grid h-18 w-18 place-items-center rounded-[1.5rem] border border-white/10 bg-white/[0.04] text-amber-200"><Target size={30} /></div><p className="mt-5 max-w-sm text-sm leading-7 text-slate-300">選定兩隊後，系統會展開校準後的賽果分佈與特徵訊號。</p><div className="mt-7 space-y-3 rounded-3xl border border-white/[0.07] bg-white/[0.025] p-4"><div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[.18em] text-slate-500"><span>Calibration field</span><span>H · D · A</span></div><div className="space-y-2.5">{[["主勝", "w-3/5", "bg-emerald-400"], ["和局", "w-[34%]", "bg-slate-400"], ["客勝", "w-[47%]", "bg-amber-300"]].map(([label, width, color]) => <div key={label} className="flex items-center gap-3"><span className="w-7 text-[10px] font-bold text-slate-500">{label}</span><div className="h-1 flex-1 overflow-hidden rounded-full bg-white/10"><div className={`h-full rounded-full ${width} ${color}`} /></div></div>)}</div></div></div>}
-              {display && <><div className="mt-5 flex items-center gap-2 text-xs text-slate-400"><Clock3 size={14} />歷史資料截點：{display.prediction_as_of}</div><div className="mt-4 rounded-2xl border border-amber-200/20 bg-amber-200/[0.06] p-4 text-xs leading-6 text-slate-300" data-testid="research-disclaimer"><div className="flex items-center gap-2 font-bold text-amber-100"><BadgeInfo size={14} />機率研究與模型賠率</div><p className="mt-2">模型賠率 = 1 ÷ 機率。主勝 {modelOdds(display.probabilities.home_win)}、和局 {modelOdds(display.probabilities.draw)}、客勝 {modelOdds(display.probabilities.away_win)}。</p><p className="mt-2 text-slate-400">下方市場賠率比較只供模型效能驗證與統計學研究，並非市場賠率推薦、價值判斷或任何投注與資金建議。</p></div></>}
+              {display && <>{display.lean && <div className="mt-5"><LeanSummary lean={display.lean} /></div>}<div className="mt-5 flex items-center gap-2 text-xs text-slate-400"><Clock3 size={14} />歷史資料截點：{display.prediction_as_of}</div><div className="mt-4 rounded-2xl border border-amber-200/20 bg-amber-200/[0.06] p-4 text-xs leading-6 text-slate-300" data-testid="research-disclaimer"><div className="flex items-center gap-2 font-bold text-amber-100"><BadgeInfo size={14} />機率研究、Lean與模型賠率</div><p className="mt-2">Lean由最高校準機率產生；模型賠率 = 1 ÷ 機率。主勝 {modelOdds(display.probabilities.home_win)}、和局 {modelOdds(display.probabilities.draw)}、客勝 {modelOdds(display.probabilities.away_win)}。</p><p className="mt-2 text-slate-400">Lean、模型賠率與下方市場比較只供模型效能驗證與統計學研究，並非市場賠率推薦、價值判斷或任何投注與資金建議。</p></div></>}
             </div>
           </div>
         </section>

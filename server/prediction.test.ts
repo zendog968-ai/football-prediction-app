@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasValidProbabilityDistribution, PredictionScopeError, type PredictionResult, validateInferenceScope } from "./prediction";
+import { deriveResearchLean, hasValidProbabilityDistribution, PredictionScopeError, type PredictionResult, validateInferenceScope } from "./prediction";
 
 const validResult: PredictionResult = {
   prediction_as_of: "2025-05-25 20:00:01",
@@ -23,6 +23,15 @@ const validResult: PredictionResult = {
     dc_expected_home_goals: 1.52,
     dc_expected_away_goals: 0.96,
   },
+  lean: {
+    outcome: "home_win",
+    label: "主勝傾向",
+    team: "Arsenal",
+    probability: 0.48,
+    risk_level: "medium",
+    reasons: ["測試用研究傾向。"],
+    limitations: [],
+  },
 };
 
 describe("prediction probability guard", () => {
@@ -35,6 +44,26 @@ describe("prediction probability guard", () => {
       ...validResult,
       probabilities: { home_win: 0.48, draw: 0.27, away_win: 0.35 },
     })).toBe(false);
+  });
+});
+
+describe("research lean contract", () => {
+  it("selects the largest calibrated outcome and makes DC gaps a high-risk limitation", () => {
+    const lean = deriveResearchLean({
+      ...validResult,
+      diagnostics: { ...validResult.diagnostics, historical_matches_used: 203, dc_history_match_count: 0, dc_available: false },
+    });
+
+    expect(lean).toMatchObject({ outcome: "home_win", label: "主勝傾向", team: "Arsenal", risk_level: "high" });
+    expect(lean.reasons[0]).toContain("機率最高");
+    expect(lean.limitations.join(" ")).toContain("Dixon–Coles資料不足");
+  });
+
+  it("does not change a valid probability distribution when producing a lean", () => {
+    const lean = deriveResearchLean(validResult);
+
+    expect(lean.probability).toBe(validResult.probabilities.home_win);
+    expect(hasValidProbabilityDistribution(validResult)).toBe(true);
   });
 });
 
