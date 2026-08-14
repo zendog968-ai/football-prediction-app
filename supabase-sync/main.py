@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""Synchronize licensed football fixtures, odds snapshots, and Poisson research outputs.
+
+This runner intentionally does not issue betting or funding instructions.  It saves
+probabilities, evidence strength, and data-quality warnings for research use only.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+from football_sync.api_football import ApiFootballClient, normalize_fixture, normalize_odds
+from football_sync.config import Settings
+from football_sync.poisson import InsufficientHistory, predict_fixture
+from football_sync.supabase_store import SupabaseStore
+
+LOGGER = logging.getLogger("football_sync")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--date", help="UTC fixture date in YYYY-MM-DD; defaults to today and tomorrow")
+    parser.add_argument("--dry-run", action="store_true", help="Fetch and calculate but do not write Supabase")
+    parser.add_argument("--max-fixtures", type=int, help="Override the safe per-run fixture cap")
+    return parser.parse_args()
+
+
+def unique_fixtures(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[int] = set()
+    result: list[dict[str, Any]] = []
+    for item in items:
+        fixture_id = item.get("fixture", {}).get("id")
+        if isinstance(fixture_id, int) and fixture_id not in seen:
+            seen.add(fixture_id)
+            result.append(item)
+    return result
+
+
+def run() -> dict[str, int]:
+    args = parse_args()
+    settings = Settings.from_env()
+    if args.max_fixtures:
+        settings = settings.with_max_fixtures(args.max_fixtures)
+    client = ApiFootballClient(settings.api_football_key)
+    today = datetime.now(UTC).date()
+    dates = [args.date] if args.date else [today.isoformat(), (today + timedelta(days=1)).isoformat()]
+    scheduled = [fixture for date in dates for fixture in client.fixtures_by_date(date)]
+    live = client.live_fixtures()
+    fixtures = unique_fixtures(scheduled + live)
+    fixtures = [fixture for fixture in fixtures if fixture.get("league", {}).get("id") in settings.league_ids]
+    fixtures = fixtures[: settings.max_fixtures]
+
+    store = None if args.dry_run else SupabaseStore.from_settings(settings)
+    counts = {"fixtures": 0, "odds_snapshots": 0, "ai_predictions": 0, "prediction_skipped": 0}
+    now = datetime.now(UTC)
+    for raw_fixture in fixtures:
+        fixture_row = normalize_fixture(raw_fixture, now)
+        if store:
+            store.upsert_fixtures([fixture_row])
+        counts["fixtures"] += 1
+
+        odds_rows = normalize_odds(client.fixture_odds(fixture_row["api_fixture_id"]), fixture_row, now)
+        if odds_rows:
+            if store:
+                store.insert_odds_snapshots(odds_rows)
+            counts["odds_snapshots"] += len(odds_rows)
+
+        if fixture_row["status"] not in {"NS", "TBD", "PST"}:
+            continue
+        try:
+            home_history = client.team_recent_fixtures(fixture_row["home_team_id"], limit=settings.history_matches)
+            away_history = client.team_recent_fixtures(fixture_row["away_team_id"], limit=settings.history_matches)
+            prediction = predict_fixture(fixture_row, home_history, away_history, generated_at=now)
+        except InsufficientHistory as exc:
+            LOGGER.info("Skipping fixture %s: %s", fixture_row["api_fixture_id"], exc)
+            counts["prediction_skipped"] += 1
+            continue
+        if store:
+            store.upsert_predictions([prediction.to_row()])
+        counts["ai_predictions"] += 1
+
+    LOGGER.info("Sync complete: %s", counts)
+    print(json.dumps(counts, ensure_ascii=False))
+    return counts
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    run()

@@ -186,3 +186,9 @@
 - [x] 實作/trend主動查詢、真實走勢圖回覆及資料不足／多重命中安全回覆。
 - [x] 實作盤口價格急遽變動與線位跳盤提示，並只在同一博彩公司、市場及足夠快照下納入研究摘要。
 - [x] 補上/trend與異常提示測試，完成型別檢查、正式建置與發布，通知使用者測試新功能（63項測試通過）。
+- [x] 核對授權足球資料源的賽程、即時比分、1X2、亞洲讓球與大小球覆蓋，選擇可由使用者安全設定的API-Football。
+- [x] 定義fixtures、odds_snapshots及ai_predictions的Supabase資料契約與非破壞性建表SQL，禁止把任何密鑰寫入程式碼或Git。
+- [x] 建立Python資料擷取、Poisson研究模型、模型傾向／資料限制輸出及Supabase同步程式。
+- [x] 建立每小時GitHub Actions工作流程與機密環境變數說明，加入重試、資料品質停止及執行紀錄。
+- [x] 執行Python單元測試與編譯檢查，交付專案檔案及Supabase／GitHub部署指引；外部API乾跑受沙箱TLS連線中斷，未寫入任何Supabase資料。
+- [ ] 在Supabase輪換聊天中已暴露的Secret Key後，安全設定新的server-only Key並執行一次乾跑與Supabase寫入驗證。
