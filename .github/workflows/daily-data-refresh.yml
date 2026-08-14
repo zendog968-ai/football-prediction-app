@@ -4,9 +4,16 @@ on:
   schedule:
     - cron: "15 3 * * *"
   workflow_dispatch:
+    inputs:
+      force_failure_drill:
+        description: "Only for notification verification; stop before candidate data is built or released"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: aurelia-daily-data-refresh
@@ -27,6 +34,11 @@ jobs:
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
       - name: Verify completed-result reconciliation contract
         run: python -m unittest data-pipeline/test_daily_update.py
+      - name: Run controlled notification failure drill
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.force_failure_drill }}
+        run: |
+          echo "Controlled failure drill: no candidate data or release assets are created."
+          exit 1
       - name: Build and validate complete candidate release
         run: python data-pipeline/run_daily_refresh.py --output-dir build/daily
       - name: Retain audited candidate outputs
@@ -45,3 +57,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/publish_github_release.sh build/daily
+
+  notify-on-failure:
+    needs: [build-validate-publish]
+    if: ${{ always() && needs['build-validate-publish'].result == 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Create one actionable data-quality alert for this failed run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_TITLE: "[Aurelia Data Alert] Daily refresh failed · run ${{ github.run_id }}"
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          if gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$RUN_TITLE" --json number --jq 'length' | grep -qx '0'; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$RUN_TITLE" --body "每日資料刷新或品質閘門未通過。既有不可變Release會繼續服務；請開啟工作流程紀錄查閱失敗步驟及保留的候選稽核檔案。\n\n失敗執行：[查看工作流程紀錄]($RUN_URL)\n\n此Issue由工作流程自動建立，同一run只會建立一次。"
+          fi

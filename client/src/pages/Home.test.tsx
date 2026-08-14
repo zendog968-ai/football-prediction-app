@@ -50,20 +50,11 @@ vi.mock("@/lib/trpc", () => ({
         useQuery: () => ({
           data: {
             leagues: [
-              { code: "BRA1", name: "Campeonato Brasileiro Série A", first_date: "2020-08-08", last_date: "2024-12-08", match_count: 1900 },
-              { code: "EPL", name: "Premier League", first_date: "2020-09-12", last_date: "2025-05-25", match_count: 1900 },
-              { code: "MLS", name: "Major League Soccer", first_date: "2020-02-29", last_date: "2024-12-07", match_count: 2329 },
-              { code: "J1", name: "J1 League", first_date: "2020-02-21", last_date: "2024-12-08", match_count: 1679 },
-              { code: "FIN1", name: "Veikkausliiga", first_date: "2020-07-01", last_date: "2024-11-02", match_count: 795 },
-              { code: "KOR1", name: "K League 1", first_date: "2020-05-08", last_date: "2024-11-24", match_count: 1074 },
-              { code: "POR1", name: "Primeira Liga", first_date: "2020-09-18", last_date: "2025-05-17", match_count: 1530 },
-              { code: "MEX1", name: "Liga MX", first_date: "2020-01-11", last_date: "2024-12-16", match_count: 1599 },
-              { code: "AUS1", name: "A-League Men", first_date: "2020-08-01", last_date: "2025-05-31", match_count: 852 },
-              { code: "UEL", name: "UEFA Europa League", first_date: "2021-08-03", last_date: "2026-08-11", match_count: 910 },
-              { code: "SUD", name: "CONMEBOL Sudamericana", first_date: "2003-07-29", last_date: "2026-08-13", match_count: 2257 },
-              { code: "LCUP", name: "Leagues Cup", first_date: "2019-07-24", last_date: "2026-08-13", match_count: 203 },
+              ...[
+                ["BRA1", "Campeonato Brasileiro Série A"], ["EPL", "Premier League"], ["LL", "La Liga"], ["BL", "Bundesliga"], ["SA", "Serie A"], ["L1", "Ligue 1"], ["MLS", "Major League Soccer"], ["J1", "J1 League"], ["FIN1", "Veikkausliiga"], ["KOR1", "K League 1"], ["POR1", "Primeira Liga"], ["MEX1", "Liga MX"], ["AUS1", "A-League Men"], ["UEL", "UEFA Europa League"], ["SUD", "CONMEBOL Sudamericana"], ["LCUP", "Leagues Cup"],
+              ].map(([code, name], index) => ({ code, name, first_completed_date: "2020-08-08", cutoff_date: index > 12 ? "2026-08-13" : "2025-05-25", last_updated_at: "2026-08-13T00:00:00+00:00", match_count: 1900, completed_match_count: 1900 })),
             ],
-            coverage: { firstDate: "2020-08-08", lastDate: "2025-05-25", lastUpdatedAt: "2026-08-13T00:00:00+00:00", model: "校準後 XGBoost 三分類模型", disclaimer: "僅使用歷史賽前資料。" },
+            coverage: { scopeCount: 16, totalMatches: 24235, totalCompletedMatches: 24235, firstDate: "2020-08-08", lastDate: "2026-08-13", lastUpdatedAt: "2026-08-13T00:00:00+00:00", releaseVersion: "data-20260813T224404Z-86a3231", model: "校準後 XGBoost 三分類模型", disclaimer: "僅使用歷史賽前資料。" },
           },
         }),
       },
@@ -211,9 +202,9 @@ describe("Home prediction workflow", () => {
       await user.click(homeInput);
       await user.clear(homeInput);
       await user.type(homeInput, search);
-      const teamOption = await screen.findByRole("button", { name: new RegExp(expected) });
+      const teamOption = (await screen.findAllByRole("button")).find(button => button.textContent?.trim() === expected);
       expect(teamOption).toBeTruthy();
-      await user.click(teamOption);
+      await user.click(teamOption!);
     }
   });
 
@@ -278,7 +269,7 @@ describe("Home prediction workflow", () => {
     const user = userEvent.setup();
     render(<Home />);
 
-    expect(screen.getByText(/資料庫最後更新/)).toBeTruthy();
+    expect(screen.getByText(/資料庫更新/)).toBeTruthy();
     await user.selectOptions(screen.getByRole("combobox"), "BRA1");
     await user.click(screen.getByLabelText("主隊"));
     await user.type(screen.getByLabelText("主隊"), "Palm");
@@ -291,6 +282,18 @@ describe("Home prediction workflow", () => {
     const disclaimer = await screen.findByTestId("research-disclaimer");
     expect(disclaimer.textContent).toContain("模型賠率 = 1 ÷ 機率");
     expect(disclaimer.textContent).toContain("只供模型效能驗證與統計學研究");
+  });
+
+  it("shows a transparent cutoff and completed-sample card grid", () => {
+    render(<Home />);
+
+    const transparency = screen.getByTestId("data-transparency-cards");
+    expect(transparency.textContent).toContain("資料截止日與樣本數");
+    expect(transparency.textContent).toContain("已驗證範圍");
+    expect(transparency.textContent).toContain("24,235");
+    expect(transparency.textContent).toContain("data-20260813T224404Z-86a3231");
+    expect(transparency.textContent).toContain("北美聯賽盃");
+    expect(transparency.textContent).toContain("已完場樣本");
   });
 
   it("calculates EV research statistics only after three valid decimal odds are supplied", async () => {

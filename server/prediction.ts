@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { Request } from "express";
-import { getReleaseAssets } from "./releaseAssets";
+import { getReleaseAssets, type ReleaseAssets } from "./releaseAssets";
 
 const execFileAsync = promisify(execFile);
 const projectRoot = process.cwd();
@@ -54,14 +54,27 @@ export type PredictionResult = {
 };
 
 export type LeagueMetadata = {
-  leagues: Array<{ code: string; name: string; first_date: string; last_date: string; match_count: number }>;
+  leagues: Array<{
+    code: string;
+    name: string;
+    first_completed_date: string | null;
+    cutoff_date: string | null;
+    last_updated_at: string | null;
+    match_count: number;
+    completed_match_count: number;
+  }>;
   teams: string[];
   coverage: {
-    firstDate: string;
-    lastDate: string;
+    scopeCount: number;
+    totalMatches: number;
+    totalCompletedMatches: number;
+    firstDate: string | null;
+    lastDate: string | null;
     lastUpdatedAt: string | null;
     model: string;
     disclaimer: string;
+    releaseVersion?: string;
+    releaseGeneratedAt?: string | null;
   };
 };
 
@@ -199,9 +212,12 @@ async function downloadFile(sourceUrl: string, destination: string) {
   await fs.writeFile(destination, bytes);
 }
 
-async function ensureRuntimeAssets(request: Request) {
+async function ensureRuntimeAssets(request: Request): Promise<ReleaseAssets> {
   const assets = await getReleaseAssets(getOrigin(request));
-  if (runtimeReady && runtimeVersion === assets.version) return runtimeReady;
+  if (runtimeReady && runtimeVersion === assets.version) {
+    await runtimeReady;
+    return assets;
+  }
   runtimeVersion = assets.version;
   runtimeReady = (async () => {
     await fs.mkdir(runtimeDirectory, { recursive: true });
@@ -215,6 +231,7 @@ async function ensureRuntimeAssets(request: Request) {
     runtimeVersion = null;
     throw error;
   }
+  return assets;
 }
 
 async function runPython(scriptName: string, args: string[]) {
@@ -227,9 +244,12 @@ async function runPython(scriptName: string, args: string[]) {
 }
 
 export async function getLeagueMetadata(request: Request): Promise<LeagueMetadata> {
-  await ensureRuntimeAssets(request);
+  const assets = await ensureRuntimeAssets(request);
   const stdout = await runPython("list_teams.py", ["--database", databasePath]);
-  return JSON.parse(stdout) as LeagueMetadata;
+  const metadata = JSON.parse(stdout) as LeagueMetadata;
+  metadata.coverage.releaseVersion = assets.version;
+  metadata.coverage.releaseGeneratedAt = assets.generatedAt;
+  return metadata;
 }
 
 export async function getTeams(request: Request, leagueCode: string): Promise<string[]> {
