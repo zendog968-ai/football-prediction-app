@@ -20,6 +20,8 @@ export type SupabaseUpcomingCache = {
   loadedAt: string;
   available: boolean;
   reason?: string;
+  fallback?: boolean;
+  lastSyncAt?: string | null;
   fixtures: CachedUpcomingFixture[];
 };
 
@@ -54,12 +56,10 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
   if (!force && cache && cache.expiresAt > Date.now()) return cache.payload;
   const loadedAt = new Date().toISOString();
   try {
-    const now = new Date().toISOString();
-    const horizon = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
-    const fixtures = await queryRows(`fixtures?select=fixture_id,league_name,event_time,home_team,away_team,status&status=in.(NS,TBD,PST)&event_time=gte.${encodeURIComponent(now)}&event_time=lte.${encodeURIComponent(horizon)}&order=event_time.asc&limit=50`);
+    const fixtures = await queryRows(`fixtures?select=fixture_id,league_name,event_time,home_team,away_team,status,updated_at&order=event_time.asc&limit=100`);
     const ids = fixtures.map(row => Number(row.fixture_id)).filter(Number.isInteger);
     if (ids.length === 0) {
-      const payload: SupabaseUpcomingCache = { source: "Supabase cache", loadedAt, available: true, fixtures: [] };
+      const payload: SupabaseUpcomingCache = { source: "Supabase cache", loadedAt, available: true, fixtures: [], lastSyncAt: null };
       cache = { expiresAt: Date.now() + CACHE_MS, payload };
       return payload;
     }
@@ -70,7 +70,6 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       const homeWin = normalizeProbability(prediction?.home_win_prob);
       const draw = normalizeProbability(prediction?.draw_prob);
       const awayWin = normalizeProbability(prediction?.away_win_prob);
-      if (!prediction || homeWin === null || draw === null || awayWin === null) return [];
       const eventTime = typeof fixture.event_time === "string" ? fixture.event_time : "";
       const homeTeam = typeof fixture.home_team === "string" ? fixture.home_team : "";
       const awayTeam = typeof fixture.away_team === "string" ? fixture.away_team : "";
@@ -81,16 +80,19 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
         eventTime,
         homeTeam,
         awayTeam,
-        homeWin,
-        draw,
-        awayWin,
-        predictedScore: typeof prediction.predicted_score === "string" ? prediction.predicted_score : null,
-        recommendation: typeof prediction.recommendation === "string" ? prediction.recommendation : null,
-        confidence: Math.max(0, Math.min(5, Number(prediction.confidence) || 0)),
-        predictionUpdatedAt: typeof prediction.updated_at === "string" ? prediction.updated_at : null,
+        homeWin: homeWin ?? 0,
+        draw: draw ?? 0,
+        awayWin: awayWin ?? 0,
+        predictedScore: typeof prediction?.predicted_score === "string" ? prediction.predicted_score : null,
+        recommendation: typeof prediction?.recommendation === "string" ? prediction.recommendation : null,
+        confidence: Math.max(0, Math.min(5, Number(prediction?.confidence) || 0)),
+        predictionUpdatedAt: typeof prediction?.updated_at === "string" ? prediction.updated_at : null,
       }];
-    }).sort((left, right) => Math.max(right.homeWin, right.draw, right.awayWin) - Math.max(left.homeWin, left.draw, left.awayWin)).slice(0, 8);
-    const payload: SupabaseUpcomingCache = { source: "Supabase cache", loadedAt, available: true, fixtures: rows };
+    }).sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime());
+    const lastSyncAt = fixtures.map(row => typeof row.updated_at === "string" ? row.updated_at : null).filter(Boolean).sort().at(-1) ?? null;
+    const payload: SupabaseUpcomingCache = { source: "Supabase cache", loadedAt, available: true, fixtures: rows, fallback: !rows.some(row => {
+      const diff = new Date(row.eventTime).getTime() - Date.now(); return diff >= 0 && diff <= 24 * 60 * 60_000;
+    }), lastSyncAt };
     cache = { expiresAt: Date.now() + CACHE_MS, payload };
     return payload;
   } catch (error) {
