@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import type { Request, Response } from "express";
-import { and, desc, eq, gte, inArray } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { parse as parseCookie } from "cookie";
 import { COOKIE_NAME } from "@shared/const";
 import {
@@ -24,6 +24,7 @@ type ApiFootballOddsResponse = {
   response?: Array<{
     fixture?: { id?: number; date?: string };
     league?: { id?: number; season?: number };
+    teams?: { home?: { name?: string }; away?: { name?: string } };
     update?: string;
     bookmakers?: Array<{
       id?: number;
@@ -67,6 +68,7 @@ type MarketContext = {
   openingOdds?: number;
   openingCapturedAt?: Date;
   trendSummary?: string;
+  anomalySummary?: string;
 };
 
 type Candidate = {
@@ -109,6 +111,7 @@ export const TELEGRAM_HELP_MESSAGE = [
   "",
   "/start — 啟用研究通知。",
   "/status — 查閱訂閱狀態、Heartbeat任務與API剩餘額度。",
+  "/trend <fixture ID> 或 /trend 主隊 vs 客隊 — 查詢已保存盤口走勢。",
   "/stop — 停止研究通知；可隨時以/start重新啟用。",
   "/help — 顯示本指令說明。",
   "",
@@ -196,6 +199,85 @@ export function formatTelegramStatus(snapshot: TelegramStatusSnapshot): string {
 
 export function normalizeTelegramCommand(text: string | undefined): string | undefined {
   return text?.trim().toLowerCase().split(/\s+/)[0]?.replace(/@[a-z0-9_]+$/i, "");
+}
+
+export function parseTrendRequest(text: string | undefined): { fixtureId?: number; homeTeam?: string; awayTeam?: string } | null {
+  const body = text?.trim().replace(/^\/trend(?:@[a-z0-9_]+)?\s*/i, "") || "";
+  if (!body) return null;
+  if (/^\d+$/.test(body)) return { fixtureId: Number(body) };
+  const parts = body.split(/\s+vs\s+/i).map(part => part.trim()).filter(Boolean);
+  if (parts.length !== 2 || parts.some(part => part.length < 2 || part.length > 120)) return null;
+  return { homeTeam: parts[0], awayTeam: parts[1] };
+}
+
+type StoredTrendSnapshot = {
+  apiFixtureId: number;
+  homeTeamName: string | null;
+  awayTeamName: string | null;
+  fixtureKickoffAt: Date;
+  bookmakerName: string;
+  bookmakerId: number;
+  marketName: string;
+  selection: string;
+  decimalOdds: string;
+  capturedAt: Date;
+};
+
+function summarizeTrendRows(rows: StoredTrendSnapshot[]): string {
+  const byMarketBookmaker = new Map<string, StoredTrendSnapshot[]>();
+  for (const row of rows) {
+    const key = `${row.marketName}:${row.bookmakerId}`;
+    byMarketBookmaker.set(key, [...(byMarketBookmaker.get(key) || []), row]);
+  }
+  const bestForMarket = new Map<string, StoredTrendSnapshot[]>();
+  for (const group of Array.from(byMarketBookmaker.values())) {
+    const sorted = [...group].sort((a, b) => a.capturedAt.getTime() - b.capturedAt.getTime());
+    const current = bestForMarket.get(sorted[0]!.marketName);
+    if (!current || sorted.length > current.length || (sorted.length === current.length && sorted.at(-1)!.capturedAt > current.at(-1)!.capturedAt)) {
+      bestForMarket.set(sorted[0]!.marketName, sorted);
+    }
+  }
+  return Array.from(bestForMarket.values()).map((group: StoredTrendSnapshot[]) => {
+    const opening = group[0]!;
+    const latest = group.at(-1)!;
+    const sameSelection = group.every((row: StoredTrendSnapshot) => row.selection === latest.selection);
+    const trend = sameSelection
+      ? renderOddsTrend(group.map((row: StoredTrendSnapshot) => Number(row.decimalOdds))) ?? "初盤基準建立中"
+      : `線位跳盤：${opening.selection} → ${latest.selection}`;
+    const anomaly = assessMarketAnomaly(group.map((row: StoredTrendSnapshot) => ({ selection: row.selection, decimalOdds: Number(row.decimalOdds) })));
+    return `${latest.marketName}｜${latest.bookmakerName}\n${latest.selection} @${Number(latest.decimalOdds).toFixed(2)}\n走勢圖：${trend}${anomaly ? `\n${anomaly}` : ""}`;
+  }).join("\n\n");
+}
+
+async function telegramTrendForRequest(text: string | undefined): Promise<string> {
+  const request = parseTrendRequest(text);
+  if (!request) return "用法：/trend <fixture ID>，或 /trend 主隊 vs 客隊。系統只查詢已保存的授權盤口快照。";
+  const db = await getDb();
+  if (!db) throw new Error("資料庫暫時無法使用。");
+  const rows: StoredTrendSnapshot[] = request.fixtureId
+    ? await db.select().from(oddsSnapshots).where(eq(oddsSnapshots.apiFixtureId, request.fixtureId)).orderBy(desc(oddsSnapshots.capturedAt)).limit(500)
+    : await db.select().from(oddsSnapshots).where(and(
+      sql`LOWER(${oddsSnapshots.homeTeamName}) = LOWER(${request.homeTeam!})`,
+      sql`LOWER(${oddsSnapshots.awayTeamName}) = LOWER(${request.awayTeam!})`,
+    )).orderBy(desc(oddsSnapshots.capturedAt)).limit(500);
+  if (!rows.length) return "尚未找到相符的已保存盤口快照。請確認隊名、改用fixture ID，或等待下一次排程建立初盤基準。";
+  const fixtureIds = Array.from(new Set(rows.map((row: StoredTrendSnapshot) => row.apiFixtureId)));
+  if (fixtureIds.length > 1 && !request.fixtureId) {
+    const matches = Array.from(new Map(rows.map((row: StoredTrendSnapshot) => [row.apiFixtureId, row])).values())
+      .map((row: StoredTrendSnapshot) => `${row.homeTeamName} vs ${row.awayTeamName}｜${row.fixtureKickoffAt.toLocaleDateString("zh-HK", { timeZone: "Asia/Hong_Kong" })}｜ID ${row.apiFixtureId}`)
+      .join("\n");
+    return `找到多場同名對戰，請改用 /trend <fixture ID> 指定：\n${matches}`;
+  }
+  const fixture = rows[0]!;
+  return [
+    "Aurelia Football｜盤口走勢查詢",
+    `${fixture.homeTeamName || "未知主隊"} vs ${fixture.awayTeamName || "未知客隊"}`,
+    `開賽：${fixture.fixtureKickoffAt.toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong", hour12: false })}`,
+    "",
+    summarizeTrendRows(rows),
+    "",
+    "只使用已保存的授權盤口快照；圖線不是即時報價，亦非投注或資金建議。",
+  ].join("\n");
 }
 
 async function telegramStatusForChat(chatId: string): Promise<string> {
@@ -291,7 +373,9 @@ async function captureLeagueOdds(leagueCode: string): Promise<Array<{ fixtureId:
   for (const row of payload.response ?? []) {
     const fixtureId = row.fixture?.id;
     const kickoff = row.fixture?.date ? new Date(row.fixture.date) : null;
-    if (!fixtureId || !kickoff || Number.isNaN(kickoff.getTime())) continue;
+    const homeTeamName = row.teams?.home?.name?.trim() || null;
+    const awayTeamName = row.teams?.away?.name?.trim() || null;
+    if (!fixtureId || !kickoff || Number.isNaN(kickoff.getTime()) || !homeTeamName || !awayTeamName) continue;
     fixtures.push({ fixtureId, kickoffAt: kickoff });
     for (const bookmaker of row.bookmakers ?? []) {
       if (!bookmaker.id || !bookmaker.name) continue;
@@ -305,6 +389,8 @@ async function captureLeagueOdds(leagueCode: string): Promise<Array<{ fixtureId:
             leagueCode,
             apiLeagueId: config.apiLeagueId,
             fixtureKickoffAt: kickoff,
+            homeTeamName,
+            awayTeamName,
             bookmakerId: bookmaker.id,
             bookmakerName: bookmaker.name,
             marketName: bet.name,
@@ -313,7 +399,7 @@ async function captureLeagueOdds(leagueCode: string): Promise<Array<{ fixtureId:
             decimalOdds: odds.toFixed(3),
             sourceUpdatedAt: row.update ? new Date(row.update) : null,
             capturedAt,
-          }).onDuplicateKeyUpdate({ set: { decimalOdds: odds.toFixed(3), sourceUpdatedAt: row.update ? new Date(row.update) : null } });
+          }).onDuplicateKeyUpdate({ set: { homeTeamName, awayTeamName, decimalOdds: odds.toFixed(3), sourceUpdatedAt: row.update ? new Date(row.update) : null } });
         }
       }
     }
@@ -346,6 +432,7 @@ async function resolveCandidate(request: Request, leagueCode: string, fixtureId:
     const trendSummary = sameSelection
       ? renderOddsTrend(sameMarketBookmaker.map(snapshot => Number(snapshot.decimalOdds))) ?? undefined
       : `盤口線已由 ${opening?.selection ?? "未知"} 調整至 ${latest.selection}，不以不同線位繪製同一價格走勢。`;
+    const anomalySummary = assessMarketAnomaly(sameMarketBookmaker.map(snapshot => ({ selection: snapshot.selection, decimalOdds: Number(snapshot.decimalOdds) })));
     return [{
       marketName,
       selection: latest.selection,
@@ -357,6 +444,7 @@ async function resolveCandidate(request: Request, leagueCode: string, fixtureId:
         openingCapturedAt: opening.capturedAt,
       } : {}),
       ...(trendSummary ? { trendSummary } : {}),
+      ...(anomalySummary ? { anomalySummary } : {}),
     }];
   });
   return { fixtureId, leagueCode, homeTeam: home, awayTeam: away, kickoffAt: details.kickoffAt, prediction, marketContext };
@@ -381,13 +469,29 @@ export function renderOddsTrend(values: number[]): string | null {
   return `${line} ${start.toFixed(2)} → ${end.toFixed(2)} (${delta >= 0 ? "+" : ""}${delta.toFixed(2)})`;
 }
 
+export function assessMarketAnomaly(points: Array<{ selection: string; decimalOdds: number }>): string | null {
+  if (points.length < 2) return null;
+  const opening = points[0]!;
+  const latest = points.at(-1)!;
+  if (opening.selection !== latest.selection) {
+    return `⚠️ 線位跳盤：${opening.selection} → ${latest.selection}。`;
+  }
+  if (!Number.isFinite(opening.decimalOdds) || !Number.isFinite(latest.decimalOdds) || opening.decimalOdds <= 1 || latest.decimalOdds <= 1) return null;
+  const delta = latest.decimalOdds - opening.decimalOdds;
+  const relative = Math.abs(delta) / opening.decimalOdds;
+  if (Math.abs(delta) >= 0.12 && relative >= 0.06) {
+    return `⚠️ 水位急遽變動：${opening.decimalOdds.toFixed(2)} → ${latest.decimalOdds.toFixed(2)}（${delta >= 0 ? "+" : ""}${delta.toFixed(2)}）。`;
+  }
+  return null;
+}
+
 function formatCandidate(candidate: Candidate): string {
   const lean = candidate.prediction.lean;
   const risk = lean.risk_level === "low" ? "低" : lean.risk_level === "medium" ? "中等" : "高";
   const reasons = lean.reasons.slice(0, 2).join(" ");
   const limitation = lean.limitations[0] ? ` 限制：${lean.limitations[0]}` : "";
   const markets = candidate.marketContext.length > 0
-    ? `盤口快照：${candidate.marketContext.map(item => `${item.marketName} ${describeMarketMovement(item)}${item.trendSummary ? `\n走勢圖：${item.trendSummary}` : ""}`).join("；")}。`
+    ? `盤口快照：${candidate.marketContext.map(item => `${item.marketName} ${describeMarketMovement(item)}${item.trendSummary ? `\n走勢圖：${item.trendSummary}` : ""}${item.anomalySummary ? `\n${item.anomalySummary}` : ""}`).join("；")}。`
     : "盤口快照：目前沒有可用的亞洲讓球／大小球資料。";
   return [
     `${candidate.homeTeam} vs ${candidate.awayTeam}`,
@@ -427,10 +531,17 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
     .filter(candidate => candidate.prediction.lean.risk_level !== "high")
     .sort((a, b) => b.prediction.lean.probability - a.prediction.lean.probability)
     .slice(0, 2);
+  const anomalyCandidates = candidates
+    .filter(candidate => candidate.marketContext.some(market => Boolean(market.anomalySummary)))
+    .slice(0, 3);
   const title = window === "day" ? "日間" : "晚間／歐洲時段";
-  const content = selected.length > 0
-    ? `Aurelia Football｜${title}研究摘要\n\n${selected.map((candidate, index) => `${index + 1}. ${formatCandidate(candidate)}`).join("\n\n")}\n\n此訊息只供模型效能與戰術研究，並非投注或資金建議。`
-    : `Aurelia Football｜${title}研究摘要\n\n今日此時段無符合研究品質條件的賽事，建議休息。\n\n此訊息只供模型效能與戰術研究，並非投注或資金建議。`;
+  const researchSection = selected.length > 0
+    ? selected.map((candidate, index) => `${index + 1}. ${formatCandidate(candidate)}`).join("\n\n")
+    : "今日此時段無符合研究品質條件的賽事，建議休息。";
+  const anomalySection = anomalyCandidates.length > 0
+    ? `\n\n盤口異常監測（只反映快照變動）：\n${anomalyCandidates.map(candidate => `• ${candidate.homeTeam} vs ${candidate.awayTeam}\n${candidate.marketContext.filter(market => market.anomalySummary).map(market => `${market.marketName} ${market.anomalySummary}`).join("\n")}`).join("\n\n")}`
+    : "";
+  const content = `Aurelia Football｜${title}研究摘要\n\n${researchSection}${anomalySection}\n\n此訊息只供模型效能與戰術研究，並非投注或資金建議。`;
   const db = await getDb();
   if (!db) throw new Error("資料庫暫時無法使用。");
   const inserted = await db.insert(researchDigests).values({ window, asOf: now, content, signalCount: selected.length });
@@ -534,6 +645,8 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     await sendTelegramMessage(String(chatId), "Aurelia Football研究通知已啟用。你會收到經資料品質檢核的研究摘要與賽後統計；回覆 /stop 可停止通知。所有內容僅供研究，並非投注或資金建議。");
   } else if (text === "/help") {
     await sendTelegramMessage(String(chatId), TELEGRAM_HELP_MESSAGE);
+  } else if (text === "/trend") {
+    await sendTelegramMessage(String(chatId), await telegramTrendForRequest(message?.text));
   } else if (text === "/status") {
     await sendTelegramMessage(String(chatId), await telegramStatusForChat(String(chatId)));
   } else if (text === "/stop") {

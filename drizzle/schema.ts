@@ -58,6 +58,8 @@ export const oddsSnapshots = mysqlTable("odds_snapshots", {
   leagueCode: varchar("leagueCode", { length: 8 }).notNull(),
   apiLeagueId: int("apiLeagueId").notNull(),
   fixtureKickoffAt: timestamp("fixtureKickoffAt").notNull(),
+  homeTeamName: varchar("homeTeamName", { length: 120 }),
+  awayTeamName: varchar("awayTeamName", { length: 120 }),
   bookmakerId: int("bookmakerId").notNull(),
   bookmakerName: varchar("bookmakerName", { length: 120 }).notNull(),
   marketName: varchar("marketName", { length: 120 }).notNull(),
@@ -69,6 +71,7 @@ export const oddsSnapshots = mysqlTable("odds_snapshots", {
 }, table => [
   index("odds_fixture_captured_idx").on(table.apiFixtureId, table.capturedAt),
   index("odds_league_kickoff_idx").on(table.leagueCode, table.fixtureKickoffAt),
+  index("odds_fixture_teams_idx").on(table.homeTeamName, table.awayTeamName, table.fixtureKickoffAt),
   uniqueIndex("odds_snapshot_unique").on(table.apiFixtureId, table.bookmakerId, table.marketName, table.selection, table.capturedAt),
 ]);
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { describeMarketMovement, formatTelegramStatus, normalizeTelegramCommand, renderOddsTrend, RESEARCH_SCHEDULES, settlementForScores, TELEGRAM_HELP_MESSAGE, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, formatTelegramStatus, normalizeTelegramCommand, parseTrendRequest, renderOddsTrend, RESEARCH_SCHEDULES, settlementForScores, TELEGRAM_HELP_MESSAGE, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -36,6 +36,7 @@ describe("Telegram系統指令", () => {
   it("/help列出全部可用的訂閱及研究指令", () => {
     expect(TELEGRAM_HELP_MESSAGE).toContain("/start");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/status");
+    expect(TELEGRAM_HELP_MESSAGE).toContain("/trend");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/stop");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/help");
     expect(TELEGRAM_HELP_MESSAGE).toContain("並非投注或資金建議");
@@ -80,6 +81,13 @@ describe("Telegram系統指令", () => {
     expect(normalizeTelegramCommand(" /stop ")).toBe("/stop");
     expect(normalizeTelegramCommand(undefined)).toBeUndefined();
   });
+
+  it("解析/trend的fixture ID與主客隊格式，拒絕不完整查詢", () => {
+    expect(parseTrendRequest("/trend 123456")).toEqual({ fixtureId: 123456 });
+    expect(parseTrendRequest("/trend Portland Timbers vs Club Tijuana")).toEqual({ homeTeam: "Portland Timbers", awayTeam: "Club Tijuana" });
+    expect(parseTrendRequest("/trend")).toBeNull();
+    expect(parseTrendRequest("/trend Portland Timbers")).toBeNull();
+  });
 });
 
 describe("盤路與資料品質閘門", () => {
@@ -88,6 +96,13 @@ describe("盤路與資料品質閘門", () => {
     expect(renderOddsTrend([1.9, 1.9])).toContain("▅▅");
     expect(renderOddsTrend([1.9])).toBeNull();
     expect(renderOddsTrend([1.9, 0])).toBeNull();
+  });
+
+  it("只對急遽水位變動或線位跳盤發出異常提示", () => {
+    expect(assessMarketAnomaly([{ selection: "Home -0.5", decimalOdds: 1.9 }, { selection: "Home -0.5", decimalOdds: 2.05 }])).toContain("水位急遽變動");
+    expect(assessMarketAnomaly([{ selection: "Over 2.5", decimalOdds: 1.9 }, { selection: "Over 3.0", decimalOdds: 1.9 }])).toContain("線位跳盤");
+    expect(assessMarketAnomaly([{ selection: "Home -0.5", decimalOdds: 1.9 }, { selection: "Home -0.5", decimalOdds: 1.94 }])).toBeNull();
+    expect(assessMarketAnomaly([{ selection: "Home -0.5", decimalOdds: 1.9 }])).toBeNull();
   });
 
   it("分別呈現初盤基準建立中與同一博彩公司初盤至最新盤變動", () => {
