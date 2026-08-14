@@ -166,8 +166,12 @@
 - [x] 在2026盤口覆蓋通過後實作盤口快照、賽後結算、Telegram訂閱及10:30／11:00／18:30香港時間排程程式；正式排程尚待使用者明確啟用。
 - [x] API-Football Pro升級已生效，status不再顯示Free且MLS 2026 odds驗證通過。
 - [x] 依使用者最新Pro升級確認，重新核對status方案與MLS 2026 odds端點，並解除資料源覆蓋停止條件。
-- [ ] 於發布版本由使用者明確設定Telegram Webhook，重新傳送/start取得訂閱，並確認後建立10:30／11:00／18:30正式Heartbeat任務。
+- [x] 於發布版本完成Telegram Webhook設定、使用者重新傳送/start取得訂閱，並依確認建立10:30／11:00／18:30正式Heartbeat任務。
 - [x] 實作並測試初盤對最新盤的亞洲讓球／大小球變動比較，將盤口線與價格變動寫入研究摘要及資料表。
-- [ ] 在發布環境完成一次可稽核的Telegram webhook、使用者/start訂閱、Heartbeat任務建立及經使用者確認的測試研究訊息送達驗證。
+- [x] 在發布環境完成一次可稽核的Telegram webhook、使用者/start訂閱、Heartbeat任務建立及經使用者確認的測試研究訊息送達驗證。
+- [x] 依使用者確認設定Telegram webhook並建立10:30、11:00、18:30香港時間Heartbeat任務：Webhook已核對成功，三個任務已持久化並啟用。
+- [x] 依使用者新指示直接呼叫Telegram setWebhook，並以平台持久Heartbeat建立三個任務，不依賴登入網頁後台或沙箱背景程序。
+- [x] 使用者已重新傳送/start，Telegram訂閱列已建立並由Bot回覆啟用訊息。
+- [x] 三個Heartbeat任務維持啟用，且測試研究通知已由Telegram API接受並由使用者確認實際送達，完成端到端驗證。
 - [x] 使用升級後API-Football帳戶重新驗證MLS 2026賽前odds：Pro方案啟用、每日7,500次，回傳10個fixture、119筆博彩公司資料及亞洲讓球／大小球市場。
 - [x] 依使用者最新Pro升級確認，重新核對status方案與MLS 2026 odds端點，並解除資料源覆蓋停止條件。
