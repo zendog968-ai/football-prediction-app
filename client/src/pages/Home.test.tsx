@@ -296,6 +296,34 @@ describe("Home prediction workflow", () => {
     expect(disclaimer.textContent).toContain("只供模型效能驗證與統計學研究");
   });
 
+  it("keeps Lean, risk reasoning and the research disclaimer available in a 375px viewport", async () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 375 });
+    window.dispatchEvent(new Event("resize"));
+    const user = userEvent.setup();
+    render(<Home />);
+
+    try {
+      await user.selectOptions(screen.getByRole("combobox"), "BRA1");
+      await user.click(screen.getByLabelText("主隊"));
+      await user.type(screen.getByLabelText("主隊"), "Palm");
+      await user.click(screen.getByRole("button", { name: /Palmeiras/ }));
+      await user.click(screen.getByLabelText("客隊"));
+      await user.type(screen.getByLabelText("客隊"), "Flam");
+      await user.click(screen.getByRole("button", { name: /Flamengo RJ/ }));
+      await user.click(screen.getByRole("button", { name: /開始分析這場對戰/ }));
+
+      const lean = await screen.findByTestId("lean-summary");
+      expect(lean.textContent).toContain("主勝傾向 · Palmeiras");
+      expect(lean.textContent).toContain("高風險");
+      expect(lean.textContent).toContain("Dixon–Coles資料不足");
+      expect((await screen.findByTestId("research-disclaimer")).textContent).toContain("只供模型效能驗證與統計學研究");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      window.dispatchEvent(new Event("resize"));
+    }
+  });
+
   it("shows a transparent cutoff and completed-sample card grid", () => {
     render(<Home />);
 
