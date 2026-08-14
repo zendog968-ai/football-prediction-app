@@ -113,8 +113,8 @@ export const TELEGRAM_HELP_MESSAGE = [
   "/start — 啟用研究通知。",
   "/status — 查閱訂閱狀態、Heartbeat任務與API剩餘額度。",
   "/trend <fixture ID> 或 /trend 主隊 vs 客隊 — 查詢已保存盤口走勢。",
-  "/upcoming — 查詢未來24小時內已同步、證據充分的研究賽事。",
-  "/report — 顯示最新24小時研究摘要（與/upcoming相同）。",
+  "/upcoming — 查詢未來24小時所有已同步賽事；完整模型以研究分析、部分資料以【基礎分析】呈現。",
+  "/report — 顯示最新24小時賽事摘要（與/upcoming相同）。",
   "/stop — 停止研究通知；可隨時以/start重新啟用。",
   "/help — 顯示本指令說明。",
   "",
@@ -130,20 +130,49 @@ export function probabilityBars(values: { homeWin: number; draw: number; awayWin
   ].join("\n");
 }
 
-export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[]): string {
-  const qualified = fixtures.filter(item => item.confidence >= 3).slice(0, 2);
-  if (!qualified.length) return "未來24小時暫無已同步且證據充分的研究賽事。資料不足時不會推測或列出方向。";
-  return [
-    "Aurelia Football｜未來24小時研究摘要",
-    "",
-    ...qualified.map((item, index) => [
-      `${index + 1}. ${item.leagueName}｜${item.homeTeam} vs ${item.awayTeam}`,
-      `開賽：${new Date(item.eventTime).toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong", hour12: false })}`,
+function displayProbability(value: number): string {
+  return !Number.isFinite(value) ? "待同步" : `${(value * 100).toFixed(1)}%`;
+}
+
+function formatCachedOdds(item: CachedUpcomingFixture): string {
+  if (!item.odds) return "目前1X2賠率：尚未同步";
+  return `目前1X2賠率：主 ${item.odds.home?.toFixed(2) ?? "待同步"}｜和 ${item.odds.draw?.toFixed(2) ?? "待同步"}｜客 ${item.odds.away?.toFixed(2) ?? "待同步"}`;
+}
+
+function formatCachedAnalysis(item: CachedUpcomingFixture): string[] {
+  if (item.hasPrediction && Number.isFinite(item.homeWin) && Number.isFinite(item.draw) && Number.isFinite(item.awayWin)) {
+    return [
       probabilityBars({ homeWin: item.homeWin, draw: item.draw, awayWin: item.awayWin }),
       `最可能比分：${item.predictedScore || "資料不足"}｜${item.recommendation || "研究傾向資料不足"}｜證據 ${"⭐".repeat(item.confidence) || "資料不足"}`,
+      formatCachedOdds(item),
+    ];
+  }
+  return [
+    "【基礎分析】",
+    `Poisson機率（已同步）：主 ${displayProbability(item.homeWin)}｜和 ${displayProbability(item.draw)}｜客 ${displayProbability(item.awayWin)}`,
+    item.predictedScore ? `現有預測比分：${item.predictedScore}` : "預測比分：待同步（不以零值或推測值替代）",
+    formatCachedOdds(item),
+  ];
+}
+
+export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = new Date()): string {
+  const start = now.getTime();
+  const end = start + 24 * 60 * 60_000;
+  const upcoming = fixtures.filter(item => {
+    const kickoff = new Date(item.eventTime).getTime();
+    return Number.isFinite(kickoff) && kickoff >= start && kickoff <= end;
+  });
+  if (!upcoming.length) return "未來24小時暫無已同步賽事。若有新fixture寫入Supabase，/upcoming會優先列出，即使進階研究或盤口尚未完整同步。";
+  return [
+    "Aurelia Football｜未來24小時同步賽事摘要",
+    "",
+    ...upcoming.map((item, index) => [
+      `${index + 1}. ${item.leagueName}｜${item.homeTeam} vs ${item.awayTeam}`,
+      `開賽：${new Date(item.eventTime).toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong", hour12: false })}`,
+      ...formatCachedAnalysis(item),
     ].join("\n")).flatMap((entry, index) => index === 0 ? [entry] : ["", entry]),
     "",
-    "只使用已同步的研究資料；並非投注或資金建議。",
+    "完整模型以研究分析呈現；資料未完整時僅列出已同步的【基礎分析】。並非投注或資金建議。",
   ].join("\n");
 }
 
@@ -344,12 +373,18 @@ async function telegramStatusForChat(chatId: string): Promise<string> {
 
 async function sendTelegramMessage(chatId: string, text: string): Promise<void> {
   const token = requireSecret(ENV.telegramBotToken, "Telegram Bot Token");
-  const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
-  });
-  if (!response.ok) throw new Error(`Telegram訊息送出失敗（${response.status}）。`);
+  const chunks = text.length <= 3800 ? [text] : text.match(/(?:[^\n]+\n?){1,40}/g)?.flatMap(chunk => {
+    if (chunk.length <= 3800) return [chunk];
+    return Array.from({ length: Math.ceil(chunk.length / 3800) }, (_, index) => chunk.slice(index * 3800, (index + 1) * 3800));
+  }) ?? [text];
+  for (const chunk of chunks) {
+    const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: chunk, disable_web_page_preview: true }),
+    });
+    if (!response.ok) throw new Error(`Telegram訊息送出失敗（${response.status}）。`);
+  }
 }
 
 async function getSubscriptionChatIds(): Promise<string[]> {

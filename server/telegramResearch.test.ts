@@ -62,10 +62,53 @@ describe("Telegram系統指令", () => {
       recommendation: "研究傾向：主勝",
       confidence: 4,
       predictionUpdatedAt: "2026-08-15T10:00:00Z",
-    }]);
+      hasPrediction: true,
+      odds: { home: 1.82, draw: 3.55, away: 4.4, capturedAt: "2026-08-15T10:00:00Z" },
+    }], new Date("2026-08-15T00:00:00Z"));
     expect(message).toContain("Example Home vs Example Away");
     expect(message).toContain("⭐⭐⭐⭐");
+    expect(message).toContain("目前1X2賠率：主 1.82｜和 3.55｜客 4.40");
     expect(message).toContain("並非投注或資金建議");
+  });
+
+  it("只要有未來24小時fixture就列出，部分模型與盤口會以基礎分析而非暫無賽事呈現", () => {
+    const message = formatCachedUpcoming([{
+      fixtureId: 102,
+      leagueName: "MLS",
+      eventTime: "2026-08-15T12:00:00Z",
+      homeTeam: "Fallback Home",
+      awayTeam: "Fallback Away",
+      homeWin: 0.48,
+      draw: Number.NaN,
+      awayWin: 0.28,
+      predictedScore: null,
+      recommendation: null,
+      confidence: 0,
+      predictionUpdatedAt: null,
+      hasPrediction: false,
+      odds: { home: 2.05, draw: null, away: 3.6, capturedAt: "2026-08-15T09:00:00Z" },
+    }, {
+      fixtureId: 103,
+      leagueName: "MLS",
+      eventTime: "2026-08-16T01:01:00Z",
+      homeTeam: "Outside Window",
+      awayTeam: "Outside Window",
+      homeWin: Number.NaN,
+      draw: Number.NaN,
+      awayWin: Number.NaN,
+      predictedScore: null,
+      recommendation: null,
+      confidence: 0,
+      predictionUpdatedAt: null,
+      hasPrediction: false,
+      odds: null,
+    }], new Date("2026-08-15T01:00:00Z"));
+    expect(message).toContain("Fallback Home vs Fallback Away");
+    expect(message).toContain("【基礎分析】");
+    expect(message).toContain("主 48.0%｜和 待同步｜客 28.0%");
+    expect(message).toContain("主 2.05｜和 待同步｜客 3.60");
+    expect(message).not.toContain("Outside Window");
+    expect(message).not.toContain("暫無已同步且證據充分");
   });
 
   it("顯示訂閱、任務與不暴露憑證的API剩餘額度", () => {

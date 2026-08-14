@@ -14,6 +14,12 @@ export type CachedUpcomingFixture = {
   confidence: number;
   predictionUpdatedAt: string | null;
   hasPrediction: boolean;
+  odds: {
+    home: number | null;
+    draw: number | null;
+    away: number | null;
+    capturedAt: string | null;
+  } | null;
 };
 
 export type SupabaseUpcomingCache = {
@@ -32,6 +38,11 @@ let cache: { expiresAt: number; payload: SupabaseUpcomingCache } | null = null;
 function normalizeProbability(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : null;
+}
+
+function normalizeOdds(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 1 ? parsed : null;
 }
 
 function postgrestUrl(path: string): URL {
@@ -64,8 +75,27 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       cache = { expiresAt: Date.now() + CACHE_MS, payload };
       return payload;
     }
-    const predictions = await queryRows(`ai_predictions?select=fixture_id,home_win_prob,draw_prob,away_win_prob,predicted_score,recommendation,confidence,updated_at&fixture_id=in.(${ids.join(",")})`);
+    const [predictions, oddsSnapshots] = await Promise.all([
+      queryRows(`ai_predictions?select=fixture_id,home_win_prob,draw_prob,away_win_prob,predicted_score,recommendation,confidence,updated_at&fixture_id=in.(${ids.join(",")})`),
+      queryRows(`odds_snapshots?select=fixture_id,market_type,home_odds,draw_odds,away_odds,snapshot_time&fixture_id=in.(${ids.join(",")})&order=snapshot_time.desc&limit=500`),
+    ]);
     const byFixture = new Map(predictions.map(row => [Number(row.fixture_id), row]));
+    const oddsByFixture = new Map<number, CachedUpcomingFixture["odds"]>();
+    for (const snapshot of oddsSnapshots) {
+      const fixtureId = Number(snapshot.fixture_id);
+      const marketType = typeof snapshot.market_type === "string" ? snapshot.market_type : "";
+      if (!Number.isInteger(fixtureId) || oddsByFixture.has(fixtureId) || !marketType.startsWith("HDA")) continue;
+      const home = normalizeOdds(snapshot.home_odds);
+      const draw = normalizeOdds(snapshot.draw_odds);
+      const away = normalizeOdds(snapshot.away_odds);
+      if (home === null && draw === null && away === null) continue;
+      oddsByFixture.set(fixtureId, {
+        home,
+        draw,
+        away,
+        capturedAt: typeof snapshot.snapshot_time === "string" ? snapshot.snapshot_time : null,
+      });
+    }
     const rows = fixtures.flatMap((fixture): CachedUpcomingFixture[] => {
       const prediction = byFixture.get(Number(fixture.fixture_id));
       const homeWin = normalizeProbability(prediction?.home_win_prob);
@@ -81,14 +111,15 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
         eventTime,
         homeTeam,
         awayTeam,
-        homeWin: homeWin ?? 0,
-        draw: draw ?? 0,
-        awayWin: awayWin ?? 0,
+        homeWin: homeWin ?? Number.NaN,
+        draw: draw ?? Number.NaN,
+        awayWin: awayWin ?? Number.NaN,
         predictedScore: typeof prediction?.predicted_score === "string" ? prediction.predicted_score : null,
         recommendation: typeof prediction?.recommendation === "string" ? prediction.recommendation : null,
         confidence: Math.max(0, Math.min(5, Number(prediction?.confidence) || 0)),
         predictionUpdatedAt: typeof prediction?.updated_at === "string" ? prediction.updated_at : null,
         hasPrediction: !!prediction && homeWin !== null && draw !== null && awayWin !== null,
+        odds: oddsByFixture.get(Number(fixture.fixture_id)) ?? null,
       }];
     }).sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime());
     const lastSyncAt = fixtures.map(row => typeof row.updated_at === "string" ? row.updated_at : null).filter(Boolean).sort().at(-1) ?? null;
