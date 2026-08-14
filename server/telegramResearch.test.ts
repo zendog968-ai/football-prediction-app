@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { describeMarketMovement, RESEARCH_SCHEDULES, settlementForScores, verifyApiFootballReadiness } from "./telegramResearch";
+import { describeMarketMovement, formatTelegramStatus, normalizeTelegramCommand, RESEARCH_SCHEDULES, settlementForScores, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -29,6 +29,48 @@ describe("Telegram研究排程", () => {
       expect.objectContaining({ kind: "day_digest", cron: "0 0 3 * * *", path: "/api/scheduled/research-day" }),
       expect.objectContaining({ kind: "evening_digest", cron: "0 30 10 * * *", path: "/api/scheduled/research-evening" }),
     ]));
+  });
+});
+
+describe("Telegram系統指令", () => {
+  it("顯示訂閱、任務與不暴露憑證的API剩餘額度", () => {
+    const message = formatTelegramStatus({
+      subscriptionActive: true,
+      scheduleCount: 3,
+      enabledScheduleCount: 3,
+      apiPlan: "Pro",
+      apiActive: true,
+      apiUsed: 120,
+      apiLimit: 7500,
+      apiError: null,
+    });
+    expect(message).toContain("通知訂閱：已啟用");
+    expect(message).toContain("3/3 個任務啟用");
+    expect(message).toContain("API-Football：正常｜方案：Pro");
+    expect(message).toContain("7380/7500 次可用");
+    expect(message).not.toContain("x-apisports-key");
+  });
+
+  it("在供應商暫時不可用時回覆狀態而不虛構額度", () => {
+    const message = formatTelegramStatus({
+      subscriptionActive: false,
+      scheduleCount: 3,
+      enabledScheduleCount: 2,
+      apiPlan: null,
+      apiActive: null,
+      apiUsed: null,
+      apiLimit: null,
+      apiError: "連線失敗",
+    });
+    expect(message).toContain("通知訂閱：已停止");
+    expect(message).toContain("暫時無法讀取（連線失敗）");
+  });
+
+  it("正規化/status及/stop的私訊與群組指令尾碼", () => {
+    expect(normalizeTelegramCommand("/status")).toBe("/status");
+    expect(normalizeTelegramCommand("/status@AureliaResearchBot extra")).toBe("/status");
+    expect(normalizeTelegramCommand(" /stop ")).toBe("/stop");
+    expect(normalizeTelegramCommand(undefined)).toBeUndefined();
   });
 });
 

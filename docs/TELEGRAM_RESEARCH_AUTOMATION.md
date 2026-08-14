@@ -21,7 +21,9 @@
 3. 在Telegram向Bot傳送`/start`；系統才會保存Chat ID並回覆訂閱成功訊息。
 4. 傳送`/stop`可隨時停止通知；再次傳送`/start`才重新啟用。
 
-Webhook只接受Telegram的`X-Telegram-Bot-Api-Secret-Token`，常數時間比對失敗會回傳403。Bot Token、Webhook Secret與API-Football Key均只在伺服器端秘密管理中讀取。
+可隨時傳送`/status`（群組可使用`/status@BotUsername`）查閱本聊天的訂閱狀態、三個Heartbeat任務啟用數、API-Football方案及**今日剩餘／總額度**。若供應商無法讀取，Bot會明確標示資料暫時不可用，而不填補或推測額度。`/stop`具可重複性：未訂閱或已停止時會回覆目前狀態，不會改寫其他聊天的訂閱資料。
+
+Webhook只接受Telegram的`X-Telegram-Bot-Api-Secret-Token`，常數時間比對失敗會回傳403。Bot Token、Webhook Secret與API-Football Key均只在伺服器端秘密管理中讀取；`/status`只回覆方案、啟用狀態與剩餘額度，從不傳送任何憑證。
 
 ## 排程
 

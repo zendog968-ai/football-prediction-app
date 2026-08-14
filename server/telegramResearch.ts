@@ -43,8 +43,19 @@ type ApiFootballFixtureResponse = {
 };
 
 type ApiFootballStatus = {
-  response?: { subscription?: { active?: boolean; plan?: string }; requests?: { limit_day?: number } };
+  response?: { subscription?: { active?: boolean; plan?: string }; requests?: { limit_day?: number; current?: number } };
   errors?: Record<string, unknown> | unknown[];
+};
+
+type TelegramStatusSnapshot = {
+  subscriptionActive: boolean;
+  scheduleCount: number;
+  enabledScheduleCount: number;
+  apiPlan: string | null;
+  apiActive: boolean | null;
+  apiUsed: number | null;
+  apiLimit: number | null;
+  apiError: string | null;
 };
 
 type MarketContext = {
@@ -147,6 +158,59 @@ export async function verifyApiFootballReadiness(): Promise<void> {
   if (apiErrorCount(mlsOdds) > 0 || !Array.isArray(mlsOdds.response) || mlsOdds.response.length === 0) {
     throw new Error("API-Football未提供2026 MLS盤口覆蓋；研究摘要已安全停止。");
   }
+}
+
+export function formatTelegramStatus(snapshot: TelegramStatusSnapshot): string {
+  const subscription = snapshot.subscriptionActive ? "已啟用" : "已停止";
+  const schedule = `${snapshot.enabledScheduleCount}/${snapshot.scheduleCount} 個任務啟用`;
+  const apiUsage = snapshot.apiError
+    ? `暫時無法讀取（${snapshot.apiError}）`
+    : snapshot.apiLimit === null || snapshot.apiUsed === null
+      ? "資料不足"
+      : `${Math.max(0, snapshot.apiLimit - snapshot.apiUsed)}/${snapshot.apiLimit} 次可用`;
+  const plan = snapshot.apiPlan ?? "未提供";
+  const apiStatus = snapshot.apiActive === true ? "正常" : snapshot.apiActive === false ? "未啟用" : "未知";
+  return [
+    "Aurelia Football｜系統狀態",
+    "",
+    `通知訂閱：${subscription}`,
+    `Heartbeat排程：${schedule}（10:30／11:00／18:30 香港時間）`,
+    `API-Football：${apiStatus}｜方案：${plan}`,
+    `今日API額度：${apiUsage}`,
+    "",
+    "所有通知只供模型與戰術研究，並非投注或資金建議。傳送 /stop 可取消訂閱。",
+  ].join("\n");
+}
+
+export function normalizeTelegramCommand(text: string | undefined): string | undefined {
+  return text?.trim().toLowerCase().split(/\s+/)[0]?.replace(/@[a-z0-9_]+$/i, "");
+}
+
+async function telegramStatusForChat(chatId: string): Promise<string> {
+  const db = await getDb();
+  if (!db) throw new Error("資料庫暫時無法使用。");
+  const [subscription, schedules] = await Promise.all([
+    db.select().from(telegramSubscriptions).where(eq(telegramSubscriptions.chatId, chatId)).limit(1),
+    db.select().from(researchScheduleJobs),
+  ]);
+  let status: ApiFootballStatus | null = null;
+  let apiError: string | null = null;
+  try {
+    status = await apiFootball<ApiFootballStatus>("/status");
+    if (apiErrorCount(status) > 0) apiError = "供應商回傳錯誤";
+  } catch (error) {
+    apiError = error instanceof Error ? error.message : "連線失敗";
+  }
+  return formatTelegramStatus({
+    subscriptionActive: subscription[0]?.isActive === true,
+    scheduleCount: schedules.length,
+    enabledScheduleCount: schedules.filter(schedule => schedule.isEnabled).length,
+    apiPlan: status?.response?.subscription?.plan ?? null,
+    apiActive: status?.response?.subscription?.active ?? null,
+    apiUsed: status?.response?.requests?.current ?? null,
+    apiLimit: status?.response?.requests?.limit_day ?? null,
+    apiError,
+  });
 }
 
 async function sendTelegramMessage(chatId: string, text: string): Promise<void> {
@@ -423,7 +487,7 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
   }
   const message = (req.body as { message?: { chat?: { id?: number | string }; from?: { first_name?: string; username?: string }; text?: string } }).message;
   const chatId = message?.chat?.id;
-  const text = message?.text?.trim().toLowerCase();
+  const text = normalizeTelegramCommand(message?.text);
   if (!chatId || !text) {
     res.status(200).json({ ok: true, ignored: true });
     return;
@@ -435,9 +499,18 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     await db.insert(telegramSubscriptions).values({ chatId: String(chatId), displayName, isActive: true, stoppedAt: null })
       .onDuplicateKeyUpdate({ set: { displayName, isActive: true, stoppedAt: null } });
     await sendTelegramMessage(String(chatId), "Aurelia Football研究通知已啟用。你會收到經資料品質檢核的研究摘要與賽後統計；回覆 /stop 可停止通知。所有內容僅供研究，並非投注或資金建議。");
+  } else if (text === "/status") {
+    await sendTelegramMessage(String(chatId), await telegramStatusForChat(String(chatId)));
   } else if (text === "/stop") {
-    await db.update(telegramSubscriptions).set({ isActive: false, stoppedAt: new Date() }).where(eq(telegramSubscriptions.chatId, String(chatId)));
-    await sendTelegramMessage(String(chatId), "Aurelia Football研究通知已停止。重新傳送 /start 可再次訂閱。");
+    const existing = (await db.select().from(telegramSubscriptions).where(eq(telegramSubscriptions.chatId, String(chatId))).limit(1))[0];
+    if (!existing) {
+      await sendTelegramMessage(String(chatId), "你目前沒有啟用中的Aurelia Football研究通知。傳送 /start 可建立訂閱。");
+    } else if (!existing.isActive) {
+      await sendTelegramMessage(String(chatId), "Aurelia Football研究通知已是停止狀態。重新傳送 /start 可再次訂閱。");
+    } else {
+      await db.update(telegramSubscriptions).set({ isActive: false, stoppedAt: new Date() }).where(eq(telegramSubscriptions.chatId, String(chatId)));
+      await sendTelegramMessage(String(chatId), "Aurelia Football研究通知已停止。重新傳送 /start 可再次訂閱。");
+    }
   }
   res.status(200).json({ ok: true });
 }

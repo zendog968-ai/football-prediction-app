@@ -175,3 +175,6 @@
 - [x] 三個Heartbeat任務維持啟用，且測試研究通知已由Telegram API接受並由使用者確認實際送達，完成端到端驗證。
 - [x] 使用升級後API-Football帳戶重新驗證MLS 2026賽前odds：Pro方案啟用、每日7,500次，回傳10個fixture、119筆博彩公司資料及亞洲讓球／大小球市場。
 - [x] 依使用者最新Pro升級確認，重新核對status方案與MLS 2026 odds端點，並解除資料源覆蓋停止條件。
+- [x] 盤點Telegram webhook現有/start與/stop流程、Heartbeat任務及API-Football status回應欄位，定義/status回覆契約。
+- [x] 實作Telegram /status系統狀態、三個排程啟用狀態與API-Football剩餘用量回覆，並補強/stop退訂可稽核處理。
+- [x] 補上Telegram指令處理測試、型別檢查、正式建置與發布，通知使用者測試/status及/stop（59項測試通過）。

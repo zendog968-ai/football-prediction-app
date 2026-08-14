@@ -234,9 +234,8 @@ describe("Home prediction workflow", () => {
       await user.click(homeInput);
       await user.clear(homeInput);
       await user.type(homeInput, search);
-      const teamOption = (await screen.findAllByRole("button")).find(button => button.textContent?.trim() === expected);
-      expect(teamOption).toBeTruthy();
-      await user.click(teamOption!);
+      const teamOption = await screen.findByRole("button", { name: expected });
+      await user.click(teamOption);
     }
   });
 
