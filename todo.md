@@ -191,4 +191,8 @@
 - [x] 建立Python資料擷取、Poisson研究模型、模型傾向／資料限制輸出及Supabase同步程式。
 - [x] 建立每小時GitHub Actions工作流程與機密環境變數說明，加入重試、資料品質停止及執行紀錄。
 - [x] 執行Python單元測試與編譯檢查，交付專案檔案及Supabase／GitHub部署指引；外部API乾跑受沙箱TLS連線中斷，未寫入任何Supabase資料。
-- [ ] 在Supabase輪換聊天中已暴露的Secret Key後，安全設定新的server-only Key並執行一次乾跑與Supabase寫入驗證。
+- [x] 在Supabase輪換聊天中已暴露的Secret Key後，安全設定新的server-only Key並執行Supabase驗證。
+- [x] 使用者已提交與聊天中先前公開值不同的全新Supabase Secret Key；新Key設定前未進行任何Supabase寫入。
+- [x] 安全設定使用者新提供的Supabase Secret Key，完成REST授權驗證與最小fixtures寫入／讀回，且未暴露任何Key。
+- [x] 以既有Supabase fixtures、odds_snapshots與ai_predictions欄位契約調整Python同步映射，不重建或破壞使用者現有資料表。
+- [x] 使用真實API-Football fixture完成Supabase最小寫入及讀回驗證（fixture 1490376），確認資料表相容後可啟用完整每小時同步。

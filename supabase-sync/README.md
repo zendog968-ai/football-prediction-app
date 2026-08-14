@@ -15,9 +15,11 @@
 | `schema.sql` | 三張Supabase資料表與索引。 |
 | `.github/workflows/main.yml` | 每小時GitHub Actions同步。 |
 
-## 先建立資料表
+## Supabase資料表
 
-登入Supabase專案，打開**SQL Editor**，貼上並執行[`schema.sql`](./schema.sql)。這會建立`fixtures`、`odds_snapshots`和`ai_predictions`及必要索引。Supabase Python用戶端的upsert要求主鍵或明確衝突欄位；本schema已提供所需約束。[1]
+若是新的Supabase專案，登入Supabase後打開**SQL Editor**，貼上並執行[`schema.sql`](./schema.sql)。它會建立`fixtures`、`odds_snapshots`和`ai_predictions`及必要索引。Supabase Python用戶端的upsert要求主鍵或明確衝突欄位；本schema已提供所需約束。[1]
+
+你的既有專案已經有同名三張表，且欄位命名為`fixture_id`、`event_time`、`home_score`、`home_odds`與`home_win_prob`等。同步器已改為**相容映射**該既有契約：不刪除或重建任何表；1X2會按同一博彩公司合併為主／和／客賠率列；亞洲讓球與大小球則保存原始選項於`handicap`，並在`market_type`保留市場與博彩公司。使用新schema或既有schema兩者擇一，不應在已有資料表時直接重跑會衝突的建表SQL。
 
 ## 本機執行
 
@@ -51,7 +53,7 @@ pytest -q
 python main.py
 ```
 
-程式預設最多處理12場，以控制每小時API配額。若任一隊最近完成賽事少於3場，該場不會產生Poisson預測；這是資料品質停止條件，而不是以假設值補齊。
+程式預設最多處理12場，以控制每小時API配額。若任一隊最近完成賽事少於3場，該場不會產生Poisson預測；這是資料品質停止條件，而不是以假設值補齊。新Secret Key已以Supabase REST根端點安全驗證，並成功寫入及讀回一筆真實API-Football fixture（ID 1490376，Orlando City SC vs FC Cincinnati）；完整主程式乾跑仍應在你的本機或GitHub Actions環境執行，以確認該執行環境到API-Football的TLS連線。
 
 ## GitHub Actions部署
 
@@ -67,7 +69,7 @@ python main.py
 
 ## 資料與模型限制
 
-API-Football透過`x-apisports-key`的GET請求授權，並提供fixtures、in-play odds及pre-match odds端點；`/status`不計入每日配額。[3] 盤口覆蓋取決於你的方案、競賽與博彩公司，空回應會被保存為該輪沒有資料，而不會推測盤口。Poisson模型不使用xG、傷兵、陣容、紅牌或未授權資料，且有限樣本會降低證據星級。
+API-Football透過`x-apisports-key`的GET請求授權，並提供fixtures、in-play odds及pre-match odds端點；`/status`不計入每日配額。[3] 盤口覆蓋取決於你的方案、競賽與博彩公司，空回應會被保存為該輪沒有資料，而不會推測盤口。Poisson模型不使用xG、傷兵、陣容、紅牌或未授權資料，且有限樣本會降低證據星級。程式針對429及暫時性5xx／連線問題採退避重試；重試仍失敗時會以非零錯誤結束工作流程，不會寫入部分推測結果。
 
 ## References
 
