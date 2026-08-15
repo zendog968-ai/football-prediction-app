@@ -4,7 +4,9 @@ import os
 from dataclasses import dataclass, replace
 
 
-POPULAR_LEAGUE_IDS = frozenset({39, 140, 135, 78, 61, 253})
+# API-Football popular coverage: major European leagues and cups, Brazil, North
+# America, and the Asian leagues supported by the wider Aurelia data registry.
+POPULAR_LEAGUE_IDS = frozenset({2, 3, 11, 13, 39, 48, 61, 71, 78, 94, 98, 135, 140, 188, 253, 262, 292})
 
 
 @dataclass(frozen=True)
@@ -12,7 +14,7 @@ class Settings:
     api_football_key: str
     supabase_url: str | None
     supabase_key: str | None
-    max_fixtures: int = 12
+    max_fixtures: int = 30
     history_matches: int = 10
     league_ids: frozenset[int] = POPULAR_LEAGUE_IDS
 

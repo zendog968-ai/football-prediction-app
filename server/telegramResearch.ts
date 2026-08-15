@@ -139,11 +139,10 @@ function formatCompactTable(rows: CompactMarketRow[], scorelines: ScorelineProba
   const row = (market: CompactMarketRow["market"]) => {
     const found = rows.find(item => item.market === market);
     const selection = found ? `${found.selection}${found.distribution ? `（全贏 ${(found.distribution.fullWin * 100).toFixed(1)}%｜半贏 ${(found.distribution.halfWin * 100).toFixed(1)}%｜走盤 ${(found.distribution.push * 100).toFixed(1)}%｜半輸 ${(found.distribution.halfLoss * 100).toFixed(1)}%｜全輸 ${(found.distribution.fullLoss * 100).toFixed(1)}%）` : ""}` : "資料不足";
-    return `| ${market} | ${selection} | ${found ? `${(found.probability * 100).toFixed(1)}%` : "—"} |`;
+    return `${market}　${selection}　${found ? `${(found.probability * 100).toFixed(1)}%` : "—"}`;
   };
   return [
-    "| 盤口種類 | 預測選項 | 命中機率 (%) |",
-    "| :--- | :--- | :--- |",
+    "盤口種類　預測選項　命中機率 (%)",
     row("主客和 (1X2)"),
     row("入球大細 1.5"),
     row("入球大細 2.5"),
@@ -158,6 +157,11 @@ function formatCompactTable(rows: CompactMarketRow[], scorelines: ScorelineProba
     "【最高機率波膽 Top 3】",
     ...[0, 1, 2].map(index => `${index + 1}. ${scorelines[index] ? `${scorelines[index]!.score}：${(scorelines[index]!.probability * 100).toFixed(1)}%` : "資料不足"}`),
   ].join("\n");
+}
+
+export function toTelegramHtmlPre(text: string): string {
+  const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return `<pre>${escaped}</pre>`;
 }
 
 export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = new Date()): string {
@@ -627,9 +631,9 @@ async function telegramStatusForChat(chatId: string): Promise<string> {
 
 async function sendTelegramMessage(chatId: string, text: string, buttons?: TelegramInlineButton[]): Promise<void> {
   const token = requireSecret(ENV.telegramBotToken, "Telegram Bot Token");
-  const chunks = text.length <= 3800 ? [text] : text.match(/(?:[^\n]+\n?){1,40}/g)?.flatMap(chunk => {
-    if (chunk.length <= 3800) return [chunk];
-    return Array.from({ length: Math.ceil(chunk.length / 3800) }, (_, index) => chunk.slice(index * 3800, (index + 1) * 3800));
+  const chunks = text.length <= 3500 ? [text] : text.match(/(?:[^\n]+\n?){1,36}/g)?.flatMap(chunk => {
+    if (chunk.length <= 3500) return [chunk];
+    return Array.from({ length: Math.ceil(chunk.length / 3500) }, (_, index) => chunk.slice(index * 3500, (index + 1) * 3500));
   }) ?? [text];
   for (const chunk of chunks) {
     const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -637,7 +641,8 @@ async function sendTelegramMessage(chatId: string, text: string, buttons?: Teleg
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         chat_id: chatId,
-        text: chunk,
+        text: toTelegramHtmlPre(chunk),
+        parse_mode: "HTML",
         disable_web_page_preview: true,
         ...(buttons && chunks.length === 1 ? { reply_markup: { inline_keyboard: buttons.map(button => [button]) } } : {}),
       }),

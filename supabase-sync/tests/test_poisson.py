@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from football_sync.config import POPULAR_LEAGUE_IDS
 from football_sync.poisson import InsufficientHistory, predict_fixture, team_metrics
 
 
@@ -31,6 +32,23 @@ def test_poisson_prediction_is_normalized_and_research_only() -> None:
 def test_insufficient_real_history_stops_prediction() -> None:
     with pytest.raises(InsufficientHistory):
         team_metrics([finished_fixture(1, 2, 1, 0)], 1, league_id=39, season=2026)
+
+
+def test_j1_two_match_basic_history_produces_explicit_low_evidence_poisson() -> None:
+    assert 98 in POPULAR_LEAGUE_IDS
+    home_history = [
+        finished_fixture(1, 9, 2, 1, league_id=98),
+        finished_fixture(8, 1, 0, 1, league_id=98),
+    ]
+    away_history = [
+        finished_fixture(2, 7, 1, 1, league_id=98),
+        finished_fixture(6, 2, 2, 1, league_id=98),
+    ]
+    fixture = {"api_fixture_id": 98001, "home_team_id": 1, "away_team_id": 2, "league_id": 98, "season": 2026}
+    prediction = predict_fixture(fixture, home_history, away_history, datetime(2026, 8, 15, tzinfo=UTC))
+    assert prediction.model_version == "poisson-v2-basic-league-research"
+    assert prediction.evidence_stars == 1
+    assert prediction.data_warning is not None and "基礎Poisson" in prediction.data_warning
 
 
 def test_other_competitions_cannot_fill_same_league_history() -> None:

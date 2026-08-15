@@ -7,6 +7,7 @@ from typing import Any
 
 
 FINISHED_STATUSES = {"FT", "AET", "PEN"}
+MIN_BASIC_HISTORY = 2
 
 
 class InsufficientHistory(ValueError):
@@ -66,7 +67,7 @@ def team_metrics(history: list[dict[str, Any]], team_id: int, *, league_id: int,
             goals_for.append(away_goals)
             goals_against.append(home_goals)
     matches = len(goals_for)
-    if matches < 3:
+    if matches < MIN_BASIC_HISTORY:
         raise InsufficientHistory(f"team {team_id} has only {matches} completed recent matches")
     return TeamMetrics(matches=matches, goals_for=sum(goals_for) / matches, goals_against=sum(goals_against) / matches)
 
@@ -102,13 +103,15 @@ def predict_fixture(fixture: dict[str, Any], home_history: list[dict[str, Any]],
     # model.  Data availability must never be presented as predictive confidence.
     evidence_stars = 2 if sample >= 6 else 1
     warnings = ["勝平負、大小球與BTTS均為未校準Poisson研究值；不可解讀為公平賠率、EV或命中率。"]
-    if sample < 6:
+    if sample < 3:
+        warnings.append("基礎Poisson僅使用每隊至少兩場同聯賽同賽季完場資料；輸出僅作低證據研究參考。")
+    elif sample < 6:
         warnings.append("同聯賽賽季近況樣本偏少；輸出僅作低證據研究參考。")
     elif sample < 10:
         warnings.append("同聯賽賽季近況少於10場；未納入完整主客場、xG、陣容或市場校準。")
     return PoissonPrediction(
         api_fixture_id=fixture["api_fixture_id"],
-        model_version="poisson-v2-league-research",
+        model_version="poisson-v2-basic-league-research" if sample < 3 else "poisson-v2-league-research",
         generated_at=generated_at.isoformat(),
         home_win_probability=round(home_win, 6),
         draw_probability=round(draw, 6),

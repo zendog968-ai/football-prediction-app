@@ -42,6 +42,33 @@ def unique_fixtures(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
+def prioritize_popular_fixtures(items: list[dict[str, Any]], max_fixtures: int) -> list[dict[str, Any]]:
+    """Keep at least one fixture per covered league before filling remaining capacity.
+
+    API-Football can return a large group of matches from one competition first.
+    A round-robin pass prevents leagues such as J1 from being omitted merely because
+    MLS or a European league has many fixtures on the same sync date.
+    """
+    ordered = sorted(items, key=lambda item: str(item.get("fixture", {}).get("date") or ""))
+    selected: list[dict[str, Any]] = []
+    represented: set[int] = set()
+    for fixture in ordered:
+        league_id = fixture.get("league", {}).get("id")
+        if not isinstance(league_id, int) or league_id in represented:
+            continue
+        selected.append(fixture)
+        represented.add(league_id)
+        if len(selected) >= max_fixtures:
+            return selected
+    for fixture in ordered:
+        if fixture in selected:
+            continue
+        selected.append(fixture)
+        if len(selected) >= max_fixtures:
+            break
+    return selected
+
+
 def run() -> dict[str, Any]:
     args = parse_args()
     settings = Settings.from_env()
@@ -54,7 +81,7 @@ def run() -> dict[str, Any]:
     live = client.live_fixtures()
     fixtures = unique_fixtures(scheduled + live)
     fixtures = [fixture for fixture in fixtures if fixture.get("league", {}).get("id") in settings.league_ids]
-    fixtures = fixtures[: settings.max_fixtures]
+    fixtures = prioritize_popular_fixtures(fixtures, settings.max_fixtures)
 
     store = None if args.dry_run else SupabaseStore.from_settings(settings)
     counts = {"fixtures": 0, "odds_snapshots": 0, "ai_predictions": 0, "prediction_skipped": 0}
