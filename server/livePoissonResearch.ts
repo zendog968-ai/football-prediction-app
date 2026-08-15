@@ -3,7 +3,7 @@ import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, 
 
 const API_BASE = "https://v3.football.api-sports.io";
 const FINISHED = new Set(["FT", "AET", "PEN"]);
-const POPULAR_LEAGUE_IDS = new Set([2, 3, 11, 13, 39, 48, 61, 71, 78, 94, 98, 135, 140, 188, 253, 262, 292]);
+const POPULAR_LEAGUE_IDS = new Set([2, 3, 11, 13, 39, 48, 61, 71, 78, 94, 98, 135, 140, 169, 188, 253, 262, 292]);
 
 type ApiFixture = {
   fixture?: { id?: number; date?: string; status?: { short?: string } };

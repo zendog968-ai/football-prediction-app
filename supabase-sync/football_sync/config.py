@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 
 # API-Football popular coverage: major European leagues and cups, Brazil, North
 # America, and the Asian leagues supported by the wider Aurelia data registry.
-POPULAR_LEAGUE_IDS = frozenset({2, 3, 11, 13, 39, 48, 61, 71, 78, 94, 98, 135, 140, 188, 253, 262, 292})
+POPULAR_LEAGUE_IDS = frozenset({2, 3, 11, 13, 39, 48, 61, 71, 78, 94, 98, 135, 140, 169, 188, 253, 262, 292})
 
 
 @dataclass(frozen=True)

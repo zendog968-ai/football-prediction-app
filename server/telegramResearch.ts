@@ -98,6 +98,7 @@ const LEAGUES: Record<string, { apiLeagueId: number; season: number }> = {
   J1: { apiLeagueId: 98, season: 2026 },
   FIN1: { apiLeagueId: 244, season: 2026 },
   KOR1: { apiLeagueId: 292, season: 2026 },
+  CSL: { apiLeagueId: 169, season: 2026 },
   POR1: { apiLeagueId: 94, season: 2026 },
   MEX1: { apiLeagueId: 262, season: 2026 },
   AUS1: { apiLeagueId: 188, season: 2026 },
@@ -384,6 +385,22 @@ const TEAM_QUERY_ALIASES: Record<string, string> = {
   "大阪飛腳": "gamba osaka",
   "大阪櫻花": "cerezo osaka",
   "廣島三箭": "sanfrecce hiroshima",
+  "町田澤維亞": "machida zelvia",
+  "柏雷素爾": "kashiwa reysol",
+  "京都不死鳥": "kyoto sanga",
+  "湘南比馬": "shonan bellmare",
+  "東京綠茵": "tokyo verdy",
+  "新潟天鵝": "albirex niigata",
+  "福岡黃蜂": "avispa fukuoka",
+  "名古屋鯨魚": "nagoya grampus",
+  "濟州SK": "jeju united",
+  "濟州聯": "jeju united",
+  "濟州聯隊": "jeju united",
+  "濟州聯合": "jeju united",
+  "Jeju United": "jeju united",
+  "Jeju United FC": "jeju united",
+  "Jeju SK": "jeju united",
+  "Jeju SK FC": "jeju united",
   "蔚山HD": "ulsan hd",
   "蔚山現代": "ulsan hd",
   "全北現代": "jeonbuk hyundai motors",
@@ -391,6 +408,11 @@ const TEAM_QUERY_ALIASES: Record<string, string> = {
   "FC首爾": "fc seoul",
   "大田市民": "daejeon hana citizen",
   "光州FC": "gwangju fc",
+  "江原FC": "gangwon fc",
+  "水原FC": "suwon fc",
+  "金泉尚武": "gimcheon sangmu",
+  "FC安養": "fc anyang",
+  "大邱FC": "daegu fc",
   "阿美利加": "club america",
   "墨西哥美洲": "club america",
   "瓜達拉哈拉": "guadalajara",
@@ -423,7 +445,21 @@ const TEAM_QUERY_ALIASES: Record<string, string> = {
   "布里斯班獅吼": "brisbane roar",
   "珀斯光輝": "perth glory",
   "威靈頓鳳凰": "wellington phoenix",
+  "西部聯": "western united",
+  "麥克阿瑟": "macarthur fc",
+  "紐卡素噴射機": "newcastle jets",
+  "上海海港": "shanghai port",
+  "上海申花": "shanghai shenhua",
+  "北京國安": "beijing guoan",
+  "山東泰山": "shandong luneng",
+  "成都蓉城": "chengdu rongcheng",
+  "天津津門虎": "tianjin jinmen tiger",
+  "浙江隊": "zhejiang professional",
 };
+
+function noRecentFixtureMessage(team: string): string {
+  return `⚠️ 暫未找到 ${team} 的近期賽事資料，請確認隊名或嘗試其他熱門隊伍。`;
+}
 
 export function parseTeamRequest(text: string | undefined): string | null {
   const team = text?.trim().replace(/^\/team(?:@[a-z0-9_]+)?\s*/i, "") || "";
@@ -457,7 +493,7 @@ export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedT
       return home === query || away === query || home.includes(query) || away.includes(query);
     })
     .sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime())[0];
-  if (!match) return "資料不足";
+  if (!match) return noRecentFixtureMessage(requestedTeam);
   return [`${match.homeTeam} vs ${match.awayTeam}`, formatCompactTable(match.compactMarkets, match.topScorelines, { homeWin: match.homeWin, draw: match.draw, awayWin: match.awayWin })].join("\n");
 }
 
@@ -526,7 +562,7 @@ async function telegramTeamResearch(request: Request, text: string | undefined):
   if (live) return { text: formatLiveTeamResearch(live) };
   return suggestions.length > 0
     ? { text: "請選擇相近隊伍", buttons: suggestions.map(item => ({ text: `${item.homeTeam} vs ${item.awayTeam}`, callback_data: `team:${item.fixtureId}` })) }
-    : { text: "暫未找到可驗證未來賽事" };
+    : { text: noRecentFixtureMessage(requestedTeam) };
 }
 
 async function telegramNaturalLanguageTeamResearch(request: Request, text: string | undefined): Promise<TeamResearchResponse | null> {
@@ -538,7 +574,7 @@ async function telegramNaturalLanguageTeamResearch(request: Request, text: strin
   if (fixture) return { text: await teamResearchForFixture(request, fixture) };
   const live = await fetchLiveTeamResearch(normalizedTeamQuery(requestedTeam)).catch(() => null);
   if (live) return { text: formatLiveTeamResearch(live) };
-  if (suggestions.length === 0) return isKnownTeamAlias(requestedTeam) ? { text: "暫未找到可驗證未來賽事" } : null;
+  if (suggestions.length === 0) return isKnownTeamAlias(requestedTeam) ? { text: noRecentFixtureMessage(requestedTeam) } : null;
   return {
     text: "請選擇相近隊伍",
     buttons: suggestions.map(item => ({ text: `${item.homeTeam} vs ${item.awayTeam}`, callback_data: `team:${item.fixtureId}` })),

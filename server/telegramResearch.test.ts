@@ -91,7 +91,7 @@ describe("Telegram系統指令", () => {
     expect(message).toContain("1. 2-1 (12.0%)");
   });
 
-  it("解析/team並以中文別名找到下一場已同步賽事，缺少賽事時只回覆資料不足", () => {
+  it("解析/team並以中文別名找到下一場已同步賽事，缺少賽事時回覆明確警示", () => {
     expect(parseTeamRequest("/team 曼聯")).toBe("曼聯");
     expect(parseTeamRequest("/team")).toBeNull();
     const fixtures = [{
@@ -104,7 +104,7 @@ describe("Telegram系統指令", () => {
       topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
     }] as never;
     expect(formatTeamResearch(fixtures, "曼聯", new Date("2026-08-15T00:00:00Z"))).toContain("Manchester United vs Example Away");
-    expect(formatTeamResearch(fixtures, "不存在的隊", new Date("2026-08-15T00:00:00Z"))).toBe("資料不足");
+    expect(formatTeamResearch(fixtures, "不存在的隊", new Date("2026-08-15T00:00:00Z"))).toBe("⚠️ 暫未找到 不存在的隊 的近期賽事資料，請確認隊名或嘗試其他熱門隊伍。");
   });
 
   it("支援主要聯賽的常用繁體中文隊名別名，不將無關簡稱模糊命中", () => {
@@ -123,16 +123,24 @@ describe("Telegram系統指令", () => {
     expect(formatTeamResearch(fixture("Inter Miami CF"), "國際邁阿密", now)).toContain("Inter Miami CF");
     expect(formatTeamResearch(fixture("Vissel Kobe"), "神戶勝利船", now)).toContain("Vissel Kobe");
     expect(formatTeamResearch(fixture("Vissel Kobe"), "神戸勝利船", now)).toContain("Vissel Kobe");
+    expect(formatTeamResearch(fixture("Jeju United FC"), "濟州SK", now)).toContain("Jeju United FC");
+    expect(formatTeamResearch(fixture("Jeju United FC"), "濟州聯", now)).toContain("Jeju United FC");
+    expect(formatTeamResearch(fixture("Jeju United FC"), "Jeju United", now)).toContain("Jeju United FC");
+    expect(formatTeamResearch(fixture("Gangwon FC"), "江原FC", now)).toContain("Gangwon FC");
+    expect(formatTeamResearch(fixture("Machida Zelvia"), "町田澤維亞", now)).toContain("Machida Zelvia");
+    expect(formatTeamResearch(fixture("Western United"), "西部聯", now)).toContain("Western United");
+    expect(formatTeamResearch(fixture("Shanghai Port"), "上海海港", now)).toContain("Shanghai Port");
     expect(formatTeamResearch(fixture("Ulsan HD FC"), "蔚山現代", now)).toContain("Ulsan HD FC");
     expect(formatTeamResearch(fixture("Cruz Azul"), "藍十字", now)).toContain("Cruz Azul");
     expect(formatTeamResearch(fixture("Flamengo"), "法林明高", now)).toContain("Flamengo");
     expect(formatTeamResearch(fixture("Melbourne Victory"), "墨爾本勝利", now)).toContain("Melbourne Victory");
-    expect(formatTeamResearch(fixture("Real Madrid"), "米蘭", now)).toBe("資料不足");
+    expect(formatTeamResearch(fixture("Real Madrid"), "米蘭", now)).toBe("⚠️ 暫未找到 米蘭 的近期賽事資料，請確認隊名或嘗試其他熱門隊伍。");
   });
 
   it("可從無斜線自然語言訊息抽取最長隊名別名", () => {
     expect(extractNaturalLanguageTeamQuery("請分析 神戸勝利船 下一場")).toBe("神戸勝利船");
     expect(extractNaturalLanguageTeamQuery("幫我睇下 FC東京")).toBe("FC東京");
+    expect(extractNaturalLanguageTeamQuery("請分析濟州SK近期賽事")).toBe("濟州SK");
     expect(extractNaturalLanguageTeamQuery("想知國際邁阿密的賽程")).toBe("國際邁阿密");
     expect(isKnownTeamAlias(extractNaturalLanguageTeamQuery("請分析 神戸勝利船 下一場"))).toBe(true);
     expect(isKnownTeamAlias("healthcheck")).toBe(false);
