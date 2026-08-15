@@ -65,7 +65,9 @@ describe("Telegram系統指令", () => {
       hasPrediction: true,
       compactMarkets: [
         { market: "主客和 (1X2)", selection: "主勝", probability: 0.62 },
-        { market: "入球大細 (Over/Under)", selection: "大 2.5", probability: 0.56 },
+        { market: "入球大細 1.5", selection: "大 1.5", probability: 0.78 },
+        { market: "入球大細 2.5", selection: "大 2.5", probability: 0.56 },
+        { market: "入球大細 3.5", selection: "小 3.5", probability: 0.64 },
         { market: "讓球盤 (Handicap)", selection: "主隊 -0.5", probability: 0.62 },
       ],
       topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
@@ -73,6 +75,8 @@ describe("Telegram系統指令", () => {
     }], new Date("2026-08-15T00:00:00Z"));
     expect(message).toContain("Example Home vs Example Away");
     expect(message).toContain("| 主客和 (1X2) | 主勝 | 62.0% |");
+    expect(message).toContain("| 入球大細 1.5 | 大 1.5 | 78.0% |");
+    expect(message).toContain("| 入球大細 3.5 | 小 3.5 | 64.0% |");
     expect(message).toContain("【最高機率波膽 Top 3】");
     expect(message).toContain("1. 2-1：12.0%");
   });

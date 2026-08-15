@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { handicapSelectionProbability, highestOutcome, topScorelines, totalSelectionProbability } from "./compactResearch";
+import { handicapSelectionProbability, highestOutcome, mainstreamTotals, topScorelines, totalSelectionProbability } from "./compactResearch";
 
 describe("compact research contract", () => {
   it("orders the three most likely scorelines from verified Poisson inputs", () => {
@@ -9,11 +9,18 @@ describe("compact research contract", () => {
     expect(scores[1]!.probability).toBeGreaterThanOrEqual(scores[2]!.probability);
   });
 
-  it("only derives a totals row for an explicit 2.5 market and a half/full handicap row", () => {
+  it("derives only supported mainstream totals and a half/full handicap row", () => {
     expect(totalSelectionProbability("Over 2.5", 1.4, 0.8)).toBeGreaterThan(0);
+    expect(totalSelectionProbability("Over 1.5", 1.4, 0.8)).toBeGreaterThan(totalSelectionProbability("Over 3.5", 1.4, 0.8)!);
     expect(totalSelectionProbability("Over 3.0", 1.4, 0.8)).toBeNull();
     expect(handicapSelectionProbability("Home -0.5", 1.4, 0.8)).toBeGreaterThan(0);
     expect(handicapSelectionProbability("Home -0.25", 1.4, 0.8)).toBeNull();
+  });
+
+  it("returns one high-probability direction for every mainstream totals line", () => {
+    const rows = mainstreamTotals(1.4, 0.8);
+    expect(rows.map(row => row.market)).toEqual(["入球大細 1.5", "入球大細 2.5", "入球大細 3.5"]);
+    expect(rows.every(row => row.probability >= 0.5)).toBe(true);
   });
 
   it("returns the highest complete 1X2 outcome without inventing partial probabilities", () => {

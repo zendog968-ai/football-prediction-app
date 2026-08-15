@@ -1,4 +1,4 @@
-import { handicapSelectionProbability, highestOutcome, topScorelines, totalSelectionProbability, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
+import { handicapSelectionProbability, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
 import { ENV } from "./_core/env";
 
 type CachedMarketSelection = { selection: string; odds: number | null };
@@ -149,14 +149,12 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       const expectedHomeGoals = normalizeProbability(metadata?.expected_home_goals) ?? null;
       const expectedAwayGoals = normalizeProbability(metadata?.expected_away_goals) ?? null;
       const storedScorelines = normalizeScorelines(metadata?.top_scorelines);
-      const totals = totalsByFixture.get(fixtureId);
       const handicap = handicapByFixture.get(fixtureId);
-      const totalProbability = totalSelectionProbability(totals?.selection, expectedHomeGoals, expectedAwayGoals);
       const handicapProbability = handicapSelectionProbability(handicap?.selection, expectedHomeGoals, expectedAwayGoals);
       const outcome = homeWin !== null && draw !== null && awayWin !== null ? highestOutcome(homeWin, draw, awayWin) : null;
       const compactMarkets = [
         outcome,
-        totalProbability !== null && totals ? { market: "入球大細 (Over/Under)" as const, selection: totals.selection.replace(/^Over/i, "大").replace(/^Under/i, "小"), probability: totalProbability } : null,
+        ...mainstreamTotals(expectedHomeGoals, expectedAwayGoals),
         handicapProbability !== null && handicap ? { market: "讓球盤 (Handicap)" as const, selection: handicap.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicapProbability } : null,
       ].filter((item): item is CompactMarketRow => item !== null);
       const eventTime = typeof fixture.event_time === "string" ? fixture.event_time : "";

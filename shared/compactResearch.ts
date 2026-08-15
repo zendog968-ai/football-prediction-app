@@ -1,7 +1,7 @@
 export type ScorelineProbability = { score: string; probability: number };
 
 export type CompactMarketRow = {
-  market: "主客和 (1X2)" | "入球大細 (Over/Under)" | "讓球盤 (Handicap)";
+  market: "主客和 (1X2)" | "入球大細 1.5" | "入球大細 2.5" | "入球大細 3.5" | "讓球盤 (Handicap)";
   selection: string;
   probability: number;
 };
@@ -37,10 +37,26 @@ export function topScorelines(homeMean: number | null | undefined, awayMean: num
 }
 
 export function totalSelectionProbability(selection: string | null | undefined, homeMean: number | null | undefined, awayMean: number | null | undefined): number | null {
-  const match = selection?.match(/^(Over|Under)\s+2\.5$/i);
+  const match = selection?.match(/^(Over|Under)\s+([123]\.5)$/i);
   if (!match || !validMean(homeMean) || !validMean(awayMean)) return null;
-  const over = scoreGrid(homeMean, awayMean).reduce((total, item) => total + (item.homeGoals + item.awayGoals >= 3 ? item.probability : 0), 0);
+  const line = Number(match[2]);
+  if (!Number.isFinite(line)) return null;
+  const over = scoreGrid(homeMean, awayMean).reduce((total, item) => total + (item.homeGoals + item.awayGoals > line ? item.probability : 0), 0);
   return match[1]?.toLowerCase() === "over" ? over : 1 - over;
+}
+
+export function mainstreamTotals(homeMean: number | null | undefined, awayMean: number | null | undefined): CompactMarketRow[] {
+  if (!validMean(homeMean) || !validMean(awayMean)) return [];
+  return [1.5, 2.5, 3.5].flatMap((line): CompactMarketRow[] => {
+    const over = totalSelectionProbability(`Over ${line}`, homeMean, awayMean);
+    if (over === null) return [];
+    const under = 1 - over;
+    return [{
+      market: `入球大細 ${line}` as CompactMarketRow["market"],
+      selection: over >= under ? `大 ${line}` : `小 ${line}`,
+      probability: Math.max(over, under),
+    }];
+  });
 }
 
 export function handicapSelectionProbability(selection: string | null | undefined, homeMean: number | null | undefined, awayMean: number | null | undefined): number | null {

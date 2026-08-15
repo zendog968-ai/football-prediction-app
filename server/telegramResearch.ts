@@ -16,7 +16,7 @@ import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
 import { sdk } from "./_core/sdk";
 import { getPrediction, getTeams, type PredictionResult } from "./prediction";
 import { getSupabaseUpcomingCache, type CachedUpcomingFixture } from "./supabaseCache";
-import { handicapSelectionProbability, highestOutcome, topScorelines, totalSelectionProbability, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
+import { handicapSelectionProbability, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
 
 export type ResearchWindow = "day" | "evening" | "settlement";
 export type ScheduleKind = "settlement" | "day_digest" | "evening_digest";
@@ -140,7 +140,9 @@ function formatCompactTable(rows: CompactMarketRow[], scorelines: ScorelineProba
     "| 盤口種類 | 預測選項 | 命中機率 (%) |",
     "| :--- | :--- | :--- |",
     row("主客和 (1X2)"),
-    row("入球大細 (Over/Under)"),
+    row("入球大細 1.5"),
+    row("入球大細 2.5"),
+    row("入球大細 3.5"),
     row("讓球盤 (Handicap)"),
     "",
     "【最高機率波膽 Top 3】",
@@ -544,14 +546,12 @@ export function assessMarketAnomaly(points: Array<{ selection: string; decimalOd
 function formatCandidate(candidate: Candidate): string {
   const homeMean = candidate.prediction.selected_features.dc_expected_home_goals;
   const awayMean = candidate.prediction.selected_features.dc_expected_away_goals;
-  const total = candidate.marketContext.find(item => item.marketName === "Goals Over/Under" && /^(Over|Under)\s+2\.5$/i.test(item.selection));
   const handicap = candidate.marketContext.find(item => item.marketName === "Asian Handicap" && /^(Home|Away)\s+[+-]?\d+(?:\.5)?$/i.test(item.selection));
   const outcome = highestOutcome(candidate.prediction.probabilities.home_win, candidate.prediction.probabilities.draw, candidate.prediction.probabilities.away_win);
-  const totalProbability = totalSelectionProbability(total?.selection, homeMean, awayMean);
   const handicapProbability = handicapSelectionProbability(handicap?.selection, homeMean, awayMean);
   const rows = [
     outcome,
-    total && totalProbability !== null ? { market: "入球大細 (Over/Under)" as const, selection: total.selection.replace(/^Over/i, "大").replace(/^Under/i, "小"), probability: totalProbability } : null,
+    ...mainstreamTotals(homeMean, awayMean),
     handicap && handicapProbability !== null ? { market: "讓球盤 (Handicap)" as const, selection: handicap.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicapProbability } : null,
   ].filter((item): item is CompactMarketRow => item !== null);
   return [
