@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -170,6 +170,12 @@ describe("Telegram系統指令", () => {
     const selected = rankDailyPicks([candidate(0.72, "medium"), candidate(0.81, "low"), candidate(0.64, "low"), candidate(0.6, "high"), candidate(0.85, "low", 19)]);
     expect(selected).toHaveLength(3);
     expect(selected.map(item => item.prediction.lean.probability)).toEqual([0.81, 0.72, 0.64]);
+  });
+
+  it("每日摘要在嚴格候選不足三場時，以可用候選依機率補足至最多三場", () => {
+    const candidate = (probability: number, risk: "low" | "medium" | "high", samples: number, available: boolean) => ({ prediction: { lean: { probability, risk_level: risk }, diagnostics: { dc_available: available, dc_history_match_count: samples } } }) as never;
+    const candidates = [candidate(0.62, "low", 25, true), candidate(0.59, "high", 6, true), candidate(0.55, "medium", 4, false), candidate(0.49, "high", 2, false)];
+    expect(selectDailyDigestPicks(candidates).map(item => item.prediction.lean.probability)).toEqual([0.62, 0.59, 0.55]);
   });
 
   it("只要有未來24小時fixture就列出，部分模型與盤口會以基礎分析而非暫無賽事呈現", () => {

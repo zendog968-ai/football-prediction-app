@@ -952,6 +952,19 @@ export function rankDailyPicks<T extends Pick<Candidate, "prediction">>(candidat
     .slice(0, 3);
 }
 
+export function selectDailyDigestPicks<T extends Pick<Candidate, "prediction">>(candidates: T[]): T[] {
+  const strict = rankDailyPicks(candidates);
+  if (strict.length >= 3) return strict;
+  const strictSet = new Set(strict);
+  const fallback = candidates
+    .filter(candidate => !strictSet.has(candidate))
+    .sort((left, right) => (
+      right.prediction.lean.probability - left.prediction.lean.probability
+      || right.prediction.diagnostics.dc_history_match_count - left.prediction.diagnostics.dc_history_match_count
+    ));
+  return [...strict, ...fallback].slice(0, 3);
+}
+
 function hktDateKey(value: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit" }).format(value);
 }
@@ -964,19 +977,23 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
   if (window === "evening" && latestDayDigest && hktDateKey(latestDayDigest.asOf) === hktDateKey(now)) {
     return { digestId: latestDayDigest.id, signalCount: 0 };
   }
-  await verifyApiFootballReadiness();
+  let apiReady = true;
+  try {
+    await verifyApiFootballReadiness();
+  } catch {
+    apiReady = false;
+  }
   const allFixtures: Array<{ leagueCode: string; fixtureId: number }> = [];
   const captureErrors: string[] = [];
-  for (const leagueCode of Object.keys(LEAGUES)) {
-    try {
-      const fixtures = await captureLeagueOdds(leagueCode);
-      allFixtures.push(...fixtures.map(item => ({ leagueCode, fixtureId: item.fixtureId })));
-    } catch (error) {
-      captureErrors.push(`${leagueCode}: ${error instanceof Error ? error.message : String(error)}`);
+  if (apiReady) {
+    for (const leagueCode of Object.keys(LEAGUES)) {
+      try {
+        const fixtures = await captureLeagueOdds(leagueCode);
+        allFixtures.push(...fixtures.map(item => ({ leagueCode, fixtureId: item.fixtureId })));
+      } catch (error) {
+        captureErrors.push(`${leagueCode}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
-  }
-  if (captureErrors.length > 0 || allFixtures.length === 0) {
-    throw new Error(`盤口資料品質閘門失敗，未產生或傳送研究摘要：${captureErrors.join(" | ") || "沒有可用fixture"}`);
   }
   const candidates: Candidate[] = [];
   for (const item of allFixtures.slice(0, 16)) {
@@ -987,15 +1004,19 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
       // Team naming / individual inference failures are intentionally skipped, not inferred.
     }
   }
-  const selected = rankDailyPicks(candidates);
+  const selected = selectDailyDigestPicks(candidates);
+  const liveFallback = selected.length > 0 || !apiReady ? [] : await fetchLiveUpcomingResearch(3).catch(() => []);
   const anomalyCandidates = candidates
     .filter(candidate => candidate.marketContext.some(market => Boolean(market.anomalySummary)))
     .slice(0, 3);
   const researchSection = selected.length > 0
     ? selected.map((candidate, index) => `${index + 1}. ${formatCandidate(candidate)}`).join("\n\n")
-    : "資料不足";
+    : liveFallback.length > 0
+      ? liveFallback.map((research, index) => `${index + 1}. ${formatLiveTeamResearch(research)}`).join("\n\n")
+      : "今日暫無可驗證未來賽事。";
   const content = researchSection;
-  const inserted = await db.insert(researchDigests).values({ window, asOf: now, content, signalCount: selected.length });
+  const signalCount = selected.length || liveFallback.length;
+  const inserted = await db.insert(researchDigests).values({ window, asOf: now, content, signalCount });
   const digestId = Number(inserted[0].insertId);
   const settlementRows = selected.flatMap(candidate => candidate.marketContext.map(market => ({
     digestId,
@@ -1005,7 +1026,7 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
   })));
   if (settlementRows.length > 0) await db.insert(researchSettlements).values(settlementRows);
   await deliverDigest(digestId, content);
-  return { digestId, signalCount: selected.length };
+  return { digestId, signalCount };
 }
 
 function splitAsianLine(line: number): number[] {
