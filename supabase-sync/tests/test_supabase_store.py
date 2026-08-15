@@ -55,9 +55,9 @@ def test_prediction_mapping_retains_research_label() -> None:
         "data_warning": "勝平負、大小球與BTTS均為未校準Poisson研究值；不可解讀為公平賠率、EV或命中率。",
         "generated_at": "2026-08-14T00:00:00+00:00",
     })
-    assert mapped["recommendation"].startswith("研究傾向：主隊傾向（")
-    assert "未校準Poisson" in mapped["recommendation"]
     assert "[AURELIA_META]" in mapped["recommendation"]
-    assert '"top_scorelines":[{"score":"1-0","probability":0.14}]' in mapped["recommendation"]
-    assert '"research_source":"英冠正式聯賽樣本＋聯賽平均及主場優勢校準"' in mapped["recommendation"]
+    assert '"h":1.5' in mapped["recommendation"]
+    assert '"a":0.9' in mapped["recommendation"]
+    assert '"s":"英冠校準"' in mapped["recommendation"]
+    assert len(mapped["recommendation"]) <= 50
     assert mapped["confidence"] == 3

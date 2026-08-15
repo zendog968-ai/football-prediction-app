@@ -71,15 +71,11 @@ def odds_to_existing_schema(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def prediction_to_existing_schema(row: dict[str, Any]) -> dict[str, Any]:
-    warning = row.get("data_warning") or "未校準Poisson研究值；不可解讀為公平賠率、EV或命中率。"
+    championship = str(row.get("model_version", "")).startswith("poisson-v3-championship")
     metadata = json.dumps({
-        "version": 2,
-        "model_version": row.get("model_version"),
-        "research_source": "英冠正式聯賽樣本＋聯賽平均及主場優勢校準" if str(row.get("model_version", "")).startswith("poisson-v3-championship") else "隊伍歷史攻防",
-        "expected_home_goals": row.get("expected_home_goals"),
-        "expected_away_goals": row.get("expected_away_goals"),
-        "over_2_5_probability": row.get("over_2_5_probability"),
-        "top_scorelines": row.get("top_scorelines", []),
+        "h": row.get("expected_home_goals"),
+        "a": row.get("expected_away_goals"),
+        "s": "英冠校準" if championship else "隊史",
     }, ensure_ascii=False, separators=(",", ":"))
     return {
         "fixture_id": row["api_fixture_id"],
@@ -87,7 +83,7 @@ def prediction_to_existing_schema(row: dict[str, Any]) -> dict[str, Any]:
         "draw_prob": row["draw_probability"],
         "away_win_prob": row["away_win_probability"],
         "predicted_score": row["most_likely_score"],
-        "recommendation": f"研究傾向：{row['research_lean']}（{warning}）\n[AURELIA_META]{metadata}",
+        "recommendation": f"\n[AURELIA_META]{metadata}",
         "confidence": row["evidence_stars"],
         "updated_at": row["generated_at"],
     }

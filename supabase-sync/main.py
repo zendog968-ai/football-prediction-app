@@ -109,13 +109,14 @@ def run() -> dict[str, Any]:
             continue
         try:
             history_season = season - 1 if league_id == 40 and season > 0 else season
-            home_history = client.team_recent_fixtures(
+            history_loader = client.team_league_season_fixtures if league_id == 40 else client.team_recent_fixtures
+            home_history = history_loader(
                 fixture_row["home_team_id"],
                 limit=settings.history_matches,
                 league_id=league_id,
                 season=history_season,
             )
-            away_history = client.team_recent_fixtures(
+            away_history = history_loader(
                 fixture_row["away_team_id"],
                 limit=settings.history_matches,
                 league_id=league_id,

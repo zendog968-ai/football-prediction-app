@@ -67,7 +67,7 @@ describe("即時可驗證Poisson回退", () => {
 
   it("英冠布里斯托城即使缺少即時賠率，仍只以真實歷史賽果產出完整基礎Poisson研究", async () => {
     const championshipFixture = {
-      fixture: { id: 1563083, date: "2026-08-15T14:00:00+00:00", status: { short: "NS" } },
+      fixture: { id: 1563083, date: "2026-08-16T14:00:00+00:00", status: { short: "NS" } },
       league: { id: 40, season: 2026, name: "Championship" },
       teams: { home: { id: 55, name: "Bristol City" }, away: { id: 64, name: "Millwall" } },
     };
@@ -77,7 +77,7 @@ describe("即時可驗證Poisson回退", () => {
       json: async () => {
         if (input.includes("/teams?search=Bristol%20City")) return { response: [{ team: { id: 55, name: "Bristol City" } }], errors: [] };
         if (input.includes("/fixtures?team=55&next=10")) return { response: [championshipFixture], errors: [] };
-        if (input.includes("/fixtures?team=55&league=40&season=2025&last=10") || input.includes("/fixtures?team=64&league=40&season=2025&last=10") || input.includes("/fixtures?league=40&season=2025&last=40")) return { response: history, errors: [] };
+        if (input.includes("/fixtures?team=55&league=40&season=2025") || input.includes("/fixtures?team=64&league=40&season=2025") || input.includes("/fixtures?league=40&season=2025")) return { response: history, errors: [] };
         return { response: [], errors: [] };
       },
     }));

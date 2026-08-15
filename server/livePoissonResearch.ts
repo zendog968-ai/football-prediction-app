@@ -172,11 +172,14 @@ async function researchForFixture(fixture: ApiFixture): Promise<LiveTeamResearch
   if (!Number.isInteger(homeId) || !Number.isInteger(awayId) || !Number.isInteger(leagueId) || !Number.isInteger(season)) return null;
   const resolvedSeason = Number(season);
   const historySeason = leagueId === 40 && resolvedSeason > 0 ? resolvedSeason - 1 : resolvedSeason;
-  const [homeHistory, awayHistory, leagueHistory] = await Promise.all([
-    leagueId === 40 ? apiFootball<ApiFixture>(`/fixtures?team=${homeId}&league=${leagueId}&season=${historySeason}&last=10&timezone=UTC`) : apiFootball<ApiFixture>(`/fixtures?team=${homeId}&last=10&timezone=UTC`),
-    leagueId === 40 ? apiFootball<ApiFixture>(`/fixtures?team=${awayId}&league=${leagueId}&season=${historySeason}&last=10&timezone=UTC`) : apiFootball<ApiFixture>(`/fixtures?team=${awayId}&last=10&timezone=UTC`),
-    apiFootball<ApiFixture>(`/fixtures?league=${leagueId}&season=${historySeason}&last=40&timezone=UTC`),
+  const [rawHomeHistory, rawAwayHistory, rawLeagueHistory] = await Promise.all([
+    leagueId === 40 ? apiFootball<ApiFixture>(`/fixtures?team=${homeId}&league=${leagueId}&season=${historySeason}&timezone=UTC`) : apiFootball<ApiFixture>(`/fixtures?team=${homeId}&last=10&timezone=UTC`),
+    leagueId === 40 ? apiFootball<ApiFixture>(`/fixtures?team=${awayId}&league=${leagueId}&season=${historySeason}&timezone=UTC`) : apiFootball<ApiFixture>(`/fixtures?team=${awayId}&last=10&timezone=UTC`),
+    leagueId === 40 ? apiFootball<ApiFixture>(`/fixtures?league=${leagueId}&season=${historySeason}&timezone=UTC`) : apiFootball<ApiFixture>(`/fixtures?league=${leagueId}&season=${historySeason}&last=40&timezone=UTC`),
   ]);
+  const homeHistory = leagueId === 40 ? rawHomeHistory.slice(-10) : rawHomeHistory;
+  const awayHistory = leagueId === 40 ? rawAwayHistory.slice(-10) : rawAwayHistory;
+  const leagueHistory = leagueId === 40 ? rawLeagueHistory.slice(-40) : rawLeagueHistory;
   return deriveLivePoissonResearch(fixture, homeHistory, awayHistory, leagueHistory);
 }
 

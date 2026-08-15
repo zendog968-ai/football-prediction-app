@@ -46,6 +46,11 @@ function normalizeProbability(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : null;
 }
 
+function normalizeExpectedGoals(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 6 ? parsed : null;
+}
+
 function normalizeOdds(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 1 ? parsed : null;
@@ -163,10 +168,15 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       const draw = normalizeProbability(prediction?.draw_prob);
       const awayWin = normalizeProbability(prediction?.away_win_prob);
       const { recommendation, metadata } = parseResearchMetadata(prediction?.recommendation);
-      const expectedHomeGoals = normalizeProbability(metadata?.expected_home_goals) ?? null;
-      const expectedAwayGoals = normalizeProbability(metadata?.expected_away_goals) ?? null;
+      const expectedHomeGoals = normalizeExpectedGoals(metadata?.expected_home_goals ?? metadata?.h) ?? null;
+      const expectedAwayGoals = normalizeExpectedGoals(metadata?.expected_away_goals ?? metadata?.a) ?? null;
       const storedScorelines = normalizeScorelines(metadata?.top_scorelines);
-      const researchSource = typeof metadata?.research_source === "string" ? metadata.research_source : null;
+      const sourceCode = typeof metadata?.s === "string" ? metadata.s : null;
+      const researchSource = typeof metadata?.research_source === "string"
+        ? metadata.research_source
+        : sourceCode === "英冠校準"
+          ? "英冠正式聯賽樣本＋聯賽平均及主場優勢校準"
+          : sourceCode === "隊史" ? "隊伍歷史攻防" : null;
       const handicap = handicapByFixture.get(fixtureId);
       const handicap025 = handicap025ByFixture.get(fixtureId);
       const handicap075 = handicap075ByFixture.get(fixtureId);
@@ -174,6 +184,11 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       const handicap175 = handicap175ByFixture.get(fixtureId);
       const handicapProbability = handicapSelectionProbability(handicap?.selection, expectedHomeGoals, expectedAwayGoals);
       const handicapDistribution = handicapWinDistribution(handicap?.selection, expectedHomeGoals, expectedAwayGoals);
+      const fallbackHandicapSelection = homeWin !== null && awayWin !== null && expectedHomeGoals !== null && expectedAwayGoals !== null
+        ? (homeWin >= awayWin ? "Home -0.5" : "Away +0.5")
+        : null;
+      const fallbackHandicapProbability = handicapSelectionProbability(fallbackHandicapSelection, expectedHomeGoals, expectedAwayGoals);
+      const fallbackHandicapDistribution = handicapWinDistribution(fallbackHandicapSelection, expectedHomeGoals, expectedAwayGoals);
       const handicap025Probability = handicapSelectionProbability(handicap025?.selection, expectedHomeGoals, expectedAwayGoals);
       const handicap075Probability = handicapSelectionProbability(handicap075?.selection, expectedHomeGoals, expectedAwayGoals);
       const handicap125Probability = handicapSelectionProbability(handicap125?.selection, expectedHomeGoals, expectedAwayGoals);
@@ -186,7 +201,7 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       const compactMarkets = [
         outcome,
         ...mainstreamTotals(expectedHomeGoals, expectedAwayGoals),
-        handicapProbability !== null && handicap && handicapDistribution ? { market: "讓球盤 (Handicap)" as const, selection: handicap.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicapProbability, distribution: handicapDistribution } : null,
+        handicapProbability !== null && handicap && handicapDistribution ? { market: "讓球盤 (Handicap)" as const, selection: handicap.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicapProbability, distribution: handicapDistribution } : fallbackHandicapProbability !== null && fallbackHandicapSelection && fallbackHandicapDistribution ? { market: "讓球盤 (Handicap)" as const, selection: `${fallbackHandicapSelection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊")}（模型參考）`, probability: fallbackHandicapProbability, distribution: fallbackHandicapDistribution } : null,
         handicap025Probability !== null && handicap025 && handicap025Distribution ? { market: "亞洲讓球 0.25" as const, selection: handicap025.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap025Probability, distribution: handicap025Distribution } : null,
         handicap075Probability !== null && handicap075 && handicap075Distribution ? { market: "亞洲讓球 0.75" as const, selection: handicap075.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap075Probability, distribution: handicap075Distribution } : null,
         handicap125Probability !== null && handicap125 && handicap125Distribution ? { market: "亞洲讓球 1.25" as const, selection: handicap125.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap125Probability, distribution: handicap125Distribution } : null,
