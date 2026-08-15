@@ -109,6 +109,28 @@ describe("Telegram系統指令", () => {
     expect(formatTeamResearch(fixtures, "不存在的隊", new Date("2026-08-15T00:00:00Z"))).toBe("資料不足");
   });
 
+  it("支援主要聯賽的常用繁體中文隊名別名，不將無關簡稱模糊命中", () => {
+    const fixture = (homeTeam: string) => [{
+      fixtureId: 1000,
+      leagueName: "coverage",
+      eventTime: "2026-08-16T12:00:00Z",
+      homeTeam,
+      awayTeam: "Example Away",
+      compactMarkets: [],
+      topScorelines: [],
+    }] as never;
+    const now = new Date("2026-08-15T00:00:00Z");
+    expect(formatTeamResearch(fixture("Real Madrid"), "皇馬", now)).toContain("Real Madrid");
+    expect(formatTeamResearch(fixture("Bayern Munich"), "拜仁", now)).toContain("Bayern Munich");
+    expect(formatTeamResearch(fixture("Inter Miami CF"), "國際邁阿密", now)).toContain("Inter Miami CF");
+    expect(formatTeamResearch(fixture("Vissel Kobe"), "神戶勝利船", now)).toContain("Vissel Kobe");
+    expect(formatTeamResearch(fixture("Ulsan HD FC"), "蔚山現代", now)).toContain("Ulsan HD FC");
+    expect(formatTeamResearch(fixture("Cruz Azul"), "藍十字", now)).toContain("Cruz Azul");
+    expect(formatTeamResearch(fixture("Flamengo"), "法林明高", now)).toContain("Flamengo");
+    expect(formatTeamResearch(fixture("Melbourne Victory"), "墨爾本勝利", now)).toContain("Melbourne Victory");
+    expect(formatTeamResearch(fixture("Real Madrid"), "米蘭", now)).toBe("資料不足");
+  });
+
   it("每日精選只保留最多三場完整模型、非高風險候選並按機率排序", () => {
     const candidate = (probability: number, risk: "low" | "medium" | "high", samples = 30) => ({ prediction: { lean: { probability, risk_level: risk }, diagnostics: { dc_available: true, dc_history_match_count: samples } } }) as never;
     const selected = rankDailyPicks([candidate(0.72, "medium"), candidate(0.81, "low"), candidate(0.64, "low"), candidate(0.6, "high"), candidate(0.85, "low", 19)]);
