@@ -43,6 +43,13 @@
       "when": 1786814152416,
       "tag": "0005_lonely_satana",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1786814901953,
+      "tag": "0006_sweet_iron_monger",
+      "breakpoints": true
     }
   ]
 }

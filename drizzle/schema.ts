@@ -84,7 +84,8 @@ export const teamNameTranslationAudits = mysqlTable("team_name_translation_audit
   englishName: varchar("englishName", { length: 160 }).notNull(),
   previousTraditionalName: varchar("previousTraditionalName", { length: 160 }),
   nextTraditionalName: varchar("nextTraditionalName", { length: 160 }),
-  action: mysqlEnum("action", ["override", "reset"]).notNull(),
+  action: mysqlEnum("action", ["override", "reset", "undo"]).notNull(),
+  revertsAuditId: int("revertsAuditId").unique(),
   adminChatId: varchar("adminChatId", { length: 64 }).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, table => [index("translation_audit_english_idx").on(table.englishName), index("translation_audit_created_idx").on(table.createdAt)]);

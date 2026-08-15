@@ -20,7 +20,7 @@ import { getPrediction, getTeams, type PredictionResult } from "./prediction";
 import { getSupabaseUpcomingCache, type CachedUpcomingFixture } from "./supabaseCache";
 import { fetchLiveTeamResearch, fetchLiveUpcomingResearch, hasCompleteLiveResearch, type LiveTeamResearch } from "./livePoissonResearch";
 import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
-import { ensureTelegramTeamTranslations, listRecentTeamTranslations, overrideTeamTranslation, resetTeamTranslation } from "./teamTranslation";
+import { ensureTelegramTeamTranslations, listRecentTeamTranslations, overrideTeamTranslation, resetTeamTranslation, undoLastTeamTranslationOverride } from "./teamTranslation";
 
 export type ResearchWindow = "day" | "evening" | "settlement";
 export type ScheduleKind = "settlement" | "day_digest" | "evening_digest";
@@ -125,7 +125,7 @@ export const TELEGRAM_HELP_MESSAGE = [
   "/upcoming — 查詢未來24小時所有已同步賽事；完整模型以研究分析、部分資料以【基礎分析】呈現。",
   "/report — 顯示最新24小時賽事摘要（與/upcoming相同）。",
   "/team <隊伍名稱> — 查詢該隊最近一場已同步賽事的極簡機率表格與Top 3波膽。",
-  "/dict — 管理員查看近期自動隊名譯名；可用 /dict set 英文隊名 => 繁中譯名 覆寫，或 /dict reset 英文隊名 重設。",
+  "/dict — 管理員查看近期自動隊名譯名；可用 /dict set 英文隊名 => 繁中譯名 覆寫、/dict reset 英文隊名 重設，或 /dict undo 復原最近覆寫。",
   "/stop — 停止研究通知；可隨時以/start重新啟用。",
   "/help — 顯示本指令說明。",
   "",
@@ -308,9 +308,11 @@ export function parseDictionaryCommand(rawText: string | undefined):
   | { kind: "list" }
   | { kind: "set"; englishName: string; traditionalName: string }
   | { kind: "reset"; englishName: string }
+  | { kind: "undo" }
   | { kind: "invalid" } {
   const body = rawText?.trim().replace(/^\/dict(?:@[a-z0-9_]+)?\s*/i, "") ?? "";
   if (!body) return { kind: "list" };
+  if (/^undo$/i.test(body)) return { kind: "undo" };
   const set = /^set\s+(.+?)\s*=>\s*(.+)$/i.exec(body);
   if (set) return { kind: "set", englishName: set[1]!.trim(), traditionalName: set[2]!.trim() };
   const reset = /^reset\s+(.+)$/i.exec(body);
@@ -337,6 +339,13 @@ async function telegramDictionaryForAdmin(chatId: string, rawText: string | unde
       ? `↩️ 已重設 ${command.englishName}\n下次需要時會恢復使用詞庫或重新進行安全翻譯。`
       : `找不到 ${command.englishName} 的可重設自動／覆寫譯名。`;
   }
+  if (command.kind === "undo") {
+    const undone = await undoLastTeamTranslationOverride(chatId);
+    if (!undone) return "目前沒有可復原的詞典覆寫。";
+    return undone.traditionalName
+      ? `↩️ 已復原最近覆寫\n${undone.englishName} → ${undone.traditionalName}\n\n此復原已記錄至詞典稽核。`
+      : `↩️ 已移除最近覆寫\n${undone.englishName} 已還原至內建詞庫或待下次安全翻譯。`;
+  }
   const recent = await listRecentTeamTranslations(12);
   if (!recent.length) return "📚 詞典目前沒有已快取的自動譯名。";
   return [
@@ -345,6 +354,7 @@ async function telegramDictionaryForAdmin(chatId: string, rawText: string | unde
     "",
     "覆寫：/dict set 英文隊名 => 繁中譯名",
     "重設：/dict reset 英文隊名",
+    "復原最近覆寫：/dict undo",
   ].join("\n");
 }
 

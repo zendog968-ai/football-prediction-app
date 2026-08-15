@@ -1,4 +1,4 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { teamNameTranslationAudits, teamNameTranslations } from "../drizzle/schema";
 import { clearRuntimeTeamTranslation, localizeTeamName, registerRuntimeTeamTranslation } from "@shared/teamDisplay";
 import { getDb } from "./db";
@@ -53,6 +53,38 @@ export async function resetTeamTranslation(input: { englishName: string; adminCh
   await db.insert(teamNameTranslationAudits).values({ englishName, previousTraditionalName: previous.traditionalName, nextTraditionalName: null, action: "reset", adminChatId: input.adminChatId });
   clearRuntimeTeamTranslation(englishName);
   return true;
+}
+
+export async function undoLastTeamTranslationOverride(adminChatId: string): Promise<{ englishName: string; traditionalName: string | null } | null> {
+  const db = await getDb();
+  if (!db) throw new Error("資料庫暫時無法使用。");
+  const [overrides, priorUndos] = await Promise.all([
+    db.select().from(teamNameTranslationAudits)
+      .where(and(eq(teamNameTranslationAudits.action, "override"), eq(teamNameTranslationAudits.adminChatId, adminChatId)))
+      .orderBy(desc(teamNameTranslationAudits.id)).limit(50),
+    db.select({ revertsAuditId: teamNameTranslationAudits.revertsAuditId }).from(teamNameTranslationAudits)
+      .where(and(eq(teamNameTranslationAudits.action, "undo"), eq(teamNameTranslationAudits.adminChatId, adminChatId))),
+  ]);
+  const reverted = new Set(priorUndos.map(row => row.revertsAuditId).filter((id): id is number => id !== null));
+  const target = overrides.find(row => !reverted.has(row.id));
+  if (!target) return null;
+  if (target.previousTraditionalName) {
+    await db.insert(teamNameTranslations).values({ englishName: target.englishName, traditionalName: target.previousTraditionalName, source: "curated" })
+      .onDuplicateKeyUpdate({ set: { traditionalName: target.previousTraditionalName, source: "curated" } });
+    registerRuntimeTeamTranslation(target.englishName, target.previousTraditionalName);
+  } else {
+    await db.delete(teamNameTranslations).where(eq(teamNameTranslations.englishName, target.englishName));
+    clearRuntimeTeamTranslation(target.englishName);
+  }
+  await db.insert(teamNameTranslationAudits).values({
+    englishName: target.englishName,
+    previousTraditionalName: target.nextTraditionalName,
+    nextTraditionalName: target.previousTraditionalName,
+    action: "undo",
+    revertsAuditId: target.id,
+    adminChatId,
+  });
+  return { englishName: target.englishName, traditionalName: target.previousTraditionalName };
 }
 
 export async function ensureTelegramTeamTranslations(names: string[]): Promise<void> {

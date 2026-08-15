@@ -366,3 +366,6 @@
 - [x] 核實Telegram管理員識別方式與既有LLM隊名翻譯快取資料結構：以telegram_subscriptions.isAdmin控制；唯一已啟用、已驗證的專案擁有者訂閱已安全標記為管理員。
 - [x] 實作管理員專用/dict檢視、指令式覆寫與翻譯來源稽核流程：支援檢視近期翻譯、`/dict set 英文 => 繁中`與`/dict reset 英文`；所有更改寫入team_name_translation_audits。
 - [x] 補上授權、覆寫與格式回歸測試，完成正式Webhook驗證與發布：96項測試、型別檢查與建置已通過；正式管理員/dict檢視、`set Atlante FC => 亞特蘭特`及`reset Atlante FC`均回傳HTTP 200，覆寫／重設稽核已寫入且Webhook無積壓或最後錯誤。
+- [x] 核實最近覆寫稽核列與可安全復原的資料條件：只選取管理員最近且尚未被undo稽核關聯的override，避免同一操作重複回退。
+- [x] 實作管理員專用/dict undo、還原稽核與詞典快取刷新流程：undo會復原上一譯名或移除覆寫、清除／更新記憶體快取，並以revertsAuditId寫入單次可追溯稽核。
+- [ ] 補上復原回歸測試，完成正式Webhook測試、建置與發布：31項相關測試、型別檢查與建置已通過，待正式/dict undo端到端驗證。
