@@ -31,6 +31,11 @@ describe("Telegram研究排程", () => {
       expect.objectContaining({ kind: "evening_digest", cron: "0 30 10 * * *", path: "/api/scheduled/research-evening" }),
     ]));
   });
+
+  it("日間與晚間摘要具有獨立排程，不應互相取代", () => {
+    expect(RESEARCH_SCHEDULES.filter(schedule => schedule.kind === "day_digest")).toHaveLength(1);
+    expect(RESEARCH_SCHEDULES.filter(schedule => schedule.kind === "evening_digest")).toHaveLength(1);
+  });
 });
 
 describe("Telegram系統指令", () => {

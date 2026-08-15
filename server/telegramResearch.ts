@@ -714,18 +714,30 @@ async function sendTelegramMessage(chatId: string, text: string, buttons?: Teleg
     return Array.from({ length: Math.ceil(chunk.length / 3500) }, (_, index) => chunk.slice(index * 3500, (index + 1) * 3500));
   }) ?? [text];
   for (const chunk of chunks) {
-    const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: toTelegramHtml(chunk),
-        parse_mode: "HTML",
-        disable_web_page_preview: true,
-        ...(buttons && chunks.length === 1 ? { reply_markup: { inline_keyboard: buttons.map(button => [button]) } } : {}),
-      }),
-    });
-    if (!response.ok) throw new Error(`Telegram訊息送出失敗（${response.status}）。`);
+    let lastError = "未知錯誤";
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: toTelegramHtml(chunk),
+            parse_mode: "HTML",
+            disable_web_page_preview: true,
+            ...(buttons && chunks.length === 1 ? { reply_markup: { inline_keyboard: buttons.map(button => [button]) } } : {}),
+          }),
+        });
+        if (response.ok) break;
+        lastError = `Telegram訊息送出失敗（${response.status}）。`;
+        const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+        if (!retryable || attempt === 2) throw new Error(lastError);
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+        if (attempt === 2) throw new Error(lastError);
+      }
+      await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
+    }
   }
 }
 
@@ -746,6 +758,12 @@ async function getSubscriptionChatIds(): Promise<string[]> {
     .from(telegramSubscriptions)
     .where(eq(telegramSubscriptions.isActive, true));
   return rows.map(row => row.chatId);
+}
+
+async function notifyDigestFailure(kind: ScheduleKind, detail: string): Promise<void> {
+  const chatIds = await getSubscriptionChatIds();
+  const message = `⚠️ Aurelia Football 自動摘要失敗\n時段：${kind}\n系統將依Heartbeat規則重試。\n原因：${detail.slice(0, 300)}`;
+  await Promise.allSettled(chatIds.map(chatId => sendTelegramMessage(chatId, message)));
 }
 
 async function deliverDigest(digestId: number, content: string): Promise<void> {
@@ -986,10 +1004,6 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
   const now = new Date();
   const db = await getDb();
   if (!db) throw new Error("資料庫暫時無法使用。");
-  const latestDayDigest = (await db.select().from(researchDigests).where(eq(researchDigests.window, "day")).orderBy(desc(researchDigests.asOf)).limit(1))[0];
-  if (window === "evening" && latestDayDigest && hktDateKey(latestDayDigest.asOf) === hktDateKey(now)) {
-    return { digestId: latestDayDigest.id, signalCount: 0 };
-  }
   let apiReady = true;
   try {
     await verifyApiFootballReadiness();
@@ -1235,6 +1249,7 @@ export async function handleScheduledResearch(req: Request, res: Response, kind:
     if (db) {
       await db.update(researchScheduleJobs).set({ lastError: detail.slice(0, 4000) }).where(eq(researchScheduleJobs.kind, kind)).catch(() => undefined);
     }
+    await notifyDigestFailure(kind, detail).catch(() => undefined);
     res.status(500).json({ error: detail, timestamp: new Date().toISOString(), context: { kind } });
   }
 }
