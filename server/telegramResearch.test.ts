@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assessMarketAnomaly, describeMarketMovement, formatCachedUpcoming, formatTelegramStatus, normalizeTelegramCommand, parseTrendRequest, probabilityBars, renderOddsTrend, RESEARCH_SCHEDULES, settlementForScores, TELEGRAM_HELP_MESSAGE, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, formatCachedUpcoming, formatTeamResearch, formatTelegramStatus, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, settlementForScores, TELEGRAM_HELP_MESSAGE, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -39,6 +39,7 @@ describe("Telegram系統指令", () => {
     expect(TELEGRAM_HELP_MESSAGE).toContain("/trend");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/upcoming");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/report");
+    expect(TELEGRAM_HELP_MESSAGE).toContain("/team");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/stop");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/help");
     expect(TELEGRAM_HELP_MESSAGE).toContain("並非投注或資金建議");
@@ -90,6 +91,29 @@ describe("Telegram系統指令", () => {
     expect(message).toContain("| 亞洲讓球 1.75 | 客隊 +1.75（全贏 56.0%｜半贏 24.0%｜走盤 0.0%｜半輸 8.0%｜全輸 12.0%） | 68.0% |");
     expect(message).toContain("【最高機率波膽 Top 3】");
     expect(message).toContain("1. 2-1：12.0%");
+  });
+
+  it("解析/team並以中文別名找到下一場已同步賽事，缺少賽事時只回覆資料不足", () => {
+    expect(parseTeamRequest("/team 曼聯")).toBe("曼聯");
+    expect(parseTeamRequest("/team")).toBeNull();
+    const fixtures = [{
+      fixtureId: 999,
+      leagueName: "EPL",
+      eventTime: "2026-08-16T12:00:00Z",
+      homeTeam: "Manchester United",
+      awayTeam: "Example Away",
+      compactMarkets: [{ market: "主客和 (1X2)", selection: "主勝", probability: 0.61 }],
+      topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
+    }] as never;
+    expect(formatTeamResearch(fixtures, "曼聯", new Date("2026-08-15T00:00:00Z"))).toContain("Manchester United vs Example Away");
+    expect(formatTeamResearch(fixtures, "不存在的隊", new Date("2026-08-15T00:00:00Z"))).toBe("資料不足");
+  });
+
+  it("每日精選只保留最多三場完整模型、非高風險候選並按機率排序", () => {
+    const candidate = (probability: number, risk: "low" | "medium" | "high", samples = 30) => ({ prediction: { lean: { probability, risk_level: risk }, diagnostics: { dc_available: true, dc_history_match_count: samples } } }) as never;
+    const selected = rankDailyPicks([candidate(0.72, "medium"), candidate(0.81, "low"), candidate(0.64, "low"), candidate(0.6, "high"), candidate(0.85, "low", 19)]);
+    expect(selected).toHaveLength(3);
+    expect(selected.map(item => item.prediction.lean.probability)).toEqual([0.81, 0.72, 0.64]);
   });
 
   it("只要有未來24小時fixture就列出，部分模型與盤口會以基礎分析而非暫無賽事呈現", () => {

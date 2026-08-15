@@ -116,6 +116,7 @@ export const TELEGRAM_HELP_MESSAGE = [
   "/trend <fixture ID> 或 /trend 主隊 vs 客隊 — 查詢已保存盤口走勢。",
   "/upcoming — 查詢未來24小時所有已同步賽事；完整模型以研究分析、部分資料以【基礎分析】呈現。",
   "/report — 顯示最新24小時賽事摘要（與/upcoming相同）。",
+  "/team <隊伍名稱> — 查詢該隊最近一場已同步賽事的極簡機率表格與Top 3波膽。",
   "/stop — 停止研究通知；可隨時以/start重新啟用。",
   "/help — 顯示本指令說明。",
   "",
@@ -266,6 +267,68 @@ export function parseTrendRequest(text: string | undefined): { fixtureId?: numbe
   const parts = body.split(/\s+vs\s+/i).map(part => part.trim()).filter(Boolean);
   if (parts.length !== 2 || parts.some(part => part.length < 2 || part.length > 120)) return null;
   return { homeTeam: parts[0], awayTeam: parts[1] };
+}
+
+const TEAM_QUERY_ALIASES: Record<string, string> = {
+  "曼聯": "manchester united",
+  "阿仙奴": "arsenal",
+  "阿森纳": "arsenal",
+  "利物浦": "liverpool",
+  "車路士": "chelsea",
+  "曼城": "manchester city",
+  "熱刺": "tottenham",
+  "巴塞隆拿": "barcelona",
+  "皇家馬德里": "real madrid",
+};
+
+export function parseTeamRequest(text: string | undefined): string | null {
+  const team = text?.trim().replace(/^\/team(?:@[a-z0-9_]+)?\s*/i, "") || "";
+  return team.length >= 2 && team.length <= 120 ? team : null;
+}
+
+function normalizedTeamQuery(value: string): string {
+  return normalizeTeam(TEAM_QUERY_ALIASES[value.trim()] || value);
+}
+
+export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedTeam: string, now = new Date()): string {
+  const query = normalizedTeamQuery(requestedTeam);
+  const match = fixtures
+    .filter(item => new Date(item.eventTime).getTime() >= now.getTime())
+    .filter(item => {
+      const home = normalizeTeam(item.homeTeam);
+      const away = normalizeTeam(item.awayTeam);
+      return home === query || away === query || home.includes(query) || away.includes(query);
+    })
+    .sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime())[0];
+  if (!match) return "資料不足";
+  return [`${match.homeTeam} vs ${match.awayTeam}`, formatCompactTable(match.compactMarkets, match.topScorelines)].join("\n");
+}
+
+function findUpcomingTeamFixture(fixtures: CachedUpcomingFixture[], requestedTeam: string, now = new Date()): CachedUpcomingFixture | null {
+  const query = normalizedTeamQuery(requestedTeam);
+  return fixtures
+    .filter(item => new Date(item.eventTime).getTime() >= now.getTime())
+    .filter(item => {
+      const home = normalizeTeam(item.homeTeam);
+      const away = normalizeTeam(item.awayTeam);
+      return home === query || away === query || home.includes(query) || away.includes(query);
+    })
+    .sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime())[0] ?? null;
+}
+
+async function telegramTeamResearch(request: Request, text: string | undefined): Promise<string> {
+  const requestedTeam = parseTeamRequest(text);
+  if (!requestedTeam) return "資料不足";
+  const cached = await getSupabaseUpcomingCache();
+  const fixture = cached.available ? findUpcomingTeamFixture(cached.fixtures, requestedTeam) : null;
+  if (!fixture) return "資料不足";
+  const db = await getDb();
+  const latestSnapshot = db ? (await db.select({ leagueCode: oddsSnapshots.leagueCode }).from(oddsSnapshots)
+    .where(eq(oddsSnapshots.apiFixtureId, fixture.fixtureId)).orderBy(desc(oddsSnapshots.capturedAt)).limit(1))[0] : null;
+  const candidate = latestSnapshot?.leagueCode && LEAGUES[latestSnapshot.leagueCode]
+    ? await resolveCandidate(request, latestSnapshot.leagueCode, fixture.fixtureId).catch(() => null)
+    : null;
+  return candidate ? formatCandidate(candidate) : formatTeamResearch([fixture], requestedTeam);
 }
 
 type StoredTrendSnapshot = {
@@ -591,8 +654,30 @@ function formatCandidate(candidate: Candidate): string {
   ].join("\n");
 }
 
+export function rankDailyPicks<T extends Pick<Candidate, "prediction">>(candidates: T[]): T[] {
+  const riskScore = (level: PredictionResult["lean"]["risk_level"]) => level === "low" ? 2 : level === "medium" ? 1 : 0;
+  return candidates
+    .filter(candidate => candidate.prediction.lean.risk_level !== "high" && candidate.prediction.diagnostics.dc_available && candidate.prediction.diagnostics.dc_history_match_count >= 20)
+    .sort((left, right) => (
+      right.prediction.lean.probability - left.prediction.lean.probability
+      || riskScore(right.prediction.lean.risk_level) - riskScore(left.prediction.lean.risk_level)
+      || right.prediction.diagnostics.dc_history_match_count - left.prediction.diagnostics.dc_history_match_count
+    ))
+    .slice(0, 3);
+}
+
+function hktDateKey(value: Date): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit" }).format(value);
+}
+
 export async function runResearchDigest(request: Request, window: "day" | "evening"): Promise<{ digestId: number; signalCount: number }> {
   const now = new Date();
+  const db = await getDb();
+  if (!db) throw new Error("資料庫暫時無法使用。");
+  const latestDayDigest = (await db.select().from(researchDigests).where(eq(researchDigests.window, "day")).orderBy(desc(researchDigests.asOf)).limit(1))[0];
+  if (window === "evening" && latestDayDigest && hktDateKey(latestDayDigest.asOf) === hktDateKey(now)) {
+    return { digestId: latestDayDigest.id, signalCount: 0 };
+  }
   await verifyApiFootballReadiness();
   const allFixtures: Array<{ leagueCode: string; fixtureId: number }> = [];
   const captureErrors: string[] = [];
@@ -616,10 +701,7 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
       // Team naming / individual inference failures are intentionally skipped, not inferred.
     }
   }
-  const selected = candidates
-    .filter(candidate => candidate.prediction.lean.risk_level !== "high")
-    .sort((a, b) => b.prediction.lean.probability - a.prediction.lean.probability)
-    .slice(0, 2);
+  const selected = rankDailyPicks(candidates);
   const anomalyCandidates = candidates
     .filter(candidate => candidate.marketContext.some(market => Boolean(market.anomalySummary)))
     .slice(0, 3);
@@ -627,8 +709,6 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
     ? selected.map((candidate, index) => `${index + 1}. ${formatCandidate(candidate)}`).join("\n\n")
     : "資料不足";
   const content = researchSection;
-  const db = await getDb();
-  if (!db) throw new Error("資料庫暫時無法使用。");
   const inserted = await db.insert(researchDigests).values({ window, asOf: now, content, signalCount: selected.length });
   const digestId = Number(inserted[0].insertId);
   const settlementRows = selected.flatMap(candidate => candidate.marketContext.map(market => ({
@@ -734,6 +814,8 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     await sendTelegramMessage(String(chatId), await telegramTrendForRequest(message?.text));
   } else if (text === "/upcoming" || text === "/report") {
     await sendTelegramMessage(String(chatId), await telegramUpcoming());
+  } else if (text === "/team") {
+    await sendTelegramMessage(String(chatId), await telegramTeamResearch(req, message?.text));
   } else if (text === "/status") {
     await sendTelegramMessage(String(chatId), await telegramStatusForChat(String(chatId)));
   } else if (text === "/stop") {
