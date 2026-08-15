@@ -366,6 +366,7 @@ const TEAM_QUERY_ALIASES: Record<string, string> = {
   "FC東京": "fc tokyo",
   "東京FC": "fc tokyo",
   "神戶勝利船": "vissel kobe",
+  "神戸勝利船": "vissel kobe",
   "橫濱水手": "yokohama f marinos",
   "浦和紅鑽": "urawa reds",
   "鹿島鹿角": "kashima antlers",
@@ -497,6 +498,21 @@ async function telegramTeamResearch(request: Request, text: string | undefined):
   return suggestions.length > 0
     ? { text: "資料不足", buttons: suggestions.map(item => ({ text: `${item.homeTeam} vs ${item.awayTeam}`, callback_data: `team:${item.fixtureId}` })) }
     : { text: "資料不足" };
+}
+
+async function telegramNaturalLanguageTeamResearch(request: Request, text: string | undefined): Promise<TeamResearchResponse | null> {
+  const requestedTeam = text?.trim();
+  if (!requestedTeam || requestedTeam.length > 120) return null;
+  const cached = await getSupabaseUpcomingCache();
+  if (!cached.available) return null;
+  const fixture = findUpcomingTeamFixture(cached.fixtures, requestedTeam);
+  const suggestions = fixture ? [] : suggestTeamFixtures(cached.fixtures, requestedTeam);
+  if (!fixture && suggestions.length === 0) return null;
+  if (fixture) return { text: await teamResearchForFixture(request, fixture) };
+  return {
+    text: "資料不足",
+    buttons: suggestions.map(item => ({ text: `${item.homeTeam} vs ${item.awayTeam}`, callback_data: `team:${item.fixtureId}` })),
+  };
 }
 
 type StoredTrendSnapshot = {
@@ -1016,6 +1032,9 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
   } else if (text === "/team") {
     const result = await telegramTeamResearch(req, message?.text);
     await sendTelegramMessage(String(chatId), result.text, result.buttons);
+  } else if (!text.startsWith("/")) {
+    const result = await telegramNaturalLanguageTeamResearch(req, message?.text);
+    if (result) await sendTelegramMessage(String(chatId), result.text, result.buttons);
   } else if (text === "/status") {
     await sendTelegramMessage(String(chatId), await telegramStatusForChat(String(chatId)));
   } else if (text === "/stop") {

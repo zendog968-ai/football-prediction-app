@@ -124,6 +124,7 @@ describe("Telegram系統指令", () => {
     expect(formatTeamResearch(fixture("Bayern Munich"), "拜仁", now)).toContain("Bayern Munich");
     expect(formatTeamResearch(fixture("Inter Miami CF"), "國際邁阿密", now)).toContain("Inter Miami CF");
     expect(formatTeamResearch(fixture("Vissel Kobe"), "神戶勝利船", now)).toContain("Vissel Kobe");
+    expect(formatTeamResearch(fixture("Vissel Kobe"), "神戸勝利船", now)).toContain("Vissel Kobe");
     expect(formatTeamResearch(fixture("Ulsan HD FC"), "蔚山現代", now)).toContain("Ulsan HD FC");
     expect(formatTeamResearch(fixture("Cruz Azul"), "藍十字", now)).toContain("Cruz Azul");
     expect(formatTeamResearch(fixture("Flamengo"), "法林明高", now)).toContain("Flamengo");
