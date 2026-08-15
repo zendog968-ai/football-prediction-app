@@ -136,33 +136,31 @@ export function probabilityBars(values: { homeWin: number; draw: number; awayWin
   ].join("\n");
 }
 
-function formatCompactTable(rows: CompactMarketRow[], scorelines: ScorelineProbability[]): string {
-  const row = (market: CompactMarketRow["market"]) => {
-    const found = rows.find(item => item.market === market);
-    const selection = found ? `${found.selection}${found.distribution ? `（全贏 ${(found.distribution.fullWin * 100).toFixed(1)}%｜半贏 ${(found.distribution.halfWin * 100).toFixed(1)}%｜走盤 ${(found.distribution.push * 100).toFixed(1)}%｜半輸 ${(found.distribution.halfLoss * 100).toFixed(1)}%｜全輸 ${(found.distribution.fullLoss * 100).toFixed(1)}%）` : ""}` : "資料不足";
-    return `${market}　${selection}　${found ? `${(found.probability * 100).toFixed(1)}%` : "—"}`;
-  };
+type OutcomeSnapshot = { homeWin: number; draw: number; awayWin: number };
+
+function formatCompactTable(rows: CompactMarketRow[], scorelines: ScorelineProbability[], outcomes: OutcomeSnapshot): string {
+  const percent = (value: number) => Number.isFinite(value) && value >= 0 && value <= 1 ? `${(value * 100).toFixed(1)}%` : "暫無可驗證機率";
+  const total = rows.find(item => item.market === "入球大細 2.5");
+  const handicap = rows.find(item => item.market === "讓球盤 (Handicap)")
+    ?? rows.find(item => item.market.startsWith("亞洲讓球"));
+  const over = total?.selection.startsWith("大") ? total.probability : total ? 1 - total.probability : null;
+  const under = total ? 1 - (over ?? 0) : null;
   return [
-    "盤口種類　預測選項　命中機率 (%)",
-    row("主客和 (1X2)"),
-    row("入球大細 1.5"),
-    row("入球大細 2.5"),
-    row("入球大細 3.5"),
-    row("入球大細 4.5"),
-    row("讓球盤 (Handicap)"),
-    row("亞洲讓球 0.25"),
-    row("亞洲讓球 0.75"),
-    row("亞洲讓球 1.25"),
-    row("亞洲讓球 1.75"),
+    "【核心盤口勝率】",
+    `• 主客和 (1X2)：主勝 ${percent(outcomes.homeWin)} | 和局 ${percent(outcomes.draw)} | 客勝 ${percent(outcomes.awayWin)}`,
+    `• 入球大細 (2.5球)：${over === null || under === null ? "暫無可驗證盤口" : `大 2.5 (${percent(over)}) | 小 2.5 (${percent(under)})`}`,
+    `• 讓球盤${handicap ? ` (${handicap.selection})：${handicap.selection} 贏盤 (${percent(handicap.probability)})` : "：暫無可驗證盤口"}`,
     "",
     "【最高機率波膽 Top 3】",
-    ...[0, 1, 2].map(index => `${index + 1}. ${scorelines[index] ? `${scorelines[index]!.score}：${(scorelines[index]!.probability * 100).toFixed(1)}%` : "資料不足"}`),
+    ...[0, 1, 2].map(index => `${index + 1}. ${scorelines[index] ? `${scorelines[index]!.score} (${percent(scorelines[index]!.probability)})` : "暫無可驗證波膽"}`),
   ].join("\n");
 }
 
-export function toTelegramHtmlPre(text: string): string {
+export function toTelegramHtml(text: string): string {
   const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return `<pre>${escaped}</pre>`;
+  return escaped
+    .replace("【核心盤口勝率】", "<b>【核心盤口勝率】</b>")
+    .replace("【最高機率波膽 Top 3】", "<b>【最高機率波膽 Top 3】</b>");
 }
 
 export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = new Date()): string {
@@ -175,7 +173,7 @@ export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = ne
   if (!upcoming.length) return "未來24小時暫無已同步賽事。若有新fixture寫入Supabase，/upcoming會優先列出，即使進階研究或盤口尚未完整同步。";
   return upcoming.map((item, index) => [
     `${index + 1}. ${item.homeTeam} vs ${item.awayTeam}`,
-    formatCompactTable(item.compactMarkets, item.topScorelines),
+    formatCompactTable(item.compactMarkets, item.topScorelines, { homeWin: item.homeWin, draw: item.draw, awayWin: item.awayWin }),
   ].join("\n")).join("\n\n");
 }
 
@@ -460,11 +458,11 @@ export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedT
     })
     .sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime())[0];
   if (!match) return "資料不足";
-  return [`${match.homeTeam} vs ${match.awayTeam}`, formatCompactTable(match.compactMarkets, match.topScorelines)].join("\n");
+  return [`${match.homeTeam} vs ${match.awayTeam}`, formatCompactTable(match.compactMarkets, match.topScorelines, { homeWin: match.homeWin, draw: match.draw, awayWin: match.awayWin })].join("\n");
 }
 
 export function formatLiveTeamResearch(research: LiveTeamResearch): string {
-  return [`${research.homeTeam} vs ${research.awayTeam}`, formatCompactTable(research.compactMarkets, research.topScorelines)].join("\n");
+  return [`${research.homeTeam} vs ${research.awayTeam}`, formatCompactTable(research.compactMarkets, research.topScorelines, research.outcomes)].join("\n");
 }
 
 function findUpcomingTeamFixture(fixtures: CachedUpcomingFixture[], requestedTeam: string, now = new Date()): CachedUpcomingFixture | null {
@@ -656,7 +654,7 @@ async function sendTelegramMessage(chatId: string, text: string, buttons?: Teleg
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         chat_id: chatId,
-        text: toTelegramHtmlPre(chunk),
+        text: toTelegramHtml(chunk),
         parse_mode: "HTML",
         disable_web_page_preview: true,
         ...(buttons && chunks.length === 1 ? { reply_markup: { inline_keyboard: buttons.map(button => [button]) } } : {}),
@@ -882,7 +880,11 @@ function formatCandidate(candidate: Candidate): string {
   ].filter((item): item is CompactMarketRow => item !== null);
   return [
     `${candidate.homeTeam} vs ${candidate.awayTeam}`,
-    formatCompactTable(rows, topScorelines(homeMean, awayMean)),
+    formatCompactTable(rows, topScorelines(homeMean, awayMean), {
+      homeWin: candidate.prediction.probabilities.home_win,
+      draw: candidate.prediction.probabilities.draw,
+      awayWin: candidate.prediction.probabilities.away_win,
+    }),
   ].join("\n");
 }
 

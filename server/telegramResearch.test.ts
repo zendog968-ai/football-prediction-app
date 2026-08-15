@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtmlPre, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -80,18 +80,15 @@ describe("Telegram系統指令", () => {
       odds: { home: 1.82, draw: 3.55, away: 4.4, capturedAt: "2026-08-15T10:00:00Z" },
     }], new Date("2026-08-15T00:00:00Z"));
     expect(message).toContain("Example Home vs Example Away");
-    expect(message).toContain("盤口種類　預測選項　命中機率 (%)");
-    expect(message).toContain("主客和 (1X2)　主勝　62.0%");
-    expect(message).toContain("入球大細 1.5　大 1.5　78.0%");
-    expect(message).toContain("入球大細 3.5　小 3.5　64.0%");
-    expect(message).toContain("入球大細 4.5　小 4.5　82.0%");
-    expect(message).toContain("讓球盤 (Handicap)　主隊 -1（全贏 47.0%｜半贏 0.0%｜走盤 21.0%｜半輸 0.0%｜全輸 32.0%）　47.0%");
-    expect(message).toContain("亞洲讓球 0.25　主隊 -0.25（全贏 37.0%｜半贏 0.0%｜走盤 0.0%｜半輸 24.0%｜全輸 39.0%）　37.0%");
-    expect(message).toContain("亞洲讓球 0.75　客隊 +0.75（全贏 49.0%｜半贏 24.0%｜走盤 0.0%｜半輸 11.0%｜全輸 16.0%）　61.0%");
-    expect(message).toContain("亞洲讓球 1.25　主隊 -1.25（全贏 24.0%｜半贏 24.0%｜走盤 0.0%｜半輸 19.0%｜全輸 33.0%）　36.0%");
-    expect(message).toContain("亞洲讓球 1.75　客隊 +1.75（全贏 56.0%｜半贏 24.0%｜走盤 0.0%｜半輸 8.0%｜全輸 12.0%）　68.0%");
+    expect(message).toContain("【核心盤口勝率】");
+    expect(message).toContain("主客和 (1X2)：主勝 62.0% | 和局 21.0% | 客勝 17.0%");
+    expect(message).toContain("入球大細 (2.5球)：大 2.5 (56.0%) | 小 2.5 (44.0%)");
+    expect(message).toContain("讓球盤 (主隊 -1)：主隊 -1 贏盤 (47.0%)");
+    expect(message).not.toContain("入球大細 1.5");
+    expect(message).not.toContain("亞洲讓球 0.25");
+    expect(message).not.toContain("全贏");
     expect(message).toContain("【最高機率波膽 Top 3】");
-    expect(message).toContain("1. 2-1：12.0%");
+    expect(message).toContain("1. 2-1 (12.0%)");
   });
 
   it("解析/team並以中文別名找到下一場已同步賽事，缺少賽事時只回覆資料不足", () => {
@@ -141,8 +138,8 @@ describe("Telegram系統指令", () => {
     expect(isKnownTeamAlias("healthcheck")).toBe(false);
   });
 
-  it("以Telegram HTML預格式包裝研究表格並轉義隊名特殊字元", () => {
-    expect(toTelegramHtmlPre("主客和　A&B <C>")).toBe("<pre>主客和　A&amp;B &lt;C&gt;</pre>");
+  it("以Telegram一般HTML文字包裝研究內容並轉義隊名特殊字元", () => {
+    expect(toTelegramHtml("【核心盤口勝率】\nA&B <C>")).toBe("<b>【核心盤口勝率】</b>\nA&amp;B &lt;C&gt;");
   });
 
   it("在無完全匹配時提供最多三個可選的相近未來賽事，不包含過去賽事", () => {
@@ -201,8 +198,8 @@ describe("Telegram系統指令", () => {
       odds: null,
     }], new Date("2026-08-15T01:00:00Z"));
     expect(message).toContain("Fallback Home vs Fallback Away");
-    expect(message).toContain("主客和 (1X2)　資料不足　—");
-    expect(message).toContain("3. 資料不足");
+    expect(message).toContain("主客和 (1X2)：主勝 48.0% | 和局 暫無可驗證機率 | 客勝 28.0%");
+    expect(message).toContain("3. 暫無可驗證波膽");
     expect(message).not.toContain("| :--- |");
     expect(message).not.toContain("Outside Window");
     expect(message).not.toContain("暫無已同步且證據充分");
