@@ -51,6 +51,29 @@ def test_j1_two_match_basic_history_produces_explicit_low_evidence_poisson() -> 
     assert prediction.data_warning is not None and "基礎Poisson" in prediction.data_warning
 
 
+def test_championship_uses_league_matches_and_marks_calibrated_research_scope() -> None:
+    assert 40 in POPULAR_LEAGUE_IDS
+    home_history = [
+        finished_fixture(55, 90, 1, 0, league_id=40, season=2025),
+        finished_fixture(91, 55, 1, 1, league_id=40, season=2025),
+        finished_fixture(55, 92, 4, 2, league_id=667, season=2025),  # 友誼賽：必須排除
+    ]
+    away_history = [
+        finished_fixture(64, 93, 1, 0, league_id=40, season=2025),
+        finished_fixture(94, 64, 0, 1, league_id=40, season=2025),
+        finished_fixture(64, 95, 3, 0, league_id=667, season=2025),  # 友誼賽：必須排除
+    ]
+    league_history = [
+        finished_fixture(100 + index, 200 + index, 1 + (index % 2), index % 2, league_id=40, season=2025)
+        for index in range(20)
+    ]
+    fixture = {"api_fixture_id": 1563083, "home_team_id": 55, "away_team_id": 64, "league_id": 40, "season": 2025}
+    prediction = predict_fixture(fixture, home_history, away_history, datetime(2026, 8, 15, tzinfo=UTC), league_history=league_history)
+    assert prediction.model_version == "poisson-v3-championship-basic-research"
+    assert prediction.expected_home_goals < 2
+    assert prediction.data_warning is not None and "已排除友誼賽" in prediction.data_warning
+
+
 def test_other_competitions_cannot_fill_same_league_history() -> None:
     history = [
         finished_fixture(1, 9, 2, 1, league_id=39),

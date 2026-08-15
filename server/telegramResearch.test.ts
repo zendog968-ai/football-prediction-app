@@ -196,6 +196,7 @@ describe("Telegram系統指令", () => {
     } as const;
     expect(formatLiveTeamResearch({ ...base, sourceMode: "team-history" })).toContain("【資料來源】隊伍歷史攻防");
     expect(formatLiveTeamResearch({ ...base, sourceMode: "league-average" })).toContain("【資料來源】聯賽平均");
+    expect(formatLiveTeamResearch({ ...base, sourceMode: "team-history", calibrationLabel: "英冠正式聯賽樣本＋聯賽平均及主場優勢校準" })).toContain("【校準】英冠正式聯賽樣本");
   });
 
   it("以Telegram一般HTML文字包裝對齊研究內容並轉義特殊字元", () => {

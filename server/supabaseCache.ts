@@ -14,6 +14,7 @@ export type CachedUpcomingFixture = {
   awayWin: number;
   predictedScore: string | null;
   recommendation: string | null;
+  researchSource?: string | null;
   confidence: number;
   predictionUpdatedAt: string | null;
   hasPrediction: boolean;
@@ -165,6 +166,7 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       const expectedHomeGoals = normalizeProbability(metadata?.expected_home_goals) ?? null;
       const expectedAwayGoals = normalizeProbability(metadata?.expected_away_goals) ?? null;
       const storedScorelines = normalizeScorelines(metadata?.top_scorelines);
+      const researchSource = typeof metadata?.research_source === "string" ? metadata.research_source : null;
       const handicap = handicapByFixture.get(fixtureId);
       const handicap025 = handicap025ByFixture.get(fixtureId);
       const handicap075 = handicap075ByFixture.get(fixtureId);
@@ -205,6 +207,7 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
         awayWin: awayWin ?? Number.NaN,
         predictedScore: typeof prediction?.predicted_score === "string" ? prediction.predicted_score : null,
         recommendation,
+        researchSource,
         confidence: Math.max(0, Math.min(5, Number(prediction?.confidence) || 0)),
         predictionUpdatedAt: typeof prediction?.updated_at === "string" ? prediction.updated_at : null,
         hasPrediction: !!prediction && homeWin !== null && draw !== null && awayWin !== null,

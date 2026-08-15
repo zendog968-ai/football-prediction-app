@@ -151,6 +151,10 @@ function hasCompleteCachedResearch(item: CachedUpcomingFixture): boolean {
     && item.topScorelines.slice(0, 3).every(scoreline => Boolean(scoreline.score) && Number.isFinite(scoreline.probability));
 }
 
+function formatCachedResearchSource(item: CachedUpcomingFixture): string | null {
+  return item.researchSource ? `📊 【資料來源】${item.researchSource}` : null;
+}
+
 function formatCompactTable(rows: CompactMarketRow[], scorelines: ScorelineProbability[], outcomes: OutcomeSnapshot): string {
   const percent = (value: number) => Number.isFinite(value) && value >= 0 && value <= 1 ? `${(value * 100).toFixed(1)}%` : "暫無可驗證機率";
   const total = rows.find(item => item.market === "入球大細 2.5");
@@ -188,8 +192,9 @@ export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = ne
   if (!upcoming.length) return "";
   return upcoming.map((item, index) => [
     `${index + 1}. ${formatFixtureDisplay(item.homeTeam, item.awayTeam)}`,
+    formatCachedResearchSource(item),
     formatCompactTable(item.compactMarkets, item.topScorelines, { homeWin: item.homeWin, draw: item.draw, awayWin: item.awayWin }),
-  ].join("\n")).join("\n\n");
+  ].filter(Boolean).join("\n")).join("\n\n");
 }
 
 async function telegramUpcoming(): Promise<string> {
@@ -531,12 +536,12 @@ export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedT
     })
     .sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime())[0];
   if (!match) return noRecentFixtureMessage(requestedTeam);
-  return [formatFixtureDisplay(match.homeTeam, match.awayTeam), formatCompactTable(match.compactMarkets, match.topScorelines, { homeWin: match.homeWin, draw: match.draw, awayWin: match.awayWin })].join("\n");
+  return [formatFixtureDisplay(match.homeTeam, match.awayTeam), formatCachedResearchSource(match), formatCompactTable(match.compactMarkets, match.topScorelines, { homeWin: match.homeWin, draw: match.draw, awayWin: match.awayWin })].filter(Boolean).join("\n");
 }
 
 export function formatLiveTeamResearch(research: LiveTeamResearch): string {
   const source = research.sourceMode === "team-history" ? "隊伍歷史攻防" : "聯賽平均";
-  return [formatFixtureDisplay(research.homeTeam, research.awayTeam), `📊 【資料來源】${source}`, formatCompactTable(research.compactMarkets, research.topScorelines, research.outcomes)].join("\n");
+  return [formatFixtureDisplay(research.homeTeam, research.awayTeam), `📊 【資料來源】${source}`, research.calibrationLabel ? `⚙️ 【校準】${research.calibrationLabel}` : null, formatCompactTable(research.compactMarkets, research.topScorelines, research.outcomes)].filter(Boolean).join("\n");
 }
 
 function findUpcomingTeamFixture(fixtures: CachedUpcomingFixture[], requestedTeam: string, now = new Date()): CachedUpcomingFixture | null {

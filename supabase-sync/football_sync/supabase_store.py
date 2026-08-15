@@ -73,7 +73,9 @@ def odds_to_existing_schema(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def prediction_to_existing_schema(row: dict[str, Any]) -> dict[str, Any]:
     warning = row.get("data_warning") or "未校準Poisson研究值；不可解讀為公平賠率、EV或命中率。"
     metadata = json.dumps({
-        "version": 1,
+        "version": 2,
+        "model_version": row.get("model_version"),
+        "research_source": "英冠正式聯賽樣本＋聯賽平均及主場優勢校準" if str(row.get("model_version", "")).startswith("poisson-v3-championship") else "隊伍歷史攻防",
         "expected_home_goals": row.get("expected_home_goals"),
         "expected_away_goals": row.get("expected_away_goals"),
         "over_2_5_probability": row.get("over_2_5_probability"),

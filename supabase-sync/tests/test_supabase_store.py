@@ -51,6 +51,7 @@ def test_prediction_mapping_retains_research_label() -> None:
         "expected_away_goals": 0.9,
         "over_2_5_probability": 0.48,
         "top_scorelines": [{"score": "1-0", "probability": 0.14}],
+        "model_version": "poisson-v3-championship-basic-research",
         "data_warning": "勝平負、大小球與BTTS均為未校準Poisson研究值；不可解讀為公平賠率、EV或命中率。",
         "generated_at": "2026-08-14T00:00:00+00:00",
     })
@@ -58,4 +59,5 @@ def test_prediction_mapping_retains_research_label() -> None:
     assert "未校準Poisson" in mapped["recommendation"]
     assert "[AURELIA_META]" in mapped["recommendation"]
     assert '"top_scorelines":[{"score":"1-0","probability":0.14}]' in mapped["recommendation"]
+    assert '"research_source":"英冠正式聯賽樣本＋聯賽平均及主場優勢校準"' in mapped["recommendation"]
     assert mapped["confidence"] == 3

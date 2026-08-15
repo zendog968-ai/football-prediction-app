@@ -77,7 +77,7 @@ describe("即時可驗證Poisson回退", () => {
       json: async () => {
         if (input.includes("/teams?search=Bristol%20City")) return { response: [{ team: { id: 55, name: "Bristol City" } }], errors: [] };
         if (input.includes("/fixtures?team=55&next=10")) return { response: [championshipFixture], errors: [] };
-        if (input.includes("/fixtures?team=55&last=10") || input.includes("/fixtures?team=64&last=10") || input.includes("/fixtures?league=40&season=2026&last=40")) return { response: history, errors: [] };
+        if (input.includes("/fixtures?team=55&league=40&season=2025&last=10") || input.includes("/fixtures?team=64&league=40&season=2025&last=10") || input.includes("/fixtures?league=40&season=2025&last=40")) return { response: history, errors: [] };
         return { response: [], errors: [] };
       },
     }));
@@ -86,6 +86,8 @@ describe("即時可驗證Poisson回退", () => {
     expect(result?.homeTeam).toBe("Bristol City");
     expect(result?.awayTeam).toBe("Millwall");
     expect(result && hasCompleteLiveResearch(result)).toBe(true);
+    expect(result?.calibrationLabel).toContain("英冠正式聯賽樣本");
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("team=55&league=40&season=2025"))).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/odds"))).toBe(false);
   });
 

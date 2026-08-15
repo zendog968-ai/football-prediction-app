@@ -22,6 +22,7 @@ export type LiveTeamResearch = {
   compactMarkets: CompactMarketRow[];
   topScorelines: ScorelineProbability[];
   sourceMode: "team-history" | "league-average";
+  calibrationLabel?: string;
 };
 
 export function hasCompleteLiveResearch(research: LiveTeamResearch): boolean {
@@ -138,7 +139,9 @@ export function deriveLivePoissonResearch(fixture: ApiFixture, homeHistory: ApiF
   const homeAgainst = home.matches >= 2 ? home.goalsAgainst / home.matches : baseline;
   const awayFor = away.matches >= 2 ? away.goalsFor / away.matches : baseline;
   const awayAgainst = away.matches >= 2 ? away.goalsAgainst / away.matches : baseline;
-  const homeMean = clampMean(baseline * (homeFor / baseline) * (awayAgainst / baseline) * 1.08);
+  const championshipCalibration = fixture.league?.id === 40;
+  const homeAdvantage = championshipCalibration ? 1.08 : 1.08;
+  const homeMean = clampMean(baseline * (homeFor / baseline) * (awayAgainst / baseline) * homeAdvantage);
   const awayMean = clampMean(baseline * (awayFor / baseline) * (homeAgainst / baseline));
   const outcomes = outcomeProbabilities(homeMean, awayMean);
   if (!outcomes) return null;
@@ -150,6 +153,7 @@ export function deriveLivePoissonResearch(fixture: ApiFixture, homeHistory: ApiF
     compactMarkets: [outcome, ...mainstreamTotals(homeMean, awayMean), ...modelHandicapRows(homeMean, awayMean, outcomes)].filter((row): row is CompactMarketRow => row !== null),
     topScorelines: topScorelines(homeMean, awayMean),
     sourceMode: home.matches >= 2 && away.matches >= 2 ? "team-history" : "league-average",
+    calibrationLabel: championshipCalibration ? "英冠正式聯賽樣本＋聯賽平均及主場優勢校準" : undefined,
   };
 }
 
@@ -166,10 +170,12 @@ async function researchForFixture(fixture: ApiFixture): Promise<LiveTeamResearch
   const leagueId = fixture.league?.id;
   const season = fixture.league?.season;
   if (!Number.isInteger(homeId) || !Number.isInteger(awayId) || !Number.isInteger(leagueId) || !Number.isInteger(season)) return null;
+  const resolvedSeason = Number(season);
+  const historySeason = leagueId === 40 && resolvedSeason > 0 ? resolvedSeason - 1 : resolvedSeason;
   const [homeHistory, awayHistory, leagueHistory] = await Promise.all([
-    apiFootball<ApiFixture>(`/fixtures?team=${homeId}&last=10&timezone=UTC`),
-    apiFootball<ApiFixture>(`/fixtures?team=${awayId}&last=10&timezone=UTC`),
-    apiFootball<ApiFixture>(`/fixtures?league=${leagueId}&season=${season}&last=40&timezone=UTC`),
+    leagueId === 40 ? apiFootball<ApiFixture>(`/fixtures?team=${homeId}&league=${leagueId}&season=${historySeason}&last=10&timezone=UTC`) : apiFootball<ApiFixture>(`/fixtures?team=${homeId}&last=10&timezone=UTC`),
+    leagueId === 40 ? apiFootball<ApiFixture>(`/fixtures?team=${awayId}&league=${leagueId}&season=${historySeason}&last=10&timezone=UTC`) : apiFootball<ApiFixture>(`/fixtures?team=${awayId}&last=10&timezone=UTC`),
+    apiFootball<ApiFixture>(`/fixtures?league=${leagueId}&season=${historySeason}&last=40&timezone=UTC`),
   ]);
   return deriveLivePoissonResearch(fixture, homeHistory, awayHistory, leagueHistory);
 }

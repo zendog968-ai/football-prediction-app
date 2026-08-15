@@ -71,6 +71,10 @@ class ApiFootballClient:
             timezone="UTC",
         )
 
+    def league_recent_fixtures(self, league_id: int, season: int, limit: int = 200) -> list[dict[str, Any]]:
+        """Return completed history from a verified league and season for calibration."""
+        return self._get("fixtures", league=league_id, season=season, last=limit, timezone="UTC")
+
 
 def normalize_fixture(raw: dict[str, Any], captured_at: datetime) -> dict[str, Any]:
     fixture = raw.get("fixture", {})
