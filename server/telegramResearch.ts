@@ -4,6 +4,7 @@ import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { parse as parseCookie } from "cookie";
 import { COOKIE_NAME } from "@shared/const";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
+import { formatLeagueDisplay } from "@shared/leagueDisplay";
 import {
   oddsSnapshots,
   researchDigests,
@@ -192,6 +193,7 @@ export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = ne
   if (!upcoming.length) return "";
   return upcoming.map((item, index) => [
     `${index + 1}. ${formatFixtureDisplay(item.homeTeam, item.awayTeam)}`,
+    `🏆 【聯賽】${formatLeagueDisplay(item.leagueName)}`,
     formatCachedResearchSource(item),
     formatCompactTable(item.compactMarkets, item.topScorelines, { homeWin: item.homeWin, draw: item.draw, awayWin: item.awayWin }),
   ].filter(Boolean).join("\n")).join("\n\n");
@@ -536,7 +538,7 @@ export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedT
     })
     .sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime())[0];
   if (!match) return noRecentFixtureMessage(requestedTeam);
-  return [formatFixtureDisplay(match.homeTeam, match.awayTeam), formatCachedResearchSource(match), formatCompactTable(match.compactMarkets, match.topScorelines, { homeWin: match.homeWin, draw: match.draw, awayWin: match.awayWin })].filter(Boolean).join("\n");
+  return [formatFixtureDisplay(match.homeTeam, match.awayTeam), `🏆 【聯賽】${formatLeagueDisplay(match.leagueName)}`, formatCachedResearchSource(match), formatCompactTable(match.compactMarkets, match.topScorelines, { homeWin: match.homeWin, draw: match.draw, awayWin: match.awayWin })].filter(Boolean).join("\n");
 }
 
 export function formatLiveTeamResearch(research: LiveTeamResearch): string {

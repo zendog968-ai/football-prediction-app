@@ -28,6 +28,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Fetch and calculate but do not write Supabase")
     parser.add_argument("--max-fixtures", type=int, help="Override the safe per-run fixture cap")
     parser.add_argument("--report-out", help="Write a non-secret JSON run report for optional notifications")
+    parser.add_argument("--coverage", choices=("popular", "all"), default="popular", help="Fixture coverage: popular research leagues or all licensed daily fixtures")
+    parser.add_argument("--skip-research", action="store_true", help="Write fixtures only; skip per-fixture odds and Poisson research calls")
     return parser.parse_args()
 
 
@@ -69,6 +71,17 @@ def prioritize_popular_fixtures(items: list[dict[str, Any]], max_fixtures: int) 
     return selected
 
 
+def select_fixture_coverage(items: list[dict[str, Any]], settings: Settings, coverage: str) -> list[dict[str, Any]]:
+    """Return all licensed daily fixtures for catalog coverage, or only research-tier leagues."""
+    if coverage == "all":
+        return items
+    return [fixture for fixture in items if fixture.get("league", {}).get("id") in settings.league_ids]
+
+
+def batches(items: list[dict[str, Any]], size: int = 250) -> list[list[dict[str, Any]]]:
+    return [items[index:index + size] for index in range(0, len(items), size)]
+
+
 def run() -> dict[str, Any]:
     args = parse_args()
     settings = Settings.from_env()
@@ -79,19 +92,35 @@ def run() -> dict[str, Any]:
     dates = [args.date] if args.date else [today.isoformat(), (today + timedelta(days=1)).isoformat()]
     scheduled = [fixture for date in dates for fixture in client.fixtures_by_date(date)]
     live = client.live_fixtures()
-    fixtures = unique_fixtures(scheduled + live)
-    fixtures = [fixture for fixture in fixtures if fixture.get("league", {}).get("id") in settings.league_ids]
-    fixtures = prioritize_popular_fixtures(fixtures, settings.max_fixtures)
+    all_fixtures = unique_fixtures(scheduled + live)
+    fixtures = select_fixture_coverage(all_fixtures, settings, args.coverage)
+    research_fixtures = prioritize_popular_fixtures(
+        [fixture for fixture in fixtures if fixture.get("league", {}).get("id") in settings.league_ids],
+        settings.max_fixtures,
+    )
 
     store = None if args.dry_run else SupabaseStore.from_settings(settings)
-    counts = {"fixtures": 0, "odds_snapshots": 0, "ai_predictions": 0, "prediction_skipped": 0}
+    counts = {"fixtures": 0, "leagues": 0, "countries": 0, "research_fixtures": 0, "odds_snapshots": 0, "ai_predictions": 0, "prediction_skipped": 0}
     summaries: list[dict[str, Any]] = []
     now = datetime.now(UTC)
-    for raw_fixture in fixtures:
+    fixture_rows = [normalize_fixture(raw_fixture, now) for raw_fixture in fixtures]
+    if store:
+        for batch in batches(fixture_rows):
+            store.upsert_fixtures(batch)
+    counts["fixtures"] = len(fixture_rows)
+    counts["leagues"] = len({row.get("league_id") for row in fixture_rows if isinstance(row.get("league_id"), int)})
+    counts["countries"] = len({str(raw.get("league", {}).get("country")) for raw in fixtures if raw.get("league", {}).get("country")})
+    if args.skip_research:
+        report = {"generated_at": now.isoformat(), "dry_run": args.dry_run, "coverage": args.coverage, "research_skipped": True, "counts": counts, "predictions": []}
+        if args.report_out:
+            with open(args.report_out, "w", encoding="utf-8") as handle:
+                json.dump(report, handle, ensure_ascii=False, indent=2)
+        print(json.dumps(report, ensure_ascii=False))
+        return report
+
+    for raw_fixture in research_fixtures:
         fixture_row = normalize_fixture(raw_fixture, now)
-        if store:
-            store.upsert_fixtures([fixture_row])
-        counts["fixtures"] += 1
+        counts["research_fixtures"] += 1
 
         odds_rows = normalize_odds(client.fixture_odds(fixture_row["api_fixture_id"]), fixture_row, now)
         if odds_rows:
@@ -142,7 +171,7 @@ def run() -> dict[str, Any]:
         })
 
     LOGGER.info("Sync complete: %s", counts)
-    report = {"generated_at": now.isoformat(), "dry_run": args.dry_run, "counts": counts, "predictions": sorted(summaries, key=lambda item: item["stars"], reverse=True)}
+    report = {"generated_at": now.isoformat(), "dry_run": args.dry_run, "coverage": args.coverage, "research_skipped": False, "counts": counts, "predictions": sorted(summaries, key=lambda item: item["stars"], reverse=True)}
     if args.report_out:
         with open(args.report_out, "w", encoding="utf-8") as handle:
             json.dump(report, handle, ensure_ascii=False, indent=2)

@@ -1,0 +1,52 @@
+name: Daily All-League Fixture Catalog
+
+on:
+  schedule:
+    # 01:10 UTC = 09:10 Hong Kong time. Fetches today and tomorrow's licensed fixtures.
+    - cron: "10 1 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Fetch and count without Supabase writes"
+        type: boolean
+        default: false
+
+concurrency:
+  group: daily-all-league-catalog
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  catalog-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: supabase-sync
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: supabase-sync/requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Sync all licensed daily fixtures with retry
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          set +e
+          mode=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then mode="--dry-run"; fi
+          for attempt in 1 2 3; do
+            echo "All-league catalog attempt ${attempt}/3"
+            python main.py ${mode} --coverage all --skip-research --report-out coverage-report.json
+            status=$?
+            if [ "$status" -eq 0 ]; then exit 0; fi
+            if [ "$attempt" -lt 3 ]; then sleep $((attempt * 30)); fi
+          done
+          exit "$status"

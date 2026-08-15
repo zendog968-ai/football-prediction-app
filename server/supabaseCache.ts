@@ -100,11 +100,31 @@ async function queryRows(path: string): Promise<Array<Record<string, unknown>>> 
   return payload as Array<Record<string, unknown>>;
 }
 
+async function queryPagedRows(path: string, pageSize = 1000, maxPages = 5): Promise<Array<Record<string, unknown>>> {
+  const result: Array<Record<string, unknown>> = [];
+  for (let page = 0; page < maxPages; page += 1) {
+    const rows = await queryRows(`${path}&limit=${pageSize}&offset=${page * pageSize}`);
+    result.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  return result;
+}
+
+function chunks<T>(items: T[], size: number): T[][] {
+  return Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size));
+}
+
+async function queryFixtureRelatedRows(select: string, ids: number[]): Promise<Array<Record<string, unknown>>> {
+  const rows = await Promise.all(chunks(ids, 150).map(group => queryRows(`${select}&fixture_id=in.(${group.join(",")})`)));
+  return rows.flat();
+}
+
 export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseUpcomingCache> {
   if (!force && cache && cache.expiresAt > Date.now()) return cache.payload;
   const loadedAt = new Date().toISOString();
   try {
-    const fixtures = await queryRows("fixtures?select=fixture_id,league_name,event_time,home_team,away_team,status,updated_at&order=event_time.asc&limit=100");
+    const now = encodeURIComponent(new Date().toISOString());
+    const fixtures = await queryPagedRows(`fixtures?select=fixture_id,league_name,event_time,home_team,away_team,status,updated_at&event_time=gte.${now}&order=event_time.asc`);
     const ids = fixtures.map(row => Number(row.fixture_id)).filter(Number.isInteger);
     if (ids.length === 0) {
       const payload: SupabaseUpcomingCache = { source: "Supabase cache", loadedAt, available: true, fixtures: [], lastSyncAt: null };
@@ -112,8 +132,8 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       return payload;
     }
     const [predictions, oddsSnapshots] = await Promise.all([
-      queryRows(`ai_predictions?select=fixture_id,home_win_prob,draw_prob,away_win_prob,predicted_score,recommendation,confidence,updated_at&fixture_id=in.(${ids.join(",")})`),
-      queryRows(`odds_snapshots?select=fixture_id,market_type,handicap,home_odds,draw_odds,away_odds,snapshot_time&fixture_id=in.(${ids.join(",")})&order=snapshot_time.desc&limit=500`),
+      queryFixtureRelatedRows("ai_predictions?select=fixture_id,home_win_prob,draw_prob,away_win_prob,predicted_score,recommendation,confidence,updated_at", ids),
+      queryFixtureRelatedRows("odds_snapshots?select=fixture_id,market_type,handicap,home_odds,draw_odds,away_odds,snapshot_time&order=snapshot_time.desc", ids),
     ]);
     const byFixture = new Map(predictions.map(row => [Number(row.fixture_id), row]));
     const oddsByFixture = new Map<number, CachedUpcomingFixture["odds"]>();
