@@ -20,7 +20,7 @@ import { getPrediction, getTeams, type PredictionResult } from "./prediction";
 import { getSupabaseUpcomingCache, type CachedUpcomingFixture } from "./supabaseCache";
 import { fetchLiveTeamResearch, fetchLiveUpcomingResearch, hasCompleteLiveResearch, type LiveTeamResearch } from "./livePoissonResearch";
 import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
-import { ensureTelegramTeamTranslations } from "./teamTranslation";
+import { ensureTelegramTeamTranslations, listRecentTeamTranslations, overrideTeamTranslation, resetTeamTranslation } from "./teamTranslation";
 
 export type ResearchWindow = "day" | "evening" | "settlement";
 export type ScheduleKind = "settlement" | "day_digest" | "evening_digest";
@@ -125,6 +125,7 @@ export const TELEGRAM_HELP_MESSAGE = [
   "/upcoming — 查詢未來24小時所有已同步賽事；完整模型以研究分析、部分資料以【基礎分析】呈現。",
   "/report — 顯示最新24小時賽事摘要（與/upcoming相同）。",
   "/team <隊伍名稱> — 查詢該隊最近一場已同步賽事的極簡機率表格與Top 3波膽。",
+  "/dict — 管理員查看近期自動隊名譯名；可用 /dict set 英文隊名 => 繁中譯名 覆寫，或 /dict reset 英文隊名 重設。",
   "/stop — 停止研究通知；可隨時以/start重新啟用。",
   "/help — 顯示本指令說明。",
   "",
@@ -301,6 +302,50 @@ export function formatTelegramStatus(snapshot: TelegramStatusSnapshot): string {
 
 export function normalizeTelegramCommand(text: string | undefined): string | undefined {
   return text?.trim().toLowerCase().split(/\s+/)[0]?.replace(/@[a-z0-9_]+$/i, "");
+}
+
+export function parseDictionaryCommand(rawText: string | undefined):
+  | { kind: "list" }
+  | { kind: "set"; englishName: string; traditionalName: string }
+  | { kind: "reset"; englishName: string }
+  | { kind: "invalid" } {
+  const body = rawText?.trim().replace(/^\/dict(?:@[a-z0-9_]+)?\s*/i, "") ?? "";
+  if (!body) return { kind: "list" };
+  const set = /^set\s+(.+?)\s*=>\s*(.+)$/i.exec(body);
+  if (set) return { kind: "set", englishName: set[1]!.trim(), traditionalName: set[2]!.trim() };
+  const reset = /^reset\s+(.+)$/i.exec(body);
+  if (reset) return { kind: "reset", englishName: reset[1]!.trim() };
+  return { kind: "invalid" };
+}
+
+async function telegramDictionaryForAdmin(chatId: string, rawText: string | undefined): Promise<string> {
+  const db = await getDb();
+  if (!db) throw new Error("資料庫暫時無法使用。");
+  const subscription = (await db.select().from(telegramSubscriptions).where(eq(telegramSubscriptions.chatId, chatId)).limit(1))[0];
+  if (!subscription?.isAdmin) return "🔒 /dict 僅限管理員使用。";
+  const command = parseDictionaryCommand(rawText);
+  if (command.kind === "invalid") {
+    return "用法：\n/dict\n/dict set Atlante FC => 亞特蘭蒂\n/dict reset Atlante FC";
+  }
+  if (command.kind === "set") {
+    await overrideTeamTranslation({ ...command, adminChatId: chatId });
+    return `✅ 已覆寫\n${command.englishName} → ${command.traditionalName}\n\n變更已記錄，後續Telegram推播會優先使用此譯名。`;
+  }
+  if (command.kind === "reset") {
+    const removed = await resetTeamTranslation({ englishName: command.englishName, adminChatId: chatId });
+    return removed
+      ? `↩️ 已重設 ${command.englishName}\n下次需要時會恢復使用詞庫或重新進行安全翻譯。`
+      : `找不到 ${command.englishName} 的可重設自動／覆寫譯名。`;
+  }
+  const recent = await listRecentTeamTranslations(12);
+  if (!recent.length) return "📚 詞典目前沒有已快取的自動譯名。";
+  return [
+    "📚 【近期自動隊名詞典】",
+    ...recent.map((entry, index) => `${index + 1}. ${entry.englishName} → ${entry.traditionalName} ${entry.source === "llm" ? "🤖" : "✍️"}`),
+    "",
+    "覆寫：/dict set 英文隊名 => 繁中譯名",
+    "重設：/dict reset 英文隊名",
+  ].join("\n");
 }
 
 export function parseTrendRequest(text: string | undefined): { fixtureId?: number; homeTeam?: string; awayTeam?: string } | null {
@@ -1213,6 +1258,8 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     await sendTelegramMessage(String(chatId), "Aurelia Football研究通知已啟用。你會收到經資料品質檢核的研究摘要與賽後統計；回覆 /stop 可停止通知。所有內容僅供研究，並非投注或資金建議。");
   } else if (text === "/help") {
     await sendTelegramMessage(String(chatId), TELEGRAM_HELP_MESSAGE);
+  } else if (text === "/dict") {
+    await sendTelegramMessage(String(chatId), await telegramDictionaryForAdmin(String(chatId), message?.text));
   } else if (text === "/trend") {
     await sendTelegramMessage(String(chatId), await telegramTrendForRequest(message?.text));
   } else if (text === "/upcoming" || text === "/report") {

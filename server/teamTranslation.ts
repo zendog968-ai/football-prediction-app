@@ -1,6 +1,6 @@
-import { inArray } from "drizzle-orm";
-import { teamNameTranslations } from "../drizzle/schema";
-import { localizeTeamName, registerRuntimeTeamTranslation } from "@shared/teamDisplay";
+import { desc, eq, inArray } from "drizzle-orm";
+import { teamNameTranslationAudits, teamNameTranslations } from "../drizzle/schema";
+import { clearRuntimeTeamTranslation, localizeTeamName, registerRuntimeTeamTranslation } from "@shared/teamDisplay";
 import { getDb } from "./db";
 import { invokeLLM } from "./_core/llm";
 
@@ -15,17 +15,55 @@ export function isValidTraditionalTeamTranslation(value: string): boolean {
   return normalized.length >= 2 && normalized.length <= 80 && /[\u3400-\u9fff]/.test(normalized) && !/[\r\n<>]/.test(normalized);
 }
 
+export type TranslationDictionaryEntry = {
+  englishName: string;
+  traditionalName: string;
+  source: "llm" | "curated";
+  updatedAt: Date;
+};
+
+export async function listRecentTeamTranslations(limit = 10): Promise<TranslationDictionaryEntry[]> {
+  const db = await getDb();
+  if (!db) throw new Error("資料庫暫時無法使用。");
+  const rows = await db.select().from(teamNameTranslations).orderBy(desc(teamNameTranslations.updatedAt)).limit(Math.min(Math.max(limit, 1), 20));
+  return rows.map(row => ({ englishName: row.englishName, traditionalName: row.traditionalName, source: row.source, updatedAt: row.updatedAt }));
+}
+
+export async function overrideTeamTranslation(input: { englishName: string; traditionalName: string; adminChatId: string }): Promise<void> {
+  const englishName = input.englishName.trim();
+  const traditionalName = input.traditionalName.trim();
+  if (!englishName || englishName.length > 160 || !isEnglishTeamName(englishName)) throw new Error("英文隊名格式不正確。");
+  if (!isValidTraditionalTeamTranslation(traditionalName)) throw new Error("繁中譯名需為2至80個字元且不可包含換行或標籤。");
+  const db = await getDb();
+  if (!db) throw new Error("資料庫暫時無法使用。");
+  const previous = (await db.select().from(teamNameTranslations).where(eq(teamNameTranslations.englishName, englishName)).limit(1))[0];
+  await db.insert(teamNameTranslations).values({ englishName, traditionalName, source: "curated" })
+    .onDuplicateKeyUpdate({ set: { traditionalName, source: "curated" } });
+  await db.insert(teamNameTranslationAudits).values({ englishName, previousTraditionalName: previous?.traditionalName ?? null, nextTraditionalName: traditionalName, action: "override", adminChatId: input.adminChatId });
+  registerRuntimeTeamTranslation(englishName, traditionalName);
+}
+
+export async function resetTeamTranslation(input: { englishName: string; adminChatId: string }): Promise<boolean> {
+  const englishName = input.englishName.trim();
+  const db = await getDb();
+  if (!db) throw new Error("資料庫暫時無法使用。");
+  const previous = (await db.select().from(teamNameTranslations).where(eq(teamNameTranslations.englishName, englishName)).limit(1))[0];
+  if (!previous) return false;
+  await db.delete(teamNameTranslations).where(eq(teamNameTranslations.englishName, englishName));
+  await db.insert(teamNameTranslationAudits).values({ englishName, previousTraditionalName: previous.traditionalName, nextTraditionalName: null, action: "reset", adminChatId: input.adminChatId });
+  clearRuntimeTeamTranslation(englishName);
+  return true;
+}
+
 export async function ensureTelegramTeamTranslations(names: string[]): Promise<void> {
-  const unique = Array.from(new Set(names.map(name => name.trim()).filter(name => {
-    return Boolean(name) && localizeTeamName(name) === name && isEnglishTeamName(name);
-  }))).slice(0, MAX_NAMES_PER_REQUEST);
+  const unique = Array.from(new Set(names.map(name => name.trim()).filter(name => Boolean(name) && isEnglishTeamName(name)))).slice(0, MAX_NAMES_PER_REQUEST);
   if (!unique.length) return;
   const db = await getDb();
   if (!db) return;
   const stored = await db.select().from(teamNameTranslations).where(inArray(teamNameTranslations.englishName, unique));
   const storedNames = new Set(stored.map(row => row.englishName));
   for (const row of stored) registerRuntimeTeamTranslation(row.englishName, row.traditionalName);
-  const pending = unique.filter(name => !storedNames.has(name));
+  const pending = unique.filter(name => !storedNames.has(name) && localizeTeamName(name) === name);
   if (!pending.length) return;
   try {
     const result = await invokeLLM({

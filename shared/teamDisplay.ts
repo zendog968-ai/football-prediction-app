@@ -30,12 +30,16 @@ export function registerRuntimeTeamTranslation(englishName: string, traditionalN
   runtimeTranslations.set(original.toLocaleLowerCase(), translated);
 }
 
+export function clearRuntimeTeamTranslation(englishName: string): void {
+  runtimeTranslations.delete(englishName.trim().toLocaleLowerCase());
+}
+
 export function localizeTeamName(englishName: string): string {
   const original = englishName.trim();
-  const direct = normalizedNames.get(original.toLocaleLowerCase());
-  if (direct) return direct;
   const runtime = runtimeTranslations.get(original.toLocaleLowerCase());
   if (runtime) return runtime;
+  const direct = normalizedNames.get(original.toLocaleLowerCase());
+  if (direct) return direct;
   const womenSuffix = /\s+(?:w|women)$/i.exec(original);
   if (!womenSuffix) return original;
   const base = original.slice(0, womenSuffix.index).trim();

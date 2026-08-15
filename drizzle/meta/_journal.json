@@ -36,6 +36,13 @@
       "when": 1786812624664,
       "tag": "0004_rainy_gideon",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1786814152416,
+      "tag": "0005_lonely_satana",
+      "breakpoints": true
     }
   ]
 }

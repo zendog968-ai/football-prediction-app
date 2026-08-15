@@ -363,3 +363,6 @@
 - [x] 核實Atlante FC對Toluca的資料列與既有墨超／中北美隊名顯示缺口：靜態詞庫未含Atlante FC；Toluca已有對照，但未收錄隊名沒有持久化翻譯回退。
 - [x] 擴充墨超與中北美常用隊名繁中對照，並建立未收錄隊名的安全翻譯回退與快取規則：新增墨超、墨甲、MLS／加拿大及中美洲常見隊名；未知純英文名稱以伺服器端結構化LLM音譯、字元驗證及MySQL快取處理，失敗時保留英文避免錯譯。
 - [x] 補上隊名映射與回退測試，發布後以Atlante FC對Toluca的Telegram研究卡驗證中文格式：94項測試、型別檢查及建置已通過；正式Webhook「Atlante FC」測試回傳HTTP 200，Webhook無積壓且無最後錯誤，詞庫輸出為亞特蘭蒂與托盧卡。
+- [x] 核實Telegram管理員識別方式與既有LLM隊名翻譯快取資料結構：以telegram_subscriptions.isAdmin控制；唯一已啟用、已驗證的專案擁有者訂閱已安全標記為管理員。
+- [x] 實作管理員專用/dict檢視、指令式覆寫與翻譯來源稽核流程：支援檢視近期翻譯、`/dict set 英文 => 繁中`與`/dict reset 英文`；所有更改寫入team_name_translation_audits。
+- [ ] 補上授權、覆寫與格式回歸測試，完成正式Webhook驗證與發布：96項測試、型別檢查與建置已通過，待正式/dict檢視與覆寫流程測試。

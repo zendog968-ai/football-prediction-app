@@ -31,6 +31,7 @@ export const telegramSubscriptions = mysqlTable("telegram_subscriptions", {
   chatId: varchar("chatId", { length: 64 }).notNull().unique(),
   displayName: varchar("displayName", { length: 255 }),
   isActive: boolean("isActive").notNull().default(true),
+  isAdmin: boolean("isAdmin").notNull().default(false),
   startedAt: timestamp("startedAt").defaultNow().notNull(),
   stoppedAt: timestamp("stoppedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -76,6 +77,17 @@ export const teamNameTranslations = mysqlTable("team_name_translations", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull().onUpdateNow(),
 });
+
+/** Every administrator override or reset of an automated team-name translation is auditable. */
+export const teamNameTranslationAudits = mysqlTable("team_name_translation_audits", {
+  id: int("id").autoincrement().primaryKey(),
+  englishName: varchar("englishName", { length: 160 }).notNull(),
+  previousTraditionalName: varchar("previousTraditionalName", { length: 160 }),
+  nextTraditionalName: varchar("nextTraditionalName", { length: 160 }),
+  action: mysqlEnum("action", ["override", "reset"]).notNull(),
+  adminChatId: varchar("adminChatId", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, table => [index("translation_audit_english_idx").on(table.englishName), index("translation_audit_created_idx").on(table.createdAt)]);
 
 /** Immutable captured values from the authorised API-Football feed. */
 export const oddsSnapshots = mysqlTable("odds_snapshots", {
