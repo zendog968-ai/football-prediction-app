@@ -432,6 +432,11 @@ export function extractNaturalLanguageTeamQuery(value: string): string {
   return alias || value.trim();
 }
 
+export function isKnownTeamAlias(value: string): boolean {
+  const normalized = normalizeTeam(value);
+  return Object.keys(TEAM_QUERY_ALIASES).some(alias => normalizeTeam(alias) === normalized);
+}
+
 export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedTeam: string, now = new Date()): string {
   const query = normalizedTeamQuery(requestedTeam);
   const match = fixtures
@@ -515,7 +520,7 @@ async function telegramNaturalLanguageTeamResearch(request: Request, text: strin
   if (!cached.available) return null;
   const fixture = findUpcomingTeamFixture(cached.fixtures, requestedTeam);
   const suggestions = fixture ? [] : suggestTeamFixtures(cached.fixtures, requestedTeam);
-  if (!fixture && suggestions.length === 0) return null;
+  if (!fixture && suggestions.length === 0) return isKnownTeamAlias(requestedTeam) ? { text: "資料不足" } : null;
   if (fixture) return { text: await teamResearchForFixture(request, fixture) };
   return {
     text: "資料不足",

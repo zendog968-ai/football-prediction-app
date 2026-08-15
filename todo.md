@@ -284,5 +284,5 @@
 - [x] 以新技能檢查同步快取與繁體中文別名解析，模擬/team 曼聯的實際Telegram回覆。
 - [x] 診斷Telegram Webhook綁定、後端服務健康、Webhook處理器錯誤及更新類型設定。
 - [x] 新增自然語言隊名偵測，令無斜線訊息可安全使用/team相同查詢與候選按鈕流程。
-- [ ] 重新綁定Webhook並驗證callback_query與一般訊息可到達處理器。
-- [ ] 重啟服務、執行測試與建置，保存並發布Telegram回應修復版本。
+- [x] 重新綁定Webhook並驗證callback_query與一般訊息可到達處理器。
+- [x] 重啟服務、執行測試與建置，保存並發布Telegram回應修復版本。

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatTeamResearch, formatTelegramStatus, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -136,6 +136,8 @@ describe("Telegram系統指令", () => {
     expect(extractNaturalLanguageTeamQuery("請分析 神戸勝利船 下一場")).toBe("神戸勝利船");
     expect(extractNaturalLanguageTeamQuery("幫我睇下 FC東京")).toBe("FC東京");
     expect(extractNaturalLanguageTeamQuery("想知國際邁阿密的賽程")).toBe("國際邁阿密");
+    expect(isKnownTeamAlias(extractNaturalLanguageTeamQuery("請分析 神戸勝利船 下一場"))).toBe(true);
+    expect(isKnownTeamAlias("healthcheck")).toBe(false);
   });
 
   it("在無完全匹配時提供最多三個可選的相近未來賽事，不包含過去賽事", () => {
