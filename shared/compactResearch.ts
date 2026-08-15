@@ -37,6 +37,16 @@ export function topScorelines(homeMean: number | null | undefined, awayMean: num
     .map(item => ({ score: `${item.homeGoals}-${item.awayGoals}`, probability: item.probability }));
 }
 
+export function outcomeProbabilities(homeMean: number | null | undefined, awayMean: number | null | undefined): { homeWin: number; draw: number; awayWin: number } | null {
+  if (!validMean(homeMean) || !validMean(awayMean)) return null;
+  return scoreGrid(homeMean, awayMean).reduce((outcomes, item) => {
+    if (item.homeGoals > item.awayGoals) outcomes.homeWin += item.probability;
+    else if (item.homeGoals === item.awayGoals) outcomes.draw += item.probability;
+    else outcomes.awayWin += item.probability;
+    return outcomes;
+  }, { homeWin: 0, draw: 0, awayWin: 0 });
+}
+
 export function totalSelectionProbability(selection: string | null | undefined, homeMean: number | null | undefined, awayMean: number | null | undefined): number | null {
   const match = selection?.match(/^(Over|Under)\s+([1234]\.5)$/i);
   if (!match || !validMean(homeMean) || !validMean(awayMean)) return null;

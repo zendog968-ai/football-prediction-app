@@ -16,6 +16,7 @@ import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
 import { sdk } from "./_core/sdk";
 import { getPrediction, getTeams, type PredictionResult } from "./prediction";
 import { getSupabaseUpcomingCache, type CachedUpcomingFixture } from "./supabaseCache";
+import { fetchLiveTeamResearch, fetchLiveUpcomingResearch, type LiveTeamResearch } from "./livePoissonResearch";
 import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
 
 export type ResearchWindow = "day" | "evening" | "settlement";
@@ -180,8 +181,15 @@ export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = ne
 
 async function telegramUpcoming(): Promise<string> {
   const cached = await getSupabaseUpcomingCache();
-  if (!cached.available) return "Supabase研究快取暫時不可用；系統不會以舊資料或推測值替代，請稍後再試。";
-  return formatCachedUpcoming(cached.fixtures);
+  const now = Date.now();
+  const hasCachedUpcoming = cached.available && cached.fixtures.some(item => {
+    const kickoff = new Date(item.eventTime).getTime();
+    return Number.isFinite(kickoff) && kickoff >= now && kickoff <= now + 24 * 60 * 60_000;
+  });
+  if (hasCachedUpcoming) return formatCachedUpcoming(cached.fixtures);
+  const live = await fetchLiveUpcomingResearch(3).catch(() => []);
+  if (live.length > 0) return live.map((item, index) => `${index + 1}. ${formatLiveTeamResearch(item)}`).join("\n\n");
+  return "暫未找到可驗證未來賽事";
 }
 
 function requireSecret(value: string, label: string): string {
@@ -455,6 +463,10 @@ export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedT
   return [`${match.homeTeam} vs ${match.awayTeam}`, formatCompactTable(match.compactMarkets, match.topScorelines)].join("\n");
 }
 
+export function formatLiveTeamResearch(research: LiveTeamResearch): string {
+  return [`${research.homeTeam} vs ${research.awayTeam}`, formatCompactTable(research.compactMarkets, research.topScorelines)].join("\n");
+}
+
 function findUpcomingTeamFixture(fixtures: CachedUpcomingFixture[], requestedTeam: string, now = new Date()): CachedUpcomingFixture | null {
   const query = normalizedTeamQuery(requestedTeam);
   return fixtures
@@ -507,27 +519,30 @@ async function teamResearchForFixture(request: Request, fixture: CachedUpcomingF
 
 async function telegramTeamResearch(request: Request, text: string | undefined): Promise<TeamResearchResponse> {
   const requestedTeam = parseTeamRequest(text);
-  if (!requestedTeam) return { text: "資料不足" };
+  if (!requestedTeam) return { text: "請輸入隊伍名稱" };
   const cached = await getSupabaseUpcomingCache();
   const fixture = cached.available ? findUpcomingTeamFixture(cached.fixtures, requestedTeam) : null;
   if (fixture) return { text: await teamResearchForFixture(request, fixture) };
   const suggestions = cached.available ? suggestTeamFixtures(cached.fixtures, requestedTeam) : [];
+  const live = await fetchLiveTeamResearch(normalizedTeamQuery(requestedTeam)).catch(() => null);
+  if (live) return { text: formatLiveTeamResearch(live) };
   return suggestions.length > 0
-    ? { text: "資料不足", buttons: suggestions.map(item => ({ text: `${item.homeTeam} vs ${item.awayTeam}`, callback_data: `team:${item.fixtureId}` })) }
-    : { text: "資料不足" };
+    ? { text: "請選擇相近隊伍", buttons: suggestions.map(item => ({ text: `${item.homeTeam} vs ${item.awayTeam}`, callback_data: `team:${item.fixtureId}` })) }
+    : { text: "暫未找到可驗證未來賽事" };
 }
 
 async function telegramNaturalLanguageTeamResearch(request: Request, text: string | undefined): Promise<TeamResearchResponse | null> {
   const requestedTeam = text ? extractNaturalLanguageTeamQuery(text) : "";
   if (!requestedTeam || requestedTeam.length > 120) return null;
   const cached = await getSupabaseUpcomingCache();
-  if (!cached.available) return null;
-  const fixture = findUpcomingTeamFixture(cached.fixtures, requestedTeam);
-  const suggestions = fixture ? [] : suggestTeamFixtures(cached.fixtures, requestedTeam);
-  if (!fixture && suggestions.length === 0) return isKnownTeamAlias(requestedTeam) ? { text: "資料不足" } : null;
+  const fixture = cached.available ? findUpcomingTeamFixture(cached.fixtures, requestedTeam) : null;
+  const suggestions = cached.available && !fixture ? suggestTeamFixtures(cached.fixtures, requestedTeam) : [];
   if (fixture) return { text: await teamResearchForFixture(request, fixture) };
+  const live = await fetchLiveTeamResearch(normalizedTeamQuery(requestedTeam)).catch(() => null);
+  if (live) return { text: formatLiveTeamResearch(live) };
+  if (suggestions.length === 0) return isKnownTeamAlias(requestedTeam) ? { text: "暫未找到可驗證未來賽事" } : null;
   return {
-    text: "資料不足",
+    text: "請選擇相近隊伍",
     buttons: suggestions.map(item => ({ text: `${item.homeTeam} vs ${item.awayTeam}`, callback_data: `team:${item.fixtureId}` })),
   };
 }
