@@ -12,10 +12,18 @@ def _selection_key(value: str) -> str:
     return value.strip().lower()
 
 
+def _league_identity(name: object, country: object) -> str | None:
+    league = str(name or "").strip()
+    nation = str(country or "").strip()
+    if not league:
+        return None
+    return f"{nation}::{league}" if nation else league
+
+
 def fixture_to_existing_schema(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "fixture_id": row["api_fixture_id"],
-        "league_name": row.get("league_name"),
+        "league_name": _league_identity(row.get("league_name"), row.get("league_country")),
         "event_time": row["kickoff_at"],
         "status": row.get("status"),
         "home_team": row["home_team"],

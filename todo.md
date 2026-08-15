@@ -353,3 +353,6 @@
 - [x] 實作受保護的每日全聯賽同步端點，寫入可稽核覆蓋統計並保留現有研究層資料；新增all_league_sync_jobs資料表與Telegram覆蓋摘要。
 - [x] 建立09:10（香港時間）已部署服務排程，完成全聯賽同步後發送Telegram覆蓋摘要：Heartbeat E89AaJAiNgcjNrdN9BNLsP已啟用，回調/api/scheduled/all-league-sync。
 - [x] 端到端驗證已部署服務同步、Telegram摘要與實際覆蓋統計，發布最終版本：同一服務函式實測寫入1,956場、316個聯賽、88個國家／地區，Telegram摘要對1名啟用訂閱者成功送達。
+- [x] 核實富明尼斯對彭美拉斯資料列與現有「Serie A」映射，定位巴甲被誤標為意甲的規則缺口：fixture 1492334原值僅為Serie A，顯示層因缺少country而預設意甲。
+- [x] 實作country＋league雙重辨識，修正巴甲／意甲並補強拉丁美洲與亞洲同名或常見聯賽的繁中映射回歸測試：後續同步寫入Brazil::Serie A等精準鍵，既有fixture 1492334已回填；91項TypeScript與14項Python測試通過。
+- [ ] 發布後以富明尼斯對彭美拉斯的Telegram研究卡實測，確認聯賽標示為【巴甲】。
