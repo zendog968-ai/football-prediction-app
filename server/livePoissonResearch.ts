@@ -42,13 +42,38 @@ function apiErrorCount(payload: ApiPayload<unknown>): number {
   return Array.isArray(errors) ? errors.length : Object.keys(errors).length;
 }
 
+function delay(milliseconds: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
 async function apiFootball<T>(path: string): Promise<T[]> {
   if (!ENV.apiFootballKey) throw new Error("API-Football Key未設定");
-  const response = await fetch(`${API_BASE}${path}`, { headers: { "x-apisports-key": ENV.apiFootballKey } });
-  if (!response.ok) throw new Error(`API-Football請求失敗（${response.status}）`);
-  const payload = await response.json() as ApiPayload<T>;
-  if (apiErrorCount(payload) > 0) throw new Error("API-Football回傳資料錯誤");
-  return payload.response ?? [];
+  const url = `${API_BASE}${path}`;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let response: Response;
+    try {
+      response = await fetch(url, { headers: { "x-apisports-key": ENV.apiFootballKey } });
+    } catch (error) {
+      if (attempt < 2) {
+        await delay(100 * (attempt + 1));
+        continue;
+      }
+      const message = error instanceof Error ? error.message : "未知網路錯誤";
+      throw new Error(`API-Football連線失敗：${message}`);
+    }
+    if (!response.ok) {
+      const retryable = response.status === 408 || response.status === 425 || response.status === 429 || response.status >= 500;
+      if (retryable && attempt < 2) {
+        await delay(100 * (attempt + 1));
+        continue;
+      }
+      throw new Error(`API-Football請求失敗（${response.status}）`);
+    }
+    const payload = await response.json() as ApiPayload<T>;
+    if (apiErrorCount(payload) > 0) throw new Error("API-Football回傳資料錯誤");
+    return payload.response ?? [];
+  }
+  throw new Error("API-Football重試次數已用盡");
 }
 
 function clampMean(value: number): number {

@@ -65,6 +65,28 @@ describe("即時可驗證Poisson回退", () => {
     expect(fetchMock).toHaveBeenCalled();
   });
 
+  it("在短暫API連線失敗後重試並完成即時隊伍研究", async () => {
+    const history = [finished(1, 9, 2, 1), finished(8, 1, 0, 1), finished(2, 7, 1, 1), finished(6, 2, 2, 1)];
+    let calls = 0;
+    const fetchMock = vi.fn(async (input: string) => {
+      calls += 1;
+      if (calls === 1) throw new Error("temporary SSL failure");
+      return {
+        ok: true,
+        json: async () => {
+          if (input.includes("/teams?search=Vissel")) return { response: [{ team: { id: 1, name: "Vissel Kobe" } }], errors: [] };
+          if (input.includes("/fixtures?team=1&next=10")) return { response: [upcoming], errors: [] };
+          if (input.includes("/fixtures?team=1&last=10") || input.includes("/fixtures?team=2&last=10") || input.includes("/fixtures?league=98&season=2026&last=40")) return { response: history, errors: [] };
+          return { response: [], errors: [] };
+        },
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await fetchLiveTeamResearch("Vissel Kobe");
+    expect(result?.topScorelines).toHaveLength(3);
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(4);
+  });
+
   it("以即時熱門賽程回退最多產出指定數量的研究", async () => {
     const history = [finished(1, 9, 2, 1), finished(8, 1, 0, 1), finished(2, 7, 1, 1), finished(6, 2, 2, 1)];
     const fetchMock = vi.fn(async (input: string) => ({
