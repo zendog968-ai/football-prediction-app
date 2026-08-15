@@ -73,6 +73,9 @@ type MarketContext = {
   anomalySummary?: string;
 };
 
+type TelegramInlineButton = { text: string; callback_data: string };
+type TeamResearchResponse = { text: string; buttons?: TelegramInlineButton[] };
+
 type Candidate = {
   fixtureId: number;
   leagueCode: string;
@@ -446,19 +449,54 @@ function findUpcomingTeamFixture(fixtures: CachedUpcomingFixture[], requestedTea
     .sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime())[0] ?? null;
 }
 
-async function telegramTeamResearch(request: Request, text: string | undefined): Promise<string> {
-  const requestedTeam = parseTeamRequest(text);
-  if (!requestedTeam) return "資料不足";
-  const cached = await getSupabaseUpcomingCache();
-  const fixture = cached.available ? findUpcomingTeamFixture(cached.fixtures, requestedTeam) : null;
-  if (!fixture) return "資料不足";
+export function suggestTeamFixtures(fixtures: CachedUpcomingFixture[], requestedTeam: string, now = new Date()): CachedUpcomingFixture[] {
+  const rawQuery = normalizeTeam(requestedTeam);
+  const aliasTargets = Object.entries(TEAM_QUERY_ALIASES)
+    .filter(([alias]) => normalizeTeam(alias).includes(rawQuery) || rawQuery.includes(normalizeTeam(alias)))
+    .map(([, target]) => normalizeTeam(target));
+  const terms = new Set([rawQuery, normalizedTeamQuery(requestedTeam), ...aliasTargets].filter(Boolean));
+  const ranked = fixtures
+    .filter(item => new Date(item.eventTime).getTime() >= now.getTime())
+    .flatMap(item => [item.homeTeam, item.awayTeam].map(team => ({ item, team, normalized: normalizeTeam(team) })))
+    .map(candidate => {
+      const score = Array.from(terms).reduce((best, term) => {
+        if (candidate.normalized === term) return Math.max(best, 100);
+        if (candidate.normalized.startsWith(term) || term.startsWith(candidate.normalized)) return Math.max(best, 80);
+        if (candidate.normalized.includes(term) || term.includes(candidate.normalized)) return Math.max(best, 60);
+        return best;
+      }, 0);
+      return { ...candidate, score };
+    })
+    .filter(candidate => candidate.score >= 60)
+    .sort((left, right) => right.score - left.score || new Date(left.item.eventTime).getTime() - new Date(right.item.eventTime).getTime());
+  const unique = new Map<number, CachedUpcomingFixture>();
+  for (const candidate of ranked) {
+    if (!unique.has(candidate.item.fixtureId)) unique.set(candidate.item.fixtureId, candidate.item);
+    if (unique.size === 3) break;
+  }
+  return Array.from(unique.values());
+}
+
+async function teamResearchForFixture(request: Request, fixture: CachedUpcomingFixture): Promise<string> {
   const db = await getDb();
   const latestSnapshot = db ? (await db.select({ leagueCode: oddsSnapshots.leagueCode }).from(oddsSnapshots)
     .where(eq(oddsSnapshots.apiFixtureId, fixture.fixtureId)).orderBy(desc(oddsSnapshots.capturedAt)).limit(1))[0] : null;
   const candidate = latestSnapshot?.leagueCode && LEAGUES[latestSnapshot.leagueCode]
     ? await resolveCandidate(request, latestSnapshot.leagueCode, fixture.fixtureId).catch(() => null)
     : null;
-  return candidate ? formatCandidate(candidate) : formatTeamResearch([fixture], requestedTeam);
+  return candidate ? formatCandidate(candidate) : formatTeamResearch([fixture], fixture.homeTeam);
+}
+
+async function telegramTeamResearch(request: Request, text: string | undefined): Promise<TeamResearchResponse> {
+  const requestedTeam = parseTeamRequest(text);
+  if (!requestedTeam) return { text: "資料不足" };
+  const cached = await getSupabaseUpcomingCache();
+  const fixture = cached.available ? findUpcomingTeamFixture(cached.fixtures, requestedTeam) : null;
+  if (fixture) return { text: await teamResearchForFixture(request, fixture) };
+  const suggestions = cached.available ? suggestTeamFixtures(cached.fixtures, requestedTeam) : [];
+  return suggestions.length > 0
+    ? { text: "資料不足", buttons: suggestions.map(item => ({ text: `${item.homeTeam} vs ${item.awayTeam}`, callback_data: `team:${item.fixtureId}` })) }
+    : { text: "資料不足" };
 }
 
 type StoredTrendSnapshot = {
@@ -558,7 +596,7 @@ async function telegramStatusForChat(chatId: string): Promise<string> {
   });
 }
 
-async function sendTelegramMessage(chatId: string, text: string): Promise<void> {
+async function sendTelegramMessage(chatId: string, text: string, buttons?: TelegramInlineButton[]): Promise<void> {
   const token = requireSecret(ENV.telegramBotToken, "Telegram Bot Token");
   const chunks = text.length <= 3800 ? [text] : text.match(/(?:[^\n]+\n?){1,40}/g)?.flatMap(chunk => {
     if (chunk.length <= 3800) return [chunk];
@@ -568,10 +606,25 @@ async function sendTelegramMessage(chatId: string, text: string): Promise<void> 
     const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text: chunk, disable_web_page_preview: true }),
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: chunk,
+        disable_web_page_preview: true,
+        ...(buttons && chunks.length === 1 ? { reply_markup: { inline_keyboard: buttons.map(button => [button]) } } : {}),
+      }),
     });
     if (!response.ok) throw new Error(`Telegram訊息送出失敗（${response.status}）。`);
   }
+}
+
+async function answerTelegramCallback(callbackQueryId: string): Promise<void> {
+  const token = requireSecret(ENV.telegramBotToken, "Telegram Bot Token");
+  const response = await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ callback_query_id: callbackQueryId }),
+  });
+  if (!response.ok) throw new Error(`Telegram按鈕回調確認失敗（${response.status}）。`);
 }
 
 async function getSubscriptionChatIds(): Promise<string[]> {
@@ -924,7 +977,23 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     res.status(403).json({ error: "invalid webhook secret" });
     return;
   }
-  const message = (req.body as { message?: { chat?: { id?: number | string }; from?: { first_name?: string; username?: string }; text?: string } }).message;
+  const update = req.body as {
+    message?: { chat?: { id?: number | string }; from?: { first_name?: string; username?: string }; text?: string };
+    callback_query?: { id?: string; data?: string; message?: { chat?: { id?: number | string } } };
+  };
+  const callback = update.callback_query;
+  if (callback?.id && callback.message?.chat?.id) {
+    const fixtureId = /^team:(\d+)$/.exec(callback.data || "")?.[1];
+    const cached = await getSupabaseUpcomingCache();
+    const fixture = fixtureId && cached.available
+      ? cached.fixtures.find(item => item.fixtureId === Number(fixtureId) && new Date(item.eventTime).getTime() >= Date.now())
+      : null;
+    await answerTelegramCallback(callback.id);
+    await sendTelegramMessage(String(callback.message.chat.id), fixture ? await teamResearchForFixture(req, fixture) : "資料不足");
+    res.status(200).json({ ok: true });
+    return;
+  }
+  const message = update.message;
   const chatId = message?.chat?.id;
   const text = normalizeTelegramCommand(message?.text);
   if (!chatId || !text) {
@@ -945,7 +1014,8 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
   } else if (text === "/upcoming" || text === "/report") {
     await sendTelegramMessage(String(chatId), await telegramUpcoming());
   } else if (text === "/team") {
-    await sendTelegramMessage(String(chatId), await telegramTeamResearch(req, message?.text));
+    const result = await telegramTeamResearch(req, message?.text);
+    await sendTelegramMessage(String(chatId), result.text, result.buttons);
   } else if (text === "/status") {
     await sendTelegramMessage(String(chatId), await telegramStatusForChat(String(chatId)));
   } else if (text === "/stop") {
@@ -969,7 +1039,7 @@ export async function configureTelegramWebhook(request: Request): Promise<{ webh
   const response = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ url: webhookUrl, secret_token: requireSecret(ENV.telegramWebhookSecret, "Telegram Webhook Secret"), allowed_updates: ["message"] }),
+    body: JSON.stringify({ url: webhookUrl, secret_token: requireSecret(ENV.telegramWebhookSecret, "Telegram Webhook Secret"), allowed_updates: ["message", "callback_query"] }),
   });
   if (!response.ok) throw new Error(`Telegram webhook設定失敗（${response.status}）。`);
   const payload = await response.json() as { ok?: boolean };

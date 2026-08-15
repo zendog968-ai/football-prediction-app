@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assessMarketAnomaly, describeMarketMovement, formatCachedUpcoming, formatTeamResearch, formatTelegramStatus, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, settlementForScores, TELEGRAM_HELP_MESSAGE, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, formatCachedUpcoming, formatTeamResearch, formatTelegramStatus, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -129,6 +129,18 @@ describe("Telegram系統指令", () => {
     expect(formatTeamResearch(fixture("Flamengo"), "法林明高", now)).toContain("Flamengo");
     expect(formatTeamResearch(fixture("Melbourne Victory"), "墨爾本勝利", now)).toContain("Melbourne Victory");
     expect(formatTeamResearch(fixture("Real Madrid"), "米蘭", now)).toBe("資料不足");
+  });
+
+  it("在無完全匹配時提供最多三個可選的相近未來賽事，不包含過去賽事", () => {
+    const fixtures = [
+      { fixtureId: 1, eventTime: "2026-08-16T13:00:00Z", homeTeam: "Manchester United", awayTeam: "Example One" },
+      { fixtureId: 2, eventTime: "2026-08-17T13:00:00Z", homeTeam: "Example Two", awayTeam: "Manchester United" },
+      { fixtureId: 3, eventTime: "2026-08-18T13:00:00Z", homeTeam: "Manchester City", awayTeam: "Example Three" },
+      { fixtureId: 4, eventTime: "2026-08-14T13:00:00Z", homeTeam: "Manchester United", awayTeam: "Past Fixture" },
+    ] as never;
+    const candidates = suggestTeamFixtures(fixtures, "曼徹斯特", new Date("2026-08-15T00:00:00Z"));
+    expect(candidates).toHaveLength(3);
+    expect(candidates.map(item => item.fixtureId)).toEqual([1, 2, 3]);
   });
 
   it("每日精選只保留最多三場完整模型、非高風險候選並按機率排序", () => {
