@@ -394,6 +394,8 @@ const TEAM_QUERY_ALIASES: Record<string, string> = {
   "福岡黃蜂": "avispa fukuoka",
   "名古屋鯨魚": "nagoya grampus",
   "濟州SK": "jeju united",
+  "濟州sk": "jeju united",
+  "濟州": "jeju united",
   "濟州聯": "jeju united",
   "濟州聯隊": "jeju united",
   "濟州聯合": "jeju united",
@@ -466,8 +468,21 @@ export function parseTeamRequest(text: string | undefined): string | null {
   return team.length >= 2 && team.length <= 120 ? team : null;
 }
 
+function resolvedAliasTarget(value: string): string | null {
+  const normalized = normalizeTeam(value);
+  const exact = Object.entries(TEAM_QUERY_ALIASES).find(([alias]) => normalizeTeam(alias) === normalized)?.[1];
+  if (exact) return exact;
+  const partialTargets = new Set(Object.entries(TEAM_QUERY_ALIASES)
+    .filter(([alias]) => {
+      const candidate = normalizeTeam(alias);
+      return normalized.length >= 2 && candidate.length >= 2 && (candidate.includes(normalized) || normalized.includes(candidate));
+    })
+    .map(([, target]) => target));
+  return partialTargets.size === 1 ? Array.from(partialTargets)[0] ?? null : null;
+}
+
 function normalizedTeamQuery(value: string): string {
-  return normalizeTeam(TEAM_QUERY_ALIASES[value.trim()] || value);
+  return normalizeTeam(resolvedAliasTarget(value) ?? value);
 }
 
 export function extractNaturalLanguageTeamQuery(value: string): string {
@@ -479,8 +494,7 @@ export function extractNaturalLanguageTeamQuery(value: string): string {
 }
 
 export function isKnownTeamAlias(value: string): boolean {
-  const normalized = normalizeTeam(value);
-  return Object.keys(TEAM_QUERY_ALIASES).some(alias => normalizeTeam(alias) === normalized);
+  return resolvedAliasTarget(value) !== null;
 }
 
 export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedTeam: string, now = new Date()): string {
