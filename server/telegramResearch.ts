@@ -134,7 +134,7 @@ export function probabilityBars(values: { homeWin: number; draw: number; awayWin
 function formatCompactTable(rows: CompactMarketRow[], scorelines: ScorelineProbability[]): string {
   const row = (market: CompactMarketRow["market"]) => {
     const found = rows.find(item => item.market === market);
-    const selection = found ? `${found.selection}${found.distribution ? `（全贏 ${(found.distribution.fullWin * 100).toFixed(1)}%｜半贏 ${(found.distribution.halfWin * 100).toFixed(1)}%）` : ""}` : "資料不足";
+    const selection = found ? `${found.selection}${found.distribution ? `（全贏 ${(found.distribution.fullWin * 100).toFixed(1)}%｜半贏 ${(found.distribution.halfWin * 100).toFixed(1)}%｜半輸 ${(found.distribution.halfLoss * 100).toFixed(1)}%｜全輸 ${(found.distribution.fullLoss * 100).toFixed(1)}%）` : ""}` : "資料不足";
     return `| ${market} | ${selection} | ${found ? `${(found.probability * 100).toFixed(1)}%` : "—"} |`;
   };
   return [

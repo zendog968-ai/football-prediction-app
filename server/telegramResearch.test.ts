@@ -70,10 +70,10 @@ describe("Telegram系統指令", () => {
         { market: "入球大細 3.5", selection: "小 3.5", probability: 0.64 },
         { market: "入球大細 4.5", selection: "小 4.5", probability: 0.82 },
         { market: "讓球盤 (Handicap)", selection: "主隊 -0.5", probability: 0.62 },
-        { market: "亞洲讓球 0.25", selection: "主隊 -0.25", probability: 0.49, distribution: { fullWin: 0.37, halfWin: 0.24 } },
-        { market: "亞洲讓球 0.75", selection: "客隊 +0.75", probability: 0.61, distribution: { fullWin: 0.49, halfWin: 0.24 } },
-        { market: "亞洲讓球 1.25", selection: "主隊 -1.25", probability: 0.36, distribution: { fullWin: 0.24, halfWin: 0.24 } },
-        { market: "亞洲讓球 1.75", selection: "客隊 +1.75", probability: 0.68, distribution: { fullWin: 0.56, halfWin: 0.24 } },
+        { market: "亞洲讓球 0.25", selection: "主隊 -0.25", probability: 0.37, distribution: { fullWin: 0.37, halfWin: 0, halfLoss: 0.24, fullLoss: 0.39 } },
+        { market: "亞洲讓球 0.75", selection: "客隊 +0.75", probability: 0.61, distribution: { fullWin: 0.49, halfWin: 0.24, halfLoss: 0.11, fullLoss: 0.16 } },
+        { market: "亞洲讓球 1.25", selection: "主隊 -1.25", probability: 0.36, distribution: { fullWin: 0.24, halfWin: 0.24, halfLoss: 0.19, fullLoss: 0.33 } },
+        { market: "亞洲讓球 1.75", selection: "客隊 +1.75", probability: 0.68, distribution: { fullWin: 0.56, halfWin: 0.24, halfLoss: 0.08, fullLoss: 0.12 } },
       ],
       topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
       odds: { home: 1.82, draw: 3.55, away: 4.4, capturedAt: "2026-08-15T10:00:00Z" },
@@ -83,10 +83,10 @@ describe("Telegram系統指令", () => {
     expect(message).toContain("| 入球大細 1.5 | 大 1.5 | 78.0% |");
     expect(message).toContain("| 入球大細 3.5 | 小 3.5 | 64.0% |");
     expect(message).toContain("| 入球大細 4.5 | 小 4.5 | 82.0% |");
-    expect(message).toContain("| 亞洲讓球 0.25 | 主隊 -0.25（全贏 37.0%｜半贏 24.0%） | 49.0% |");
-    expect(message).toContain("| 亞洲讓球 0.75 | 客隊 +0.75（全贏 49.0%｜半贏 24.0%） | 61.0% |");
-    expect(message).toContain("| 亞洲讓球 1.25 | 主隊 -1.25（全贏 24.0%｜半贏 24.0%） | 36.0% |");
-    expect(message).toContain("| 亞洲讓球 1.75 | 客隊 +1.75（全贏 56.0%｜半贏 24.0%） | 68.0% |");
+    expect(message).toContain("| 亞洲讓球 0.25 | 主隊 -0.25（全贏 37.0%｜半贏 0.0%｜半輸 24.0%｜全輸 39.0%） | 37.0% |");
+    expect(message).toContain("| 亞洲讓球 0.75 | 客隊 +0.75（全贏 49.0%｜半贏 24.0%｜半輸 11.0%｜全輸 16.0%） | 61.0% |");
+    expect(message).toContain("| 亞洲讓球 1.25 | 主隊 -1.25（全贏 24.0%｜半贏 24.0%｜半輸 19.0%｜全輸 33.0%） | 36.0% |");
+    expect(message).toContain("| 亞洲讓球 1.75 | 客隊 +1.75（全贏 56.0%｜半贏 24.0%｜半輸 8.0%｜全輸 12.0%） | 68.0% |");
     expect(message).toContain("【最高機率波膽 Top 3】");
     expect(message).toContain("1. 2-1：12.0%");
   });

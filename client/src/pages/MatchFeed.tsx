@@ -13,10 +13,10 @@ const zh: Record<string, string> = {
 };
 const localize = (name: string) => zh[name] || name;
 
-function CompactTable({ item }: { item: { compactMarkets: Array<{ market: string; selection: string; probability: number; distribution?: { fullWin: number; halfWin: number } }>; topScorelines: Array<{ score: string; probability: number }> } }) {
+function CompactTable({ item }: { item: { compactMarkets: Array<{ market: string; selection: string; probability: number; distribution?: { fullWin: number; halfWin: number; halfLoss: number; fullLoss: number } }>; topScorelines: Array<{ score: string; probability: number }> } }) {
   const row = (market: string) => {
     const found = item.compactMarkets.find(entry => entry.market === market);
-    return <tr key={market} className="border-t border-white/10"><td className="py-2 pr-2 text-zinc-400">{market}</td><td className="py-2 pr-2 text-zinc-100">{found ? <><div>{found.selection}</div>{found.distribution && <div className="mt-0.5 text-[10px] text-zinc-500">全贏 {pct(found.distribution.fullWin)}｜半贏 {pct(found.distribution.halfWin)}</div>}</> : "資料不足"}</td><td className="py-2 text-right text-emerald-300">{found ? pct(found.probability) : "—"}</td></tr>;
+    return <tr key={market} className="border-t border-white/10"><td className="py-2 pr-2 text-zinc-400">{market}</td><td className="py-2 pr-2 text-zinc-100">{found ? <><div>{found.selection}</div>{found.distribution && <div className="mt-0.5 text-[10px] text-zinc-500">全贏 {pct(found.distribution.fullWin)}｜半贏 {pct(found.distribution.halfWin)}｜半輸 {pct(found.distribution.halfLoss)}｜全輸 {pct(found.distribution.fullLoss)}</div>}</> : "資料不足"}</td><td className="py-2 text-right text-emerald-300">{found ? pct(found.probability) : "—"}</td></tr>;
   };
   return <div className="space-y-4 text-xs"><table className="w-full border-collapse"><thead className="text-left text-[10px] uppercase tracking-[.12em] text-zinc-500"><tr><th className="pb-2">盤口種類</th><th className="pb-2">預測選項</th><th className="pb-2 text-right">命中機率</th></tr></thead><tbody>{row("主客和 (1X2)")}{row("入球大細 1.5")}{row("入球大細 2.5")}{row("入球大細 3.5")}{row("入球大細 4.5")}{row("讓球盤 (Handicap)")}{row("亞洲讓球 0.25")}{row("亞洲讓球 0.75")}{row("亞洲讓球 1.25")}{row("亞洲讓球 1.75")}</tbody></table><div><div className="mb-2 font-bold text-emerald-300">【最高機率波膽 Top 3】</div><ol className="space-y-1 text-zinc-300">{[0, 1, 2].map(index => <li key={index}>{index + 1}. {item.topScorelines[index] ? `${item.topScorelines[index]!.score}：${pct(item.topScorelines[index]!.probability)}` : "資料不足"}</li>)}</ol></div></div>;
 }
