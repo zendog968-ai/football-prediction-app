@@ -16,7 +16,7 @@ import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
 import { sdk } from "./_core/sdk";
 import { getPrediction, getTeams, type PredictionResult } from "./prediction";
 import { getSupabaseUpcomingCache, type CachedUpcomingFixture } from "./supabaseCache";
-import { handicapSelectionProbability, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
+import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
 
 export type ResearchWindow = "day" | "evening" | "settlement";
 export type ScheduleKind = "settlement" | "day_digest" | "evening_digest";
@@ -134,7 +134,8 @@ export function probabilityBars(values: { homeWin: number; draw: number; awayWin
 function formatCompactTable(rows: CompactMarketRow[], scorelines: ScorelineProbability[]): string {
   const row = (market: CompactMarketRow["market"]) => {
     const found = rows.find(item => item.market === market);
-    return `| ${market} | ${found?.selection ?? "資料不足"} | ${found ? `${(found.probability * 100).toFixed(1)}%` : "—"} |`;
+    const selection = found ? `${found.selection}${found.distribution ? `（全贏 ${(found.distribution.fullWin * 100).toFixed(1)}%｜半贏 ${(found.distribution.halfWin * 100).toFixed(1)}%）` : ""}` : "資料不足";
+    return `| ${market} | ${selection} | ${found ? `${(found.probability * 100).toFixed(1)}%` : "—"} |`;
   };
   return [
     "| 盤口種類 | 預測選項 | 命中機率 (%) |",
@@ -562,12 +563,14 @@ function formatCandidate(candidate: Candidate): string {
   const handicapProbability = handicapSelectionProbability(handicap?.selection, homeMean, awayMean);
   const handicap025Probability = handicapSelectionProbability(handicap025?.selection, homeMean, awayMean);
   const handicap075Probability = handicapSelectionProbability(handicap075?.selection, homeMean, awayMean);
+  const handicap025Distribution = handicapWinDistribution(handicap025?.selection, homeMean, awayMean);
+  const handicap075Distribution = handicapWinDistribution(handicap075?.selection, homeMean, awayMean);
   const rows = [
     outcome,
     ...mainstreamTotals(homeMean, awayMean),
     handicap && handicapProbability !== null ? { market: "讓球盤 (Handicap)" as const, selection: handicap.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicapProbability } : null,
-    handicap025 && handicap025Probability !== null ? { market: "亞洲讓球 0.25" as const, selection: handicap025.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap025Probability } : null,
-    handicap075 && handicap075Probability !== null ? { market: "亞洲讓球 0.75" as const, selection: handicap075.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap075Probability } : null,
+    handicap025 && handicap025Probability !== null && handicap025Distribution ? { market: "亞洲讓球 0.25" as const, selection: handicap025.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap025Probability, distribution: handicap025Distribution } : null,
+    handicap075 && handicap075Probability !== null && handicap075Distribution ? { market: "亞洲讓球 0.75" as const, selection: handicap075.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap075Probability, distribution: handicap075Distribution } : null,
   ].filter((item): item is CompactMarketRow => item !== null);
   return [
     `${candidate.homeTeam} vs ${candidate.awayTeam}`,

@@ -4,6 +4,7 @@ export type CompactMarketRow = {
   market: "主客和 (1X2)" | "入球大細 1.5" | "入球大細 2.5" | "入球大細 3.5" | "入球大細 4.5" | "讓球盤 (Handicap)" | "亞洲讓球 0.25" | "亞洲讓球 0.75";
   selection: string;
   probability: number;
+  distribution?: { fullWin: number; halfWin: number };
 };
 
 const MAX_GOALS = 8;
@@ -59,9 +60,9 @@ export function mainstreamTotals(homeMean: number | null | undefined, awayMean: 
   });
 }
 
-export function handicapSelectionProbability(selection: string | null | undefined, homeMean: number | null | undefined, awayMean: number | null | undefined): number | null {
+function handicapSplitLines(selection: string | null | undefined) {
   const match = selection?.match(/^(Home|Away)\s+([+-]?\d+(?:\.25|\.5|\.75)?)$/i);
-  if (!match || !validMean(homeMean) || !validMean(awayMean)) return null;
+  if (!match) return null;
   const side = match[1]?.toLowerCase();
   const line = Number(match[2]);
   if (!Number.isFinite(line) || !side) return null;
@@ -74,11 +75,25 @@ export function handicapSelectionProbability(selection: string | null | undefine
     : fraction === 0.75
       ? [sign * (whole + 0.5), sign * (whole + 1)]
       : [line];
-  return scoreGrid(homeMean, awayMean).reduce((total, item) => {
-    const goalDifference = side === "home" ? item.homeGoals - item.awayGoals : item.awayGoals - item.homeGoals;
-    const weightedWin = splitLines.reduce((sum, splitLine) => sum + (goalDifference + splitLine > 0 ? 1 : 0), 0) / splitLines.length;
-    return total + item.probability * weightedWin;
-  }, 0);
+  return { side, splitLines };
+}
+
+export function handicapWinDistribution(selection: string | null | undefined, homeMean: number | null | undefined, awayMean: number | null | undefined): { fullWin: number; halfWin: number } | null {
+  const parsed = handicapSplitLines(selection);
+  if (!parsed || !validMean(homeMean) || !validMean(awayMean)) return null;
+  return scoreGrid(homeMean, awayMean).reduce((distribution, item) => {
+    const goalDifference = parsed.side === "home" ? item.homeGoals - item.awayGoals : item.awayGoals - item.homeGoals;
+    const outcomes = parsed.splitLines.map(splitLine => goalDifference + splitLine);
+    if (outcomes.every(outcome => outcome > 0)) distribution.fullWin += item.probability;
+    if (outcomes.some(outcome => outcome > 0) && outcomes.some(outcome => outcome === 0)) distribution.halfWin += item.probability;
+    return distribution;
+  }, { fullWin: 0, halfWin: 0 });
+}
+
+export function handicapSelectionProbability(selection: string | null | undefined, homeMean: number | null | undefined, awayMean: number | null | undefined): number | null {
+  const distribution = handicapWinDistribution(selection, homeMean, awayMean);
+  if (!distribution) return null;
+  return distribution.fullWin + distribution.halfWin * 0.5;
 }
 
 export function highestOutcome(homeWin: number, draw: number, awayWin: number): CompactMarketRow | null {

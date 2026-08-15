@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { handicapSelectionProbability, highestOutcome, mainstreamTotals, topScorelines, totalSelectionProbability } from "./compactResearch";
+import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, totalSelectionProbability } from "./compactResearch";
 
 describe("compact research contract", () => {
   it("orders the three most likely scorelines from verified Poisson inputs", () => {
@@ -16,6 +16,8 @@ describe("compact research contract", () => {
     expect(handicapSelectionProbability("Home -0.5", 1.4, 0.8)).toBeGreaterThan(0);
     expect(handicapSelectionProbability("Home -0.25", 1.4, 0.8)).toBeGreaterThan(0);
     expect(handicapSelectionProbability("Away +0.75", 1.4, 0.8)).toBeGreaterThan(0);
+    expect(handicapWinDistribution("Home -0.25", 1.4, 0.8)).toEqual(expect.objectContaining({ fullWin: expect.any(Number), halfWin: 0 }));
+    expect(handicapWinDistribution("Away +0.75", 1.4, 0.8)!.halfWin).toBeGreaterThan(0);
   });
 
   it("returns one high-probability direction for every mainstream totals line", () => {

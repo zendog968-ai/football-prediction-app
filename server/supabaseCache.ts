@@ -1,4 +1,4 @@
-import { handicapSelectionProbability, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
+import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
 import { ENV } from "./_core/env";
 
 type CachedMarketSelection = { selection: string; odds: number | null };
@@ -163,13 +163,15 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       const handicapProbability = handicapSelectionProbability(handicap?.selection, expectedHomeGoals, expectedAwayGoals);
       const handicap025Probability = handicapSelectionProbability(handicap025?.selection, expectedHomeGoals, expectedAwayGoals);
       const handicap075Probability = handicapSelectionProbability(handicap075?.selection, expectedHomeGoals, expectedAwayGoals);
+      const handicap025Distribution = handicapWinDistribution(handicap025?.selection, expectedHomeGoals, expectedAwayGoals);
+      const handicap075Distribution = handicapWinDistribution(handicap075?.selection, expectedHomeGoals, expectedAwayGoals);
       const outcome = homeWin !== null && draw !== null && awayWin !== null ? highestOutcome(homeWin, draw, awayWin) : null;
       const compactMarkets = [
         outcome,
         ...mainstreamTotals(expectedHomeGoals, expectedAwayGoals),
         handicapProbability !== null && handicap ? { market: "讓球盤 (Handicap)" as const, selection: handicap.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicapProbability } : null,
-        handicap025Probability !== null && handicap025 ? { market: "亞洲讓球 0.25" as const, selection: handicap025.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap025Probability } : null,
-        handicap075Probability !== null && handicap075 ? { market: "亞洲讓球 0.75" as const, selection: handicap075.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap075Probability } : null,
+        handicap025Probability !== null && handicap025 && handicap025Distribution ? { market: "亞洲讓球 0.25" as const, selection: handicap025.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap025Probability, distribution: handicap025Distribution } : null,
+        handicap075Probability !== null && handicap075 && handicap075Distribution ? { market: "亞洲讓球 0.75" as const, selection: handicap075.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap075Probability, distribution: handicap075Distribution } : null,
       ].filter((item): item is CompactMarketRow => item !== null);
       const eventTime = typeof fixture.event_time === "string" ? fixture.event_time : "";
       const homeTeam = typeof fixture.home_team === "string" ? fixture.home_team : "";
