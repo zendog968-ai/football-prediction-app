@@ -55,7 +55,7 @@ export async function resetTeamTranslation(input: { englishName: string; adminCh
   return true;
 }
 
-export async function undoLastTeamTranslationOverride(adminChatId: string): Promise<{ englishName: string; traditionalName: string | null } | null> {
+export async function undoLastTeamTranslationOverride(adminChatId: string, englishName?: string): Promise<{ englishName: string; traditionalName: string | null } | null> {
   const db = await getDb();
   if (!db) throw new Error("資料庫暫時無法使用。");
   const [overrides, priorUndos] = await Promise.all([
@@ -66,7 +66,8 @@ export async function undoLastTeamTranslationOverride(adminChatId: string): Prom
       .where(and(eq(teamNameTranslationAudits.action, "undo"), eq(teamNameTranslationAudits.adminChatId, adminChatId))),
   ]);
   const reverted = new Set(priorUndos.map(row => row.revertsAuditId).filter((id): id is number => id !== null));
-  const target = overrides.find(row => !reverted.has(row.id));
+  const targetName = englishName?.trim().toLocaleLowerCase();
+  const target = overrides.find(row => !reverted.has(row.id) && (!targetName || row.englishName.toLocaleLowerCase() === targetName));
   if (!target) return null;
   if (target.previousTraditionalName) {
     await db.insert(teamNameTranslations).values({ englishName: target.englishName, traditionalName: target.previousTraditionalName, source: "curated" })

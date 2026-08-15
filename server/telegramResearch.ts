@@ -125,7 +125,7 @@ export const TELEGRAM_HELP_MESSAGE = [
   "/upcoming — 查詢未來24小時所有已同步賽事；完整模型以研究分析、部分資料以【基礎分析】呈現。",
   "/report — 顯示最新24小時賽事摘要（與/upcoming相同）。",
   "/team <隊伍名稱> — 查詢該隊最近一場已同步賽事的極簡機率表格與Top 3波膽。",
-  "/dict — 管理員查看近期自動隊名譯名；可用 /dict set 英文隊名 => 繁中譯名 覆寫、/dict reset 英文隊名 重設，或 /dict undo 復原最近覆寫。",
+  "/dict — 管理員查看近期自動隊名譯名；可用 /dict set 英文隊名 => 繁中譯名 覆寫、/dict reset 英文隊名 重設、/dict undo 復原最近覆寫，或 /dict undo 英文隊名 復原指定隊伍。",
   "/stop — 停止研究通知；可隨時以/start重新啟用。",
   "/help — 顯示本指令說明。",
   "",
@@ -308,11 +308,12 @@ export function parseDictionaryCommand(rawText: string | undefined):
   | { kind: "list" }
   | { kind: "set"; englishName: string; traditionalName: string }
   | { kind: "reset"; englishName: string }
-  | { kind: "undo" }
+  | { kind: "undo"; englishName?: string }
   | { kind: "invalid" } {
   const body = rawText?.trim().replace(/^\/dict(?:@[a-z0-9_]+)?\s*/i, "") ?? "";
   if (!body) return { kind: "list" };
-  if (/^undo$/i.test(body)) return { kind: "undo" };
+  const undo = /^undo(?:\s+(.+))?$/i.exec(body);
+  if (undo) return { kind: "undo", ...(undo[1]?.trim() ? { englishName: undo[1].trim() } : {}) };
   const set = /^set\s+(.+?)\s*=>\s*(.+)$/i.exec(body);
   if (set) return { kind: "set", englishName: set[1]!.trim(), traditionalName: set[2]!.trim() };
   const reset = /^reset\s+(.+)$/i.exec(body);
@@ -327,7 +328,7 @@ async function telegramDictionaryForAdmin(chatId: string, rawText: string | unde
   if (!subscription?.isAdmin) return "🔒 /dict 僅限管理員使用。";
   const command = parseDictionaryCommand(rawText);
   if (command.kind === "invalid") {
-    return "用法：\n/dict\n/dict set Atlante FC => 亞特蘭蒂\n/dict reset Atlante FC";
+    return "用法：\n/dict\n/dict set Atlante FC => 亞特蘭蒂\n/dict reset Atlante FC\n/dict undo\n/dict undo Atlante FC";
   }
   if (command.kind === "set") {
     await overrideTeamTranslation({ ...command, adminChatId: chatId });
@@ -340,8 +341,11 @@ async function telegramDictionaryForAdmin(chatId: string, rawText: string | unde
       : `找不到 ${command.englishName} 的可重設自動／覆寫譯名。`;
   }
   if (command.kind === "undo") {
-    const undone = await undoLastTeamTranslationOverride(chatId);
-    if (!undone) return "目前沒有可復原的詞典覆寫。";
+    if (command.englishName && (!/^[\x20-\x7E]+$/.test(command.englishName) || !/[A-Za-z]/.test(command.englishName) || command.englishName.length > 160)) {
+      return "指定隊名須為不超過160字元的英文隊名。";
+    }
+    const undone = await undoLastTeamTranslationOverride(chatId, command.englishName);
+    if (!undone) return command.englishName ? `找不到 ${command.englishName} 可復原的詞典覆寫。` : "目前沒有可復原的詞典覆寫。";
     return undone.traditionalName
       ? `↩️ 已復原最近覆寫\n${undone.englishName} → ${undone.traditionalName}\n\n此復原已記錄至詞典稽核。`
       : `↩️ 已移除最近覆寫\n${undone.englishName} 已還原至內建詞庫或待下次安全翻譯。`;
@@ -355,6 +359,7 @@ async function telegramDictionaryForAdmin(chatId: string, rawText: string | unde
     "覆寫：/dict set 英文隊名 => 繁中譯名",
     "重設：/dict reset 英文隊名",
     "復原最近覆寫：/dict undo",
+    "復原指定隊名：/dict undo Atlante FC",
   ].join("\n");
 }
 
