@@ -148,6 +148,8 @@ function formatCompactTable(rows: CompactMarketRow[], scorelines: ScorelineProba
     row("讓球盤 (Handicap)"),
     row("亞洲讓球 0.25"),
     row("亞洲讓球 0.75"),
+    row("亞洲讓球 1.25"),
+    row("亞洲讓球 1.75"),
     "",
     "【最高機率波膽 Top 3】",
     ...[0, 1, 2].map(index => `${index + 1}. ${scorelines[index] ? `${scorelines[index]!.score}：${(scorelines[index]!.probability * 100).toFixed(1)}%` : "資料不足"}`),
@@ -488,6 +490,8 @@ async function resolveCandidate(request: Request, leagueCode: string, fixtureId:
     { source: "Asian Handicap", label: "Asian Handicap", accepts: (selection: string) => /^(Home|Away)\s+[+-]?\d+(?:\.5)?$/i.test(selection) },
     { source: "Asian Handicap", label: "Asian Handicap 0.25", accepts: (selection: string) => /^(Home|Away)\s+[+-]?\d+\.25$/i.test(selection) },
     { source: "Asian Handicap", label: "Asian Handicap 0.75", accepts: (selection: string) => /^(Home|Away)\s+[+-]?\d+\.75$/i.test(selection) },
+    { source: "Asian Handicap", label: "Asian Handicap 1.25", accepts: (selection: string) => /^(Home|Away)\s+[+-]?1\.25$/i.test(selection) },
+    { source: "Asian Handicap", label: "Asian Handicap 1.75", accepts: (selection: string) => /^(Home|Away)\s+[+-]?1\.75$/i.test(selection) },
   ];
   const marketContext = marketDefinitions.flatMap<MarketContext>(definition => {
     const latest = snapshotRows.find(snapshot => snapshot.marketName === definition.source && definition.accepts(snapshot.selection));
@@ -559,18 +563,26 @@ function formatCandidate(candidate: Candidate): string {
   const handicap = candidate.marketContext.find(item => item.marketName === "Asian Handicap" && /^(Home|Away)\s+[+-]?\d+(?:\.5)?$/i.test(item.selection));
   const handicap025 = candidate.marketContext.find(item => item.marketName === "Asian Handicap 0.25");
   const handicap075 = candidate.marketContext.find(item => item.marketName === "Asian Handicap 0.75");
+  const handicap125 = candidate.marketContext.find(item => item.marketName === "Asian Handicap 1.25");
+  const handicap175 = candidate.marketContext.find(item => item.marketName === "Asian Handicap 1.75");
   const outcome = highestOutcome(candidate.prediction.probabilities.home_win, candidate.prediction.probabilities.draw, candidate.prediction.probabilities.away_win);
   const handicapProbability = handicapSelectionProbability(handicap?.selection, homeMean, awayMean);
   const handicap025Probability = handicapSelectionProbability(handicap025?.selection, homeMean, awayMean);
   const handicap075Probability = handicapSelectionProbability(handicap075?.selection, homeMean, awayMean);
+  const handicap125Probability = handicapSelectionProbability(handicap125?.selection, homeMean, awayMean);
+  const handicap175Probability = handicapSelectionProbability(handicap175?.selection, homeMean, awayMean);
   const handicap025Distribution = handicapWinDistribution(handicap025?.selection, homeMean, awayMean);
   const handicap075Distribution = handicapWinDistribution(handicap075?.selection, homeMean, awayMean);
+  const handicap125Distribution = handicapWinDistribution(handicap125?.selection, homeMean, awayMean);
+  const handicap175Distribution = handicapWinDistribution(handicap175?.selection, homeMean, awayMean);
   const rows = [
     outcome,
     ...mainstreamTotals(homeMean, awayMean),
     handicap && handicapProbability !== null ? { market: "讓球盤 (Handicap)" as const, selection: handicap.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicapProbability } : null,
     handicap025 && handicap025Probability !== null && handicap025Distribution ? { market: "亞洲讓球 0.25" as const, selection: handicap025.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap025Probability, distribution: handicap025Distribution } : null,
     handicap075 && handicap075Probability !== null && handicap075Distribution ? { market: "亞洲讓球 0.75" as const, selection: handicap075.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap075Probability, distribution: handicap075Distribution } : null,
+    handicap125 && handicap125Probability !== null && handicap125Distribution ? { market: "亞洲讓球 1.25" as const, selection: handicap125.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap125Probability, distribution: handicap125Distribution } : null,
+    handicap175 && handicap175Probability !== null && handicap175Distribution ? { market: "亞洲讓球 1.75" as const, selection: handicap175.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap175Probability, distribution: handicap175Distribution } : null,
   ].filter((item): item is CompactMarketRow => item !== null);
   return [
     `${candidate.homeTeam} vs ${candidate.awayTeam}`,

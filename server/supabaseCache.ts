@@ -115,6 +115,8 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
     const handicapByFixture = new Map<number, CachedMarketSelection>();
     const handicap025ByFixture = new Map<number, CachedMarketSelection>();
     const handicap075ByFixture = new Map<number, CachedMarketSelection>();
+    const handicap125ByFixture = new Map<number, CachedMarketSelection>();
+    const handicap175ByFixture = new Map<number, CachedMarketSelection>();
 
     for (const snapshot of oddsSnapshots) {
       const fixtureId = Number(snapshot.fixture_id);
@@ -130,6 +132,12 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       }
       if (marketType.startsWith("HDC") && !handicap075ByFixture.has(fixtureId) && /^(Home|Away)\s+[+-]?\d+\.75$/i.test(selection)) {
         handicap075ByFixture.set(fixtureId, { selection, odds: selectionOdds });
+      }
+      if (marketType.startsWith("HDC") && !handicap125ByFixture.has(fixtureId) && /^(Home|Away)\s+[+-]?1\.25$/i.test(selection)) {
+        handicap125ByFixture.set(fixtureId, { selection, odds: selectionOdds });
+      }
+      if (marketType.startsWith("HDC") && !handicap175ByFixture.has(fixtureId) && /^(Home|Away)\s+[+-]?1\.75$/i.test(selection)) {
+        handicap175ByFixture.set(fixtureId, { selection, odds: selectionOdds });
       }
       if (marketType.startsWith("HDC") && !handicapByFixture.has(fixtureId) && /^(Home|Away)\s+[+-]?\d+(?:\.5)?$/i.test(selection)) {
         handicapByFixture.set(fixtureId, { selection, odds: selectionOdds });
@@ -160,11 +168,17 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       const handicap = handicapByFixture.get(fixtureId);
       const handicap025 = handicap025ByFixture.get(fixtureId);
       const handicap075 = handicap075ByFixture.get(fixtureId);
+      const handicap125 = handicap125ByFixture.get(fixtureId);
+      const handicap175 = handicap175ByFixture.get(fixtureId);
       const handicapProbability = handicapSelectionProbability(handicap?.selection, expectedHomeGoals, expectedAwayGoals);
       const handicap025Probability = handicapSelectionProbability(handicap025?.selection, expectedHomeGoals, expectedAwayGoals);
       const handicap075Probability = handicapSelectionProbability(handicap075?.selection, expectedHomeGoals, expectedAwayGoals);
+      const handicap125Probability = handicapSelectionProbability(handicap125?.selection, expectedHomeGoals, expectedAwayGoals);
+      const handicap175Probability = handicapSelectionProbability(handicap175?.selection, expectedHomeGoals, expectedAwayGoals);
       const handicap025Distribution = handicapWinDistribution(handicap025?.selection, expectedHomeGoals, expectedAwayGoals);
       const handicap075Distribution = handicapWinDistribution(handicap075?.selection, expectedHomeGoals, expectedAwayGoals);
+      const handicap125Distribution = handicapWinDistribution(handicap125?.selection, expectedHomeGoals, expectedAwayGoals);
+      const handicap175Distribution = handicapWinDistribution(handicap175?.selection, expectedHomeGoals, expectedAwayGoals);
       const outcome = homeWin !== null && draw !== null && awayWin !== null ? highestOutcome(homeWin, draw, awayWin) : null;
       const compactMarkets = [
         outcome,
@@ -172,6 +186,8 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
         handicapProbability !== null && handicap ? { market: "讓球盤 (Handicap)" as const, selection: handicap.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicapProbability } : null,
         handicap025Probability !== null && handicap025 && handicap025Distribution ? { market: "亞洲讓球 0.25" as const, selection: handicap025.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap025Probability, distribution: handicap025Distribution } : null,
         handicap075Probability !== null && handicap075 && handicap075Distribution ? { market: "亞洲讓球 0.75" as const, selection: handicap075.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap075Probability, distribution: handicap075Distribution } : null,
+        handicap125Probability !== null && handicap125 && handicap125Distribution ? { market: "亞洲讓球 1.25" as const, selection: handicap125.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap125Probability, distribution: handicap125Distribution } : null,
+        handicap175Probability !== null && handicap175 && handicap175Distribution ? { market: "亞洲讓球 1.75" as const, selection: handicap175.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap175Probability, distribution: handicap175Distribution } : null,
       ].filter((item): item is CompactMarketRow => item !== null);
       const eventTime = typeof fixture.event_time === "string" ? fixture.event_time : "";
       const homeTeam = typeof fixture.home_team === "string" ? fixture.home_team : "";

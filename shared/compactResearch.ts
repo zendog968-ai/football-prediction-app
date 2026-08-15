@@ -1,7 +1,7 @@
 export type ScorelineProbability = { score: string; probability: number };
 
 export type CompactMarketRow = {
-  market: "主客和 (1X2)" | "入球大細 1.5" | "入球大細 2.5" | "入球大細 3.5" | "入球大細 4.5" | "讓球盤 (Handicap)" | "亞洲讓球 0.25" | "亞洲讓球 0.75";
+  market: "主客和 (1X2)" | "入球大細 1.5" | "入球大細 2.5" | "入球大細 3.5" | "入球大細 4.5" | "讓球盤 (Handicap)" | "亞洲讓球 0.25" | "亞洲讓球 0.75" | "亞洲讓球 1.25" | "亞洲讓球 1.75";
   selection: string;
   probability: number;
   distribution?: { fullWin: number; halfWin: number };
