@@ -371,6 +371,7 @@ const TEAM_QUERY_ALIASES: Record<string, string> = {
   "里爾": "lille",
   "尼斯": "nice",
   "布里斯托城": "bristol city",
+  "布裡斯托城": "bristol city",
   "布里斯托爾城": "bristol city",
   "布里斯托尔城": "bristol city",
   "Bristol City": "bristol city",
@@ -534,7 +535,8 @@ export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedT
 }
 
 export function formatLiveTeamResearch(research: LiveTeamResearch): string {
-  return [formatFixtureDisplay(research.homeTeam, research.awayTeam), formatCompactTable(research.compactMarkets, research.topScorelines, research.outcomes)].join("\n");
+  const source = research.sourceMode === "team-history" ? "隊伍歷史攻防" : "聯賽平均";
+  return [formatFixtureDisplay(research.homeTeam, research.awayTeam), `📊 【資料來源】${source}`, formatCompactTable(research.compactMarkets, research.topScorelines, research.outcomes)].join("\n");
 }
 
 function findUpcomingTeamFixture(fixtures: CachedUpcomingFixture[], requestedTeam: string, now = new Date()): CachedUpcomingFixture | null {

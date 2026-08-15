@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatLiveTeamResearch, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -162,6 +162,7 @@ describe("Telegram系統指令", () => {
     expect(formatTeamResearch(fixture("Flamengo"), "法林明高", now)).toContain("Flamengo");
     expect(formatTeamResearch(fixture("Melbourne Victory"), "墨爾本勝利", now)).toContain("Melbourne Victory");
     expect(formatTeamResearch(fixture("Bristol City"), "布里斯托城", now)).toContain("Bristol City");
+    expect(formatTeamResearch(fixture("Bristol City"), "布裡斯托城", now)).toContain("Bristol City");
     expect(formatTeamResearch(fixture("Bristol City"), "布里斯托爾城", now)).toContain("Bristol City");
     expect(formatTeamResearch(fixture("Bristol City"), "布里斯托尔城", now)).toContain("Bristol City");
     expect(formatTeamResearch(fixture("Bristol City"), "Bristol City", now)).toContain("Bristol City");
@@ -175,9 +176,26 @@ describe("Telegram系統指令", () => {
     expect(extractNaturalLanguageTeamQuery("請分析濟州近期賽事")).toBe("濟州");
     expect(extractNaturalLanguageTeamQuery("想知國際邁阿密的賽程")).toBe("國際邁阿密");
     expect(extractNaturalLanguageTeamQuery("請分析布里斯托城今晚賽事")).toBe("布里斯托城");
+    expect(extractNaturalLanguageTeamQuery("請分析布裡斯托城今晚賽事")).toBe("布裡斯托城");
     expect(isKnownTeamAlias(extractNaturalLanguageTeamQuery("請分析 神戸勝利船 下一場"))).toBe(true);
     expect(isKnownTeamAlias("布里斯托城")).toBe(true);
+    expect(isKnownTeamAlias("布裡斯托城")).toBe(true);
     expect(isKnownTeamAlias("healthcheck")).toBe(false);
+  });
+
+  it("在基礎Poisson回覆標示隊伍歷史攻防或聯賽平均來源", () => {
+    const base = {
+      homeTeam: "Bristol City",
+      awayTeam: "Millwall",
+      outcomes: { homeWin: 0.4, draw: 0.33, awayWin: 0.27 },
+      compactMarkets: [
+        { market: "入球大細 2.5", selection: "小 2.5", probability: 0.62 },
+        { market: "讓球盤 (Handicap)", selection: "主隊 -0.5（模型參考）", probability: 0.4 },
+      ],
+      topScorelines: [{ score: "1-0", probability: 0.15 }, { score: "0-0", probability: 0.13 }, { score: "1-1", probability: 0.12 }],
+    } as const;
+    expect(formatLiveTeamResearch({ ...base, sourceMode: "team-history" })).toContain("【資料來源】隊伍歷史攻防");
+    expect(formatLiveTeamResearch({ ...base, sourceMode: "league-average" })).toContain("【資料來源】聯賽平均");
   });
 
   it("以Telegram一般HTML文字包裝對齊研究內容並轉義特殊字元", () => {
