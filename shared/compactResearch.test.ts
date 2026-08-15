@@ -11,15 +11,16 @@ describe("compact research contract", () => {
 
   it("derives only supported mainstream totals and a half/full handicap row", () => {
     expect(totalSelectionProbability("Over 2.5", 1.4, 0.8)).toBeGreaterThan(0);
-    expect(totalSelectionProbability("Over 1.5", 1.4, 0.8)).toBeGreaterThan(totalSelectionProbability("Over 3.5", 1.4, 0.8)!);
+    expect(totalSelectionProbability("Over 1.5", 1.4, 0.8)).toBeGreaterThan(totalSelectionProbability("Over 4.5", 1.4, 0.8)!);
     expect(totalSelectionProbability("Over 3.0", 1.4, 0.8)).toBeNull();
     expect(handicapSelectionProbability("Home -0.5", 1.4, 0.8)).toBeGreaterThan(0);
-    expect(handicapSelectionProbability("Home -0.25", 1.4, 0.8)).toBeNull();
+    expect(handicapSelectionProbability("Home -0.25", 1.4, 0.8)).toBeGreaterThan(0);
+    expect(handicapSelectionProbability("Away +0.75", 1.4, 0.8)).toBeGreaterThan(0);
   });
 
   it("returns one high-probability direction for every mainstream totals line", () => {
     const rows = mainstreamTotals(1.4, 0.8);
-    expect(rows.map(row => row.market)).toEqual(["入球大細 1.5", "入球大細 2.5", "入球大細 3.5"]);
+    expect(rows.map(row => row.market)).toEqual(["入球大細 1.5", "入球大細 2.5", "入球大細 3.5", "入球大細 4.5"]);
     expect(rows.every(row => row.probability >= 0.5)).toBe(true);
   });
 

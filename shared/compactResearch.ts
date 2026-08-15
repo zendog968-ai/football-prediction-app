@@ -1,7 +1,7 @@
 export type ScorelineProbability = { score: string; probability: number };
 
 export type CompactMarketRow = {
-  market: "主客和 (1X2)" | "入球大細 1.5" | "入球大細 2.5" | "入球大細 3.5" | "讓球盤 (Handicap)";
+  market: "主客和 (1X2)" | "入球大細 1.5" | "入球大細 2.5" | "入球大細 3.5" | "入球大細 4.5" | "讓球盤 (Handicap)" | "亞洲讓球 0.25" | "亞洲讓球 0.75";
   selection: string;
   probability: number;
 };
@@ -37,7 +37,7 @@ export function topScorelines(homeMean: number | null | undefined, awayMean: num
 }
 
 export function totalSelectionProbability(selection: string | null | undefined, homeMean: number | null | undefined, awayMean: number | null | undefined): number | null {
-  const match = selection?.match(/^(Over|Under)\s+([123]\.5)$/i);
+  const match = selection?.match(/^(Over|Under)\s+([1234]\.5)$/i);
   if (!match || !validMean(homeMean) || !validMean(awayMean)) return null;
   const line = Number(match[2]);
   if (!Number.isFinite(line)) return null;
@@ -47,7 +47,7 @@ export function totalSelectionProbability(selection: string | null | undefined, 
 
 export function mainstreamTotals(homeMean: number | null | undefined, awayMean: number | null | undefined): CompactMarketRow[] {
   if (!validMean(homeMean) || !validMean(awayMean)) return [];
-  return [1.5, 2.5, 3.5].flatMap((line): CompactMarketRow[] => {
+  return [1.5, 2.5, 3.5, 4.5].flatMap((line): CompactMarketRow[] => {
     const over = totalSelectionProbability(`Over ${line}`, homeMean, awayMean);
     if (over === null) return [];
     const under = 1 - over;
@@ -60,14 +60,24 @@ export function mainstreamTotals(homeMean: number | null | undefined, awayMean: 
 }
 
 export function handicapSelectionProbability(selection: string | null | undefined, homeMean: number | null | undefined, awayMean: number | null | undefined): number | null {
-  const match = selection?.match(/^(Home|Away)\s+([+-]?\d+(?:\.5)?)$/i);
+  const match = selection?.match(/^(Home|Away)\s+([+-]?\d+(?:\.25|\.5|\.75)?)$/i);
   if (!match || !validMean(homeMean) || !validMean(awayMean)) return null;
   const side = match[1]?.toLowerCase();
   const line = Number(match[2]);
   if (!Number.isFinite(line) || !side) return null;
+  const absolute = Math.abs(line);
+  const whole = Math.floor(absolute);
+  const fraction = Math.round((absolute - whole) * 100) / 100;
+  const sign = line < 0 ? -1 : 1;
+  const splitLines = fraction === 0.25
+    ? [sign * whole, sign * (whole + 0.5)]
+    : fraction === 0.75
+      ? [sign * (whole + 0.5), sign * (whole + 1)]
+      : [line];
   return scoreGrid(homeMean, awayMean).reduce((total, item) => {
-    const adjusted = (side === "home" ? item.homeGoals - item.awayGoals : item.awayGoals - item.homeGoals) + line;
-    return total + (adjusted > 0 ? item.probability : 0);
+    const goalDifference = side === "home" ? item.homeGoals - item.awayGoals : item.awayGoals - item.homeGoals;
+    const weightedWin = splitLines.reduce((sum, splitLine) => sum + (goalDifference + splitLine > 0 ? 1 : 0), 0) / splitLines.length;
+    return total + item.probability * weightedWin;
   }, 0);
 }
 

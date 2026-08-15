@@ -30,7 +30,10 @@ vi.mock("@/lib/trpc", () => ({
                 { market: "入球大細 1.5", selection: "大 1.5", probability: 0.78 },
                 { market: "入球大細 2.5", selection: "大 2.5", probability: 0.54 },
                 { market: "入球大細 3.5", selection: "小 3.5", probability: 0.64 },
+                { market: "入球大細 4.5", selection: "小 4.5", probability: 0.82 },
                 { market: "讓球盤 (Handicap)", selection: "主隊 -0.5", probability: 0.58 },
+                { market: "亞洲讓球 0.25", selection: "主隊 -0.25", probability: 0.49 },
+                { market: "亞洲讓球 0.75", selection: "客隊 +0.75", probability: 0.61 },
               ],
               topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
               odds: null,
@@ -59,6 +62,9 @@ describe("MatchFeed compact research format", () => {
     expect(screen.getByText("入球大細 1.5")).toBeTruthy();
     expect(screen.getByText("大 2.5")).toBeTruthy();
     expect(screen.getByText("入球大細 3.5")).toBeTruthy();
+    expect(screen.getByText("入球大細 4.5")).toBeTruthy();
+    expect(screen.getByText("亞洲讓球 0.25")).toBeTruthy();
+    expect(screen.getByText("亞洲讓球 0.75")).toBeTruthy();
     expect(screen.getByText("【最高機率波膽 Top 3】")).toBeTruthy();
     expect(screen.getByText("1. 2-1：12%")).toBeTruthy();
     expect(screen.queryByText("研究標籤")).toBeNull();

@@ -143,7 +143,10 @@ function formatCompactTable(rows: CompactMarketRow[], scorelines: ScorelineProba
     row("入球大細 1.5"),
     row("入球大細 2.5"),
     row("入球大細 3.5"),
+    row("入球大細 4.5"),
     row("讓球盤 (Handicap)"),
+    row("亞洲讓球 0.25"),
+    row("亞洲讓球 0.75"),
     "",
     "【最高機率波膽 Top 3】",
     ...[0, 1, 2].map(index => `${index + 1}. ${scorelines[index] ? `${scorelines[index]!.score}：${(scorelines[index]!.probability * 100).toFixed(1)}%` : "資料不足"}`),
@@ -479,11 +482,17 @@ async function resolveCandidate(request: Request, leagueCode: string, fixtureId:
     eq(oddsSnapshots.apiFixtureId, fixtureId),
     inArray(oddsSnapshots.marketName, ["Asian Handicap", "Goals Over/Under"]),
   )).orderBy(desc(oddsSnapshots.capturedAt));
-  const marketContext = ["Asian Handicap", "Goals Over/Under"].flatMap<MarketContext>(marketName => {
-    const latest = snapshotRows.find(snapshot => snapshot.marketName === marketName);
+  const marketDefinitions = [
+    { source: "Goals Over/Under", label: "Goals Over/Under", accepts: () => true },
+    { source: "Asian Handicap", label: "Asian Handicap", accepts: (selection: string) => /^(Home|Away)\s+[+-]?\d+(?:\.5)?$/i.test(selection) },
+    { source: "Asian Handicap", label: "Asian Handicap 0.25", accepts: (selection: string) => /^(Home|Away)\s+[+-]?\d+\.25$/i.test(selection) },
+    { source: "Asian Handicap", label: "Asian Handicap 0.75", accepts: (selection: string) => /^(Home|Away)\s+[+-]?\d+\.75$/i.test(selection) },
+  ];
+  const marketContext = marketDefinitions.flatMap<MarketContext>(definition => {
+    const latest = snapshotRows.find(snapshot => snapshot.marketName === definition.source && definition.accepts(snapshot.selection));
     if (!latest) return [];
     const sameMarketBookmaker = snapshotRows
-      .filter(snapshot => snapshot.marketName === marketName && snapshot.bookmakerId === latest.bookmakerId)
+      .filter(snapshot => snapshot.marketName === definition.source && definition.accepts(snapshot.selection) && snapshot.bookmakerId === latest.bookmakerId)
       .sort((a, b) => a.capturedAt.getTime() - b.capturedAt.getTime());
     const opening = sameMarketBookmaker[0];
     const sameSelection = sameMarketBookmaker.every(snapshot => snapshot.selection === latest.selection);
@@ -492,7 +501,7 @@ async function resolveCandidate(request: Request, leagueCode: string, fixtureId:
       : `盤口線已由 ${opening?.selection ?? "未知"} 調整至 ${latest.selection}，不以不同線位繪製同一價格走勢。`;
     const anomalySummary = assessMarketAnomaly(sameMarketBookmaker.map(snapshot => ({ selection: snapshot.selection, decimalOdds: Number(snapshot.decimalOdds) })));
     return [{
-      marketName,
+      marketName: definition.label,
       selection: latest.selection,
       decimalOdds: Number(latest.decimalOdds),
       capturedAt: latest.capturedAt,
@@ -547,12 +556,18 @@ function formatCandidate(candidate: Candidate): string {
   const homeMean = candidate.prediction.selected_features.dc_expected_home_goals;
   const awayMean = candidate.prediction.selected_features.dc_expected_away_goals;
   const handicap = candidate.marketContext.find(item => item.marketName === "Asian Handicap" && /^(Home|Away)\s+[+-]?\d+(?:\.5)?$/i.test(item.selection));
+  const handicap025 = candidate.marketContext.find(item => item.marketName === "Asian Handicap 0.25");
+  const handicap075 = candidate.marketContext.find(item => item.marketName === "Asian Handicap 0.75");
   const outcome = highestOutcome(candidate.prediction.probabilities.home_win, candidate.prediction.probabilities.draw, candidate.prediction.probabilities.away_win);
   const handicapProbability = handicapSelectionProbability(handicap?.selection, homeMean, awayMean);
+  const handicap025Probability = handicapSelectionProbability(handicap025?.selection, homeMean, awayMean);
+  const handicap075Probability = handicapSelectionProbability(handicap075?.selection, homeMean, awayMean);
   const rows = [
     outcome,
     ...mainstreamTotals(homeMean, awayMean),
     handicap && handicapProbability !== null ? { market: "讓球盤 (Handicap)" as const, selection: handicap.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicapProbability } : null,
+    handicap025 && handicap025Probability !== null ? { market: "亞洲讓球 0.25" as const, selection: handicap025.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap025Probability } : null,
+    handicap075 && handicap075Probability !== null ? { market: "亞洲讓球 0.75" as const, selection: handicap075.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap075Probability } : null,
   ].filter((item): item is CompactMarketRow => item !== null);
   return [
     `${candidate.homeTeam} vs ${candidate.awayTeam}`,
