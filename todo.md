@@ -371,4 +371,4 @@
 - [x] 補上復原回歸測試，完成正式Webhook測試、建置與發布：31項相關測試、型別檢查與建置已通過；正式覆寫再`/dict undo`回傳HTTP 200並新增revertsAuditId=60001的undo稽核，Webhook無積壓或最後錯誤。
 - [x] 核實現有/dict undo語法與指定英文隊名的未復原覆寫稽核查詢條件：指定名稱會以不分大小寫精準比對管理員尚未被undo關聯的override稽核列。
 - [x] 實作`/dict undo 英文隊名`指定復原，並補上語法、權限與回退稽核測試：保留`/dict undo`最近覆原模式，指定模式不會觸及其他隊伍，英文輸入會經長度與字元驗證。
-- [ ] 完成發布及指定隊名Telegram復原端到端驗證：31項相關測試、型別檢查與建置已通過，待正式`/dict undo Atlante FC`驗證。
+- [x] 完成發布及指定隊名Telegram復原端到端驗證：31項相關測試、型別檢查與建置已通過；正式`/dict set Atlante FC => 亞特蘭特`後以`/dict undo Atlante FC`回傳HTTP 200並建立revertsAuditId=150002的undo稽核，Webhook無積壓或最後錯誤。
