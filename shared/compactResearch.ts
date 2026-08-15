@@ -4,7 +4,7 @@ export type CompactMarketRow = {
   market: "主客和 (1X2)" | "入球大細 1.5" | "入球大細 2.5" | "入球大細 3.5" | "入球大細 4.5" | "讓球盤 (Handicap)" | "亞洲讓球 0.25" | "亞洲讓球 0.75" | "亞洲讓球 1.25" | "亞洲讓球 1.75";
   selection: string;
   probability: number;
-  distribution?: { fullWin: number; halfWin: number; halfLoss: number; fullLoss: number };
+  distribution?: { fullWin: number; halfWin: number; push: number; halfLoss: number; fullLoss: number };
 };
 
 const MAX_GOALS = 8;
@@ -78,7 +78,7 @@ function handicapSplitLines(selection: string | null | undefined) {
   return { side, splitLines };
 }
 
-export function handicapWinDistribution(selection: string | null | undefined, homeMean: number | null | undefined, awayMean: number | null | undefined): { fullWin: number; halfWin: number; halfLoss: number; fullLoss: number } | null {
+export function handicapWinDistribution(selection: string | null | undefined, homeMean: number | null | undefined, awayMean: number | null | undefined): { fullWin: number; halfWin: number; push: number; halfLoss: number; fullLoss: number } | null {
   const parsed = handicapSplitLines(selection);
   if (!parsed || !validMean(homeMean) || !validMean(awayMean)) return null;
   return scoreGrid(homeMean, awayMean).reduce((distribution, item) => {
@@ -86,10 +86,11 @@ export function handicapWinDistribution(selection: string | null | undefined, ho
     const outcomes = parsed.splitLines.map(splitLine => goalDifference + splitLine);
     if (outcomes.every(outcome => outcome > 0)) distribution.fullWin += item.probability;
     if (outcomes.some(outcome => outcome > 0) && outcomes.some(outcome => outcome === 0)) distribution.halfWin += item.probability;
+    if (outcomes.every(outcome => outcome === 0)) distribution.push += item.probability;
     if (outcomes.some(outcome => outcome < 0) && outcomes.some(outcome => outcome === 0)) distribution.halfLoss += item.probability;
     if (outcomes.every(outcome => outcome < 0)) distribution.fullLoss += item.probability;
     return distribution;
-  }, { fullWin: 0, halfWin: 0, halfLoss: 0, fullLoss: 0 });
+  }, { fullWin: 0, halfWin: 0, push: 0, halfLoss: 0, fullLoss: 0 });
 }
 
 export function handicapSelectionProbability(selection: string | null | undefined, homeMean: number | null | undefined, awayMean: number | null | undefined): number | null {

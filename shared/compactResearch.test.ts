@@ -23,6 +23,7 @@ describe("compact research contract", () => {
     expect(handicapWinDistribution("Home -0.25", 1.4, 0.8)!.halfLoss).toBeGreaterThan(0);
     expect(handicapWinDistribution("Away +0.75", 1.4, 0.8)!.halfLoss).toBeGreaterThan(0);
     expect(handicapWinDistribution("Home -1.25", 1.4, 0.8)!.fullLoss).toBeGreaterThan(0);
+    expect(handicapWinDistribution("Home -1", 1.4, 0.8)!.push).toBeGreaterThan(0);
   });
 
   it("returns one high-probability direction for every mainstream totals line", () => {

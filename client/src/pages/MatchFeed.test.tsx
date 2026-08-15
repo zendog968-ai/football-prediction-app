@@ -31,11 +31,11 @@ vi.mock("@/lib/trpc", () => ({
                 { market: "入球大細 2.5", selection: "大 2.5", probability: 0.54 },
                 { market: "入球大細 3.5", selection: "小 3.5", probability: 0.64 },
                 { market: "入球大細 4.5", selection: "小 4.5", probability: 0.82 },
-                { market: "讓球盤 (Handicap)", selection: "主隊 -0.5", probability: 0.58 },
-                { market: "亞洲讓球 0.25", selection: "主隊 -0.25", probability: 0.37, distribution: { fullWin: 0.37, halfWin: 0, halfLoss: 0.24, fullLoss: 0.39 } },
-                { market: "亞洲讓球 0.75", selection: "客隊 +0.75", probability: 0.61, distribution: { fullWin: 0.49, halfWin: 0.24, halfLoss: 0.11, fullLoss: 0.16 } },
-                { market: "亞洲讓球 1.25", selection: "主隊 -1.25", probability: 0.36, distribution: { fullWin: 0.24, halfWin: 0.24, halfLoss: 0.19, fullLoss: 0.33 } },
-                { market: "亞洲讓球 1.75", selection: "客隊 +1.75", probability: 0.68, distribution: { fullWin: 0.56, halfWin: 0.24, halfLoss: 0.08, fullLoss: 0.12 } },
+                { market: "讓球盤 (Handicap)", selection: "主隊 -1", probability: 0.47, distribution: { fullWin: 0.47, halfWin: 0, push: 0.21, halfLoss: 0, fullLoss: 0.32 } },
+                { market: "亞洲讓球 0.25", selection: "主隊 -0.25", probability: 0.37, distribution: { fullWin: 0.37, halfWin: 0, push: 0, halfLoss: 0.24, fullLoss: 0.39 } },
+                { market: "亞洲讓球 0.75", selection: "客隊 +0.75", probability: 0.61, distribution: { fullWin: 0.49, halfWin: 0.24, push: 0, halfLoss: 0.11, fullLoss: 0.16 } },
+                { market: "亞洲讓球 1.25", selection: "主隊 -1.25", probability: 0.36, distribution: { fullWin: 0.24, halfWin: 0.24, push: 0, halfLoss: 0.19, fullLoss: 0.33 } },
+                { market: "亞洲讓球 1.75", selection: "客隊 +1.75", probability: 0.68, distribution: { fullWin: 0.56, halfWin: 0.24, push: 0, halfLoss: 0.08, fullLoss: 0.12 } },
               ],
               topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
               odds: null,
@@ -69,7 +69,7 @@ describe("MatchFeed compact research format", () => {
     expect(screen.getByText("亞洲讓球 0.75")).toBeTruthy();
     expect(screen.getByText("亞洲讓球 1.25")).toBeTruthy();
     expect(screen.getByText("亞洲讓球 1.75")).toBeTruthy();
-    expect(screen.getByText("全贏 37%｜半贏 0%｜半輸 24%｜全輸 39%")).toBeTruthy();
+    expect(screen.getByText("全贏 47%｜半贏 0%｜走盤 21%｜半輸 0%｜全輸 32%")).toBeTruthy();
     expect(screen.getByText("【最高機率波膽 Top 3】")).toBeTruthy();
     expect(screen.getByText("1. 2-1：12%")).toBeTruthy();
     expect(screen.queryByText("研究標籤")).toBeNull();
