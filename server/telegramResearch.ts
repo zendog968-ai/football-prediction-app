@@ -17,7 +17,7 @@ import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
 import { sdk } from "./_core/sdk";
 import { getPrediction, getTeams, type PredictionResult } from "./prediction";
 import { getSupabaseUpcomingCache, type CachedUpcomingFixture } from "./supabaseCache";
-import { fetchLiveTeamResearch, fetchLiveUpcomingResearch, type LiveTeamResearch } from "./livePoissonResearch";
+import { fetchLiveTeamResearch, fetchLiveUpcomingResearch, hasCompleteLiveResearch, type LiveTeamResearch } from "./livePoissonResearch";
 import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
 
 export type ResearchWindow = "day" | "evening" | "settlement";
@@ -140,6 +140,17 @@ export function probabilityBars(values: { homeWin: number; draw: number; awayWin
 
 type OutcomeSnapshot = { homeWin: number; draw: number; awayWin: number };
 
+function hasCompleteCachedResearch(item: CachedUpcomingFixture): boolean {
+  const outcomes = [item.homeWin, item.draw, item.awayWin];
+  const totals = item.compactMarkets.find(row => row.market === "入球大細 2.5");
+  const handicap = item.compactMarkets.find(row => row.market === "讓球盤 (Handicap)");
+  return outcomes.every(value => Number.isFinite(value) && value >= 0 && value <= 1)
+    && Boolean(totals && Number.isFinite(totals.probability))
+    && Boolean(handicap && Number.isFinite(handicap.probability))
+    && item.topScorelines.length >= 3
+    && item.topScorelines.slice(0, 3).every(scoreline => Boolean(scoreline.score) && Number.isFinite(scoreline.probability));
+}
+
 function formatCompactTable(rows: CompactMarketRow[], scorelines: ScorelineProbability[], outcomes: OutcomeSnapshot): string {
   const percent = (value: number) => Number.isFinite(value) && value >= 0 && value <= 1 ? `${(value * 100).toFixed(1)}%` : "暫無可驗證機率";
   const total = rows.find(item => item.market === "入球大細 2.5");
@@ -172,9 +183,9 @@ export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = ne
   const end = start + 24 * 60 * 60_000;
   const upcoming = fixtures.filter(item => {
     const kickoff = new Date(item.eventTime).getTime();
-    return Number.isFinite(kickoff) && kickoff >= start && kickoff <= end;
-  });
-  if (!upcoming.length) return "未來24小時暫無已同步賽事。若有新fixture寫入Supabase，/upcoming會優先列出，即使進階研究或盤口尚未完整同步。";
+    return Number.isFinite(kickoff) && kickoff >= start && kickoff <= end && hasCompleteCachedResearch(item);
+  }).slice(0, 3);
+  if (!upcoming.length) return "";
   return upcoming.map((item, index) => [
     `${index + 1}. ${formatFixtureDisplay(item.homeTeam, item.awayTeam)}`,
     formatCompactTable(item.compactMarkets, item.topScorelines, { homeWin: item.homeWin, draw: item.draw, awayWin: item.awayWin }),
@@ -186,11 +197,12 @@ async function telegramUpcoming(): Promise<string> {
   const now = Date.now();
   const hasCachedUpcoming = cached.available && cached.fixtures.some(item => {
     const kickoff = new Date(item.eventTime).getTime();
-    return Number.isFinite(kickoff) && kickoff >= now && kickoff <= now + 24 * 60 * 60_000;
+    return Number.isFinite(kickoff) && kickoff >= now && kickoff <= now + 24 * 60 * 60_000 && hasCompleteCachedResearch(item);
   });
   if (hasCachedUpcoming) return formatCachedUpcoming(cached.fixtures);
   const live = await fetchLiveUpcomingResearch(3).catch(() => []);
-  if (live.length > 0) return live.map((item, index) => `${index + 1}. ${formatLiveTeamResearch(item)}`).join("\n\n");
+  const completeLive = live.filter(hasCompleteLiveResearch);
+  if (completeLive.length > 0) return completeLive.map((item, index) => `${index + 1}. ${formatLiveTeamResearch(item)}`).join("\n\n");
   return "暫未找到可驗證未來賽事";
 }
 

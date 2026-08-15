@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { deriveLivePoissonResearch, fetchLiveTeamResearch, fetchLiveUpcomingResearch } from "./livePoissonResearch";
+import { deriveLivePoissonResearch, fetchLiveTeamResearch, fetchLiveUpcomingResearch, hasCompleteLiveResearch } from "./livePoissonResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -33,6 +33,16 @@ describe("即時可驗證Poisson回退", () => {
     const result = deriveLivePoissonResearch(upcoming, [finished(1, 9, 1, 0)], [finished(2, 7, 0, 1)], league);
     expect(result?.sourceMode).toBe("league-average");
     expect(result?.compactMarkets.find(item => item.market === "主客和 (1X2)")?.probability).toBeGreaterThan(0);
+  });
+
+  it("拒絕缺少主流2.5大小球、讓球或三個波膽的即時研究", () => {
+    const incomplete = {
+      homeTeam: "Example Home", awayTeam: "Example Away",
+      outcomes: { homeWin: 0.5, draw: 0.25, awayWin: 0.25 },
+      compactMarkets: [{ market: "主客和 (1X2)", selection: "主勝", probability: 0.5 }],
+      topScorelines: [{ score: "1-0", probability: 0.1 }], sourceMode: "league-average",
+    } as never;
+    expect(hasCompleteLiveResearch(incomplete)).toBe(false);
   });
 
   it("在Supabase未命中時以API-Football即時隊伍賽程及歷史產出研究", async () => {

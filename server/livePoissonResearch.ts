@@ -24,6 +24,17 @@ export type LiveTeamResearch = {
   sourceMode: "team-history" | "league-average";
 };
 
+export function hasCompleteLiveResearch(research: LiveTeamResearch): boolean {
+  const outcomes = [research.outcomes.homeWin, research.outcomes.draw, research.outcomes.awayWin];
+  const totals = research.compactMarkets.find(item => item.market === "入球大細 2.5");
+  const handicap = research.compactMarkets.find(item => item.market === "讓球盤 (Handicap)");
+  return outcomes.every(value => Number.isFinite(value) && value >= 0 && value <= 1)
+    && Boolean(totals && Number.isFinite(totals.probability))
+    && Boolean(handicap && Number.isFinite(handicap.probability))
+    && research.topScorelines.length >= 3
+    && research.topScorelines.slice(0, 3).every(item => Boolean(item.score) && Number.isFinite(item.probability));
+}
+
 type TeamGoals = { matches: number; goalsFor: number; goalsAgainst: number };
 
 function apiErrorCount(payload: ApiPayload<unknown>): number {
@@ -151,7 +162,12 @@ export async function fetchLiveTeamResearch(teamName: string): Promise<LiveTeamR
 
 export async function fetchLiveUpcomingResearch(limit = 3): Promise<LiveTeamResearch[]> {
   const fixtures = await apiFootball<ApiFixture>("/fixtures?next=30&timezone=UTC");
-  const candidates = fixtures.filter(row => POPULAR_LEAGUE_IDS.has(row.league?.id ?? -1)).slice(0, limit);
-  const results = await Promise.all(candidates.map(researchForFixture));
-  return results.filter((result): result is LiveTeamResearch => result !== null);
+  const candidates = fixtures.filter(row => POPULAR_LEAGUE_IDS.has(row.league?.id ?? -1));
+  const results: LiveTeamResearch[] = [];
+  for (const candidate of candidates.slice(0, Math.max(limit * 5, 15))) {
+    const research = await researchForFixture(candidate).catch(() => null);
+    if (research && hasCompleteLiveResearch(research)) results.push(research);
+    if (results.length === limit) break;
+  }
+  return results;
 }

@@ -92,6 +92,19 @@ describe("Telegram系統指令", () => {
     expect(message).toContain("1. 2-1 ── 12.0%");
   });
 
+  it("/upcoming跳過缺少勝率、2.5大小球、讓球或Top 3波膽的已同步賽事", () => {
+    const base = {
+      fixtureId: 202, leagueName: "MLS", eventTime: "2026-08-15T20:00:00Z", homeTeam: "Example Home", awayTeam: "Example Away",
+      homeWin: 0.6, draw: 0.22, awayWin: 0.18,
+      compactMarkets: [{ market: "入球大細 2.5", selection: "大 2.5", probability: 0.55 }, { market: "讓球盤 (Handicap)", selection: "主隊 -0.5", probability: 0.6 }],
+      topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
+    } as never;
+    const incomplete = { ...base, fixtureId: 201, homeWin: Number.NaN, topScorelines: [] };
+    const text = formatCachedUpcoming([incomplete, base], new Date("2026-08-15T00:00:00Z"));
+    expect(text).not.toContain("暫無可驗證");
+    expect(text).toContain("Example Home vs Example Away");
+  });
+
   it("在Telegram標題以繁體中文加英文原名顯示已知球隊，未知隊名保留原文", () => {
     expect(formatFixtureDisplay("Jeju United FC", "FC Anyang")).toBe("濟州SK (Jeju United FC) vs 安養FC (FC Anyang)");
     expect(formatFixtureDisplay("Shenyang Urban", "Sichuan Jiuniu")).toBe("瀋陽城市 (Shenyang Urban) vs 四川九牛 (Sichuan Jiuniu)");
@@ -221,12 +234,7 @@ describe("Telegram系統指令", () => {
       topScorelines: [],
       odds: null,
     }], new Date("2026-08-15T01:00:00Z"));
-    expect(message).toContain("Fallback Home vs Fallback Away");
-    expect(message).toContain("【主客和】主勝 48.0% | 和 暫無可驗證機率 | 客 28.0%");
-    expect(message).toContain("3. 暫無可驗證波膽");
-    expect(message).not.toContain("| :--- |");
-    expect(message).not.toContain("Outside Window");
-    expect(message).not.toContain("暫無已同步且證據充分");
+    expect(message).toBe("");
   });
 
   it("顯示訂閱、任務與不暴露憑證的API剩餘額度", () => {
