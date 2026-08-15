@@ -1268,6 +1268,7 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     await sendTelegramMessage(String(chatId), "Aurelia Football研究通知已啟用。你會收到經資料品質檢核的研究摘要與賽後統計；回覆 /stop 可停止通知。所有內容僅供研究，並非投注或資金建議。");
   } else if (text === "/help") {
     await sendTelegramMessage(String(chatId), TELEGRAM_HELP_MESSAGE);
+  // Dictionary commands are admin-gated inside telegramDictionaryForAdmin, including /dict undo.
   } else if (text === "/dict") {
     await sendTelegramMessage(String(chatId), await telegramDictionaryForAdmin(String(chatId), message?.text));
   } else if (text === "/trend") {
