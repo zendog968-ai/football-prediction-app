@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assessMarketAnomaly, describeMarketMovement, formatCachedUpcoming, formatTeamResearch, formatTelegramStatus, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatTeamResearch, formatTelegramStatus, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -130,6 +130,12 @@ describe("Telegram系統指令", () => {
     expect(formatTeamResearch(fixture("Flamengo"), "法林明高", now)).toContain("Flamengo");
     expect(formatTeamResearch(fixture("Melbourne Victory"), "墨爾本勝利", now)).toContain("Melbourne Victory");
     expect(formatTeamResearch(fixture("Real Madrid"), "米蘭", now)).toBe("資料不足");
+  });
+
+  it("可從無斜線自然語言訊息抽取最長隊名別名", () => {
+    expect(extractNaturalLanguageTeamQuery("請分析 神戸勝利船 下一場")).toBe("神戸勝利船");
+    expect(extractNaturalLanguageTeamQuery("幫我睇下 FC東京")).toBe("FC東京");
+    expect(extractNaturalLanguageTeamQuery("想知國際邁阿密的賽程")).toBe("國際邁阿密");
   });
 
   it("在無完全匹配時提供最多三個可選的相近未來賽事，不包含過去賽事", () => {

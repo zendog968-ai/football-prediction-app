@@ -424,6 +424,14 @@ function normalizedTeamQuery(value: string): string {
   return normalizeTeam(TEAM_QUERY_ALIASES[value.trim()] || value);
 }
 
+export function extractNaturalLanguageTeamQuery(value: string): string {
+  const normalized = normalizeTeam(value);
+  const alias = Object.keys(TEAM_QUERY_ALIASES)
+    .sort((left, right) => right.length - left.length)
+    .find(candidate => normalized.includes(normalizeTeam(candidate)));
+  return alias || value.trim();
+}
+
 export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedTeam: string, now = new Date()): string {
   const query = normalizedTeamQuery(requestedTeam);
   const match = fixtures
@@ -501,7 +509,7 @@ async function telegramTeamResearch(request: Request, text: string | undefined):
 }
 
 async function telegramNaturalLanguageTeamResearch(request: Request, text: string | undefined): Promise<TeamResearchResponse | null> {
-  const requestedTeam = text?.trim();
+  const requestedTeam = text ? extractNaturalLanguageTeamQuery(text) : "";
   if (!requestedTeam || requestedTeam.length > 120) return null;
   const cached = await getSupabaseUpcomingCache();
   if (!cached.available) return null;
