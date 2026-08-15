@@ -9,6 +9,7 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { handleScheduledResearch, handleTelegramWebhook } from "../telegramResearch";
+import { handleScheduledAllLeagueSync } from "../allLeagueSync";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -47,6 +48,7 @@ async function startServer() {
   app.post("/api/scheduled/research-settlement", (req, res) => void handleScheduledResearch(req, res, "settlement"));
   app.post("/api/scheduled/research-day", (req, res) => void handleScheduledResearch(req, res, "day_digest"));
   app.post("/api/scheduled/research-evening", (req, res) => void handleScheduledResearch(req, res, "evening_digest"));
+  app.post("/api/scheduled/all-league-sync", (req, res) => void handleScheduledAllLeagueSync(req, res));
   // tRPC API
   app.use(
     "/api/trpc",

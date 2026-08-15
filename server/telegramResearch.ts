@@ -800,6 +800,20 @@ async function deliverDigest(digestId: number, content: string): Promise<void> {
   if (failed.length === chatIds.length) throw new Error("所有Telegram研究訊息均未能送達。");
 }
 
+export async function deliverAllLeagueCoverageSummary(summary: { fixtures: number; leagues: number; countries: number; generatedAt: string }): Promise<{ recipients: number; delivered: number }> {
+  const chatIds = await getSubscriptionChatIds();
+  const content = [
+    "🏆 <b>Aurelia 全聯賽同步摘要</b>",
+    `賽事：${summary.fixtures.toLocaleString()} 場`,
+    `聯賽：${summary.leagues.toLocaleString()} 個`,
+    `國家／地區：${summary.countries.toLocaleString()} 個`,
+    `更新：${new Date(summary.generatedAt).toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong", hour12: false })}`,
+    "資料層：全量賽程與隊伍識別；賠率及歷史研究按資料可用性分層提供。",
+  ].join("\n");
+  const results = await Promise.allSettled(chatIds.map(chatId => sendTelegramMessage(chatId, content)));
+  return { recipients: chatIds.length, delivered: results.filter(result => result.status === "fulfilled").length };
+}
+
 async function fixtureDetails(fixtureId: number): Promise<{ homeTeam: string; awayTeam: string; kickoffAt: Date; status: string; homeGoals: number | null; awayGoals: number | null } | null> {
   const payload = await apiFootball<ApiFootballFixtureResponse>(`/fixtures?id=${fixtureId}`);
   const row = payload.response?.[0];

@@ -51,6 +51,22 @@ export const researchScheduleJobs = mysqlTable("research_schedule_jobs", {
   updatedAt: timestamp("updatedAt").defaultNow().notNull().onUpdateNow(),
 });
 
+/** Project-level daily catalog job. The callback finds this row by Heartbeat task UID only. */
+export const allLeagueSyncJobs = mysqlTable("all_league_sync_jobs", {
+  id: int("id").autoincrement().primaryKey(),
+  scheduleCronTaskUid: varchar("scheduleCronTaskUid", { length: 65 }).unique(),
+  cronExpression: varchar("cronExpression", { length: 64 }).notNull(),
+  isEnabled: boolean("isEnabled").notNull().default(false),
+  lastStartedAt: timestamp("lastStartedAt"),
+  lastCompletedAt: timestamp("lastCompletedAt"),
+  lastFixtureCount: int("lastFixtureCount").notNull().default(0),
+  lastLeagueCount: int("lastLeagueCount").notNull().default(0),
+  lastCountryCount: int("lastCountryCount").notNull().default(0),
+  lastError: text("lastError"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull().onUpdateNow(),
+});
+
 /** Immutable captured values from the authorised API-Football feed. */
 export const oddsSnapshots = mysqlTable("odds_snapshots", {
   id: int("id").autoincrement().primaryKey(),
