@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { formatFixtureDisplay } from "@shared/teamDisplay";
 import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -91,6 +92,12 @@ describe("Telegram系統指令", () => {
     expect(message).toContain("1. 2-1 ── 12.0%");
   });
 
+  it("在Telegram標題以繁體中文加英文原名顯示已知球隊，未知隊名保留原文", () => {
+    expect(formatFixtureDisplay("Jeju United FC", "FC Anyang")).toBe("濟州SK (Jeju United FC) vs 安養FC (FC Anyang)");
+    expect(formatFixtureDisplay("Shenyang Urban", "Sichuan Jiuniu")).toBe("瀋陽城市 (Shenyang Urban) vs 四川九牛 (Sichuan Jiuniu)");
+    expect(formatFixtureDisplay("Unknown FC", "FC Tokyo")).toBe("Unknown FC vs FC東京 (FC Tokyo)");
+  });
+
   it("解析/team並以中文別名找到下一場已同步賽事，缺少賽事時回覆明確警示", () => {
     expect(parseTeamRequest("/team 曼聯")).toBe("曼聯");
     expect(parseTeamRequest("/team")).toBeNull();
@@ -103,7 +110,7 @@ describe("Telegram系統指令", () => {
       compactMarkets: [{ market: "主客和 (1X2)", selection: "主勝", probability: 0.61 }],
       topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
     }] as never;
-    expect(formatTeamResearch(fixtures, "曼聯", new Date("2026-08-15T00:00:00Z"))).toContain("Manchester United vs Example Away");
+    expect(formatTeamResearch(fixtures, "曼聯", new Date("2026-08-15T00:00:00Z"))).toContain("曼聯 (Manchester United) vs Example Away");
     expect(formatTeamResearch(fixtures, "不存在的隊", new Date("2026-08-15T00:00:00Z"))).toBe("⚠️ 暫未找到 不存在的隊 的近期賽事資料，請確認隊名或嘗試其他熱門隊伍。");
   });
 

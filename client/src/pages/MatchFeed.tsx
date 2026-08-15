@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { CalendarDays, ChevronDown, Clock3, ShieldAlert, Sparkles } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { localizeTeamName } from "@shared/teamDisplay";
 
 const pct = (value: number) => `${Math.round(value * 100)}%`;
 const labelTime = (value: string) => new Intl.DateTimeFormat("zh-HK", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
@@ -11,7 +12,7 @@ const zh: Record<string, string> = {
   "Major League Soccer": "美國職業足球大聯盟", "Premier League": "英格蘭超級足球聯賽", "La Liga": "西班牙甲組足球聯賽", "UEFA Champions League": "歐洲冠軍聯賽", "UEFA Europa League": "歐洲聯賽", "J1 League": "日本職業足球甲級聯賽",
   "Orlando City SC": "奧蘭多城", "FC Cincinnati": "辛辛那提FC", "Inter Miami": "國際邁阿密", "LA Galaxy": "洛杉磯銀河", "Los Angeles FC": "洛杉磯FC", "Seattle Sounders": "西雅圖海灣者", "Portland Timbers": "波特蘭伐木者", "Club Tijuana": "提華納", "Cruz Azul": "藍十字", "Chicago Fire": "芝加哥火焰",
 };
-const localize = (name: string) => zh[name] || name;
+const localize = (name: string) => zh[name] || localizeTeamName(name);
 
 function CompactTable({ item }: { item: { compactMarkets: Array<{ market: string; selection: string; probability: number; distribution?: { fullWin: number; halfWin: number; push: number; halfLoss: number; fullLoss: number } }>; topScorelines: Array<{ score: string; probability: number }> } }) {
   const row = (market: string) => {

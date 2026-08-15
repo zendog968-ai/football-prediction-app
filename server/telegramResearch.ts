@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { parse as parseCookie } from "cookie";
 import { COOKIE_NAME } from "@shared/const";
+import { formatFixtureDisplay } from "@shared/teamDisplay";
 import {
   oddsSnapshots,
   researchDigests,
@@ -175,7 +176,7 @@ export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = ne
   });
   if (!upcoming.length) return "未來24小時暫無已同步賽事。若有新fixture寫入Supabase，/upcoming會優先列出，即使進階研究或盤口尚未完整同步。";
   return upcoming.map((item, index) => [
-    `${index + 1}. ${item.homeTeam} vs ${item.awayTeam}`,
+    `${index + 1}. ${formatFixtureDisplay(item.homeTeam, item.awayTeam)}`,
     formatCompactTable(item.compactMarkets, item.topScorelines, { homeWin: item.homeWin, draw: item.draw, awayWin: item.awayWin }),
   ].join("\n")).join("\n\n");
 }
@@ -510,11 +511,11 @@ export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedT
     })
     .sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime())[0];
   if (!match) return noRecentFixtureMessage(requestedTeam);
-  return [`${match.homeTeam} vs ${match.awayTeam}`, formatCompactTable(match.compactMarkets, match.topScorelines, { homeWin: match.homeWin, draw: match.draw, awayWin: match.awayWin })].join("\n");
+  return [formatFixtureDisplay(match.homeTeam, match.awayTeam), formatCompactTable(match.compactMarkets, match.topScorelines, { homeWin: match.homeWin, draw: match.draw, awayWin: match.awayWin })].join("\n");
 }
 
 export function formatLiveTeamResearch(research: LiveTeamResearch): string {
-  return [`${research.homeTeam} vs ${research.awayTeam}`, formatCompactTable(research.compactMarkets, research.topScorelines, research.outcomes)].join("\n");
+  return [formatFixtureDisplay(research.homeTeam, research.awayTeam), formatCompactTable(research.compactMarkets, research.topScorelines, research.outcomes)].join("\n");
 }
 
 function findUpcomingTeamFixture(fixtures: CachedUpcomingFixture[], requestedTeam: string, now = new Date()): CachedUpcomingFixture | null {
@@ -577,7 +578,7 @@ async function telegramTeamResearch(request: Request, text: string | undefined):
   const live = await fetchLiveTeamResearch(normalizedTeamQuery(requestedTeam)).catch(() => null);
   if (live) return { text: formatLiveTeamResearch(live) };
   return suggestions.length > 0
-    ? { text: "請選擇相近隊伍", buttons: suggestions.map(item => ({ text: `${item.homeTeam} vs ${item.awayTeam}`, callback_data: `team:${item.fixtureId}` })) }
+    ? { text: "請選擇相近隊伍", buttons: suggestions.map(item => ({ text: formatFixtureDisplay(item.homeTeam, item.awayTeam), callback_data: `team:${item.fixtureId}` })) }
     : { text: noRecentFixtureMessage(requestedTeam) };
 }
 
@@ -593,7 +594,7 @@ async function telegramNaturalLanguageTeamResearch(request: Request, text: strin
   if (suggestions.length === 0) return isKnownTeamAlias(requestedTeam) ? { text: noRecentFixtureMessage(requestedTeam) } : null;
   return {
     text: "請選擇相近隊伍",
-    buttons: suggestions.map(item => ({ text: `${item.homeTeam} vs ${item.awayTeam}`, callback_data: `team:${item.fixtureId}` })),
+    buttons: suggestions.map(item => ({ text: formatFixtureDisplay(item.homeTeam, item.awayTeam), callback_data: `team:${item.fixtureId}` })),
   };
 }
 
@@ -931,7 +932,7 @@ function formatCandidate(candidate: Candidate): string {
     handicap175 && handicap175Probability !== null && handicap175Distribution ? { market: "亞洲讓球 1.75" as const, selection: handicap175.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap175Probability, distribution: handicap175Distribution } : null,
   ].filter((item): item is CompactMarketRow => item !== null);
   return [
-    `${candidate.homeTeam} vs ${candidate.awayTeam}`,
+    formatFixtureDisplay(candidate.homeTeam, candidate.awayTeam),
     formatCompactTable(rows, topScorelines(homeMean, awayMean), {
       homeWin: candidate.prediction.probabilities.home_win,
       draw: candidate.prediction.probabilities.draw,
