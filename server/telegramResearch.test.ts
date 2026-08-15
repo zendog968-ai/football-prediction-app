@@ -80,15 +80,15 @@ describe("Telegram系統指令", () => {
       odds: { home: 1.82, draw: 3.55, away: 4.4, capturedAt: "2026-08-15T10:00:00Z" },
     }], new Date("2026-08-15T00:00:00Z"));
     expect(message).toContain("Example Home vs Example Away");
-    expect(message).toContain("【核心盤口勝率】");
-    expect(message).toContain("主客和 (1X2)：主勝 62.0% | 和局 21.0% | 客勝 17.0%");
-    expect(message).toContain("入球大細 (2.5球)：大 2.5 (56.0%) | 小 2.5 (44.0%)");
-    expect(message).toContain("讓球盤 (主隊 -1)：主隊 -1 贏盤 (47.0%)");
+    expect(message).toContain("──────────────────");
+    expect(message).toContain("【主客和】主勝 62.0% | 和 21.0% | 客 17.0%");
+    expect(message).toContain("【大細球】大 2.5 (56.0%) | 小 2.5 (44.0%)");
+    expect(message).toContain("【讓球盤】主隊 -1 贏盤 (47.0%)");
     expect(message).not.toContain("入球大細 1.5");
     expect(message).not.toContain("亞洲讓球 0.25");
     expect(message).not.toContain("全贏");
-    expect(message).toContain("【最高機率波膽 Top 3】");
-    expect(message).toContain("1. 2-1 (12.0%)");
+    expect(message).toContain("🎯 【最高波膽 Top 3】");
+    expect(message).toContain("1. 2-1 ── 12.0%");
   });
 
   it("解析/team並以中文別名找到下一場已同步賽事，缺少賽事時回覆明確警示", () => {
@@ -149,8 +149,8 @@ describe("Telegram系統指令", () => {
     expect(isKnownTeamAlias("healthcheck")).toBe(false);
   });
 
-  it("以Telegram一般HTML文字包裝研究內容並轉義隊名特殊字元", () => {
-    expect(toTelegramHtml("【核心盤口勝率】\nA&B <C>")).toBe("<b>【核心盤口勝率】</b>\nA&amp;B &lt;C&gt;");
+  it("以Telegram一般HTML文字包裝對齊研究內容並轉義特殊字元", () => {
+    expect(toTelegramHtml("【主客和】\nA&B <C>")).toBe("<b>【主客和】</b>\nA&amp;B &lt;C&gt;");
   });
 
   it("在無完全匹配時提供最多三個可選的相近未來賽事，不包含過去賽事", () => {
@@ -209,7 +209,7 @@ describe("Telegram系統指令", () => {
       odds: null,
     }], new Date("2026-08-15T01:00:00Z"));
     expect(message).toContain("Fallback Home vs Fallback Away");
-    expect(message).toContain("主客和 (1X2)：主勝 48.0% | 和局 暫無可驗證機率 | 客勝 28.0%");
+    expect(message).toContain("【主客和】主勝 48.0% | 和 暫無可驗證機率 | 客 28.0%");
     expect(message).toContain("3. 暫無可驗證波膽");
     expect(message).not.toContain("| :--- |");
     expect(message).not.toContain("Outside Window");

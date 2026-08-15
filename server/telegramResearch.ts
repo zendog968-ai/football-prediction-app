@@ -147,21 +147,23 @@ function formatCompactTable(rows: CompactMarketRow[], scorelines: ScorelineProba
   const over = total?.selection.startsWith("大") ? total.probability : total ? 1 - total.probability : null;
   const under = total ? 1 - (over ?? 0) : null;
   return [
-    "【核心盤口勝率】",
-    `• 主客和 (1X2)：主勝 ${percent(outcomes.homeWin)} | 和局 ${percent(outcomes.draw)} | 客勝 ${percent(outcomes.awayWin)}`,
-    `• 入球大細 (2.5球)：${over === null || under === null ? "暫無可驗證盤口" : `大 2.5 (${percent(over)}) | 小 2.5 (${percent(under)})`}`,
-    `• 讓球盤${handicap ? ` (${handicap.selection})：${handicap.selection} 贏盤 (${percent(handicap.probability)})` : "：暫無可驗證盤口"}`,
+    "──────────────────",
+    `【主客和】主勝 ${percent(outcomes.homeWin)} | 和 ${percent(outcomes.draw)} | 客 ${percent(outcomes.awayWin)}`,
+    `【大細球】${over === null || under === null ? "暫無可驗證盤口" : `大 2.5 (${percent(over)}) | 小 2.5 (${percent(under)})`}`,
+    `【讓球盤】${handicap ? `${handicap.selection} 贏盤 (${percent(handicap.probability)})` : "暫無可驗證盤口"}`,
     "",
-    "【最高機率波膽 Top 3】",
-    ...[0, 1, 2].map(index => `${index + 1}. ${scorelines[index] ? `${scorelines[index]!.score} (${percent(scorelines[index]!.probability)})` : "暫無可驗證波膽"}`),
+    "🎯 【最高波膽 Top 3】",
+    ...[0, 1, 2].map(index => `${index + 1}. ${scorelines[index] ? `${scorelines[index]!.score} ── ${percent(scorelines[index]!.probability)}` : "暫無可驗證波膽"}`),
   ].join("\n");
 }
 
 export function toTelegramHtml(text: string): string {
   const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return escaped
-    .replace("【核心盤口勝率】", "<b>【核心盤口勝率】</b>")
-    .replace("【最高機率波膽 Top 3】", "<b>【最高機率波膽 Top 3】</b>");
+    .replace("【主客和】", "<b>【主客和】</b>")
+    .replace("【大細球】", "<b>【大細球】</b>")
+    .replace("【讓球盤】", "<b>【讓球盤】</b>")
+    .replace("🎯 【最高波膽 Top 3】", "🎯 <b>【最高波膽 Top 3】</b>");
 }
 
 export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = new Date()): string {
