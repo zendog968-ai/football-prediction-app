@@ -1026,6 +1026,18 @@ export function selectDailyDigestPicks<T extends Pick<Candidate, "prediction">>(
   return [...strict, ...fallback].slice(0, 3);
 }
 
+export function hasCompleteDigestCandidate(candidate: Pick<Candidate, "prediction" | "marketContext">): boolean {
+  const probabilities = [candidate.prediction.probabilities.home_win, candidate.prediction.probabilities.draw, candidate.prediction.probabilities.away_win];
+  const validProbability = (value: number | undefined) => Number.isFinite(value) && value! > 0 && value! < 1;
+  const expectedGoals = [candidate.prediction.selected_features.dc_expected_home_goals, candidate.prediction.selected_features.dc_expected_away_goals];
+  const hasTotals = candidate.marketContext.some(item => item.marketName === "Goals Over/Under" && Boolean(item.selection) && Number.isFinite(item.decimalOdds) && item.decimalOdds > 1);
+  const hasHandicap = candidate.marketContext.some(item => item.marketName === "Asian Handicap" && Boolean(item.selection) && Number.isFinite(item.decimalOdds) && item.decimalOdds > 1);
+  return probabilities.every(validProbability)
+    && Math.abs(probabilities.reduce((total, value) => total + value, 0) - 1) < 0.02
+    && expectedGoals.every(value => value !== null && Number.isFinite(value) && value > 0)
+    && hasTotals && hasHandicap;
+}
+
 function hktDateKey(value: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit" }).format(value);
 }
@@ -1061,8 +1073,8 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
       // Team naming / individual inference failures are intentionally skipped, not inferred.
     }
   }
-  const selected = selectDailyDigestPicks(candidates);
-  const liveFallback = selected.length > 0 || !apiReady ? [] : await fetchLiveUpcomingResearch(3).catch(() => []);
+  const selected = selectDailyDigestPicks(candidates.filter(hasCompleteDigestCandidate));
+  const liveFallback = selected.length > 0 || !apiReady ? [] : (await fetchLiveUpcomingResearch(3).catch(() => [])).filter(hasCompleteLiveResearch);
   const anomalyCandidates = candidates
     .filter(candidate => candidate.marketContext.some(market => Boolean(market.anomalySummary)))
     .slice(0, 3);

@@ -10,14 +10,22 @@ const TRADITIONAL_TEAM_NAMES: Record<string, string> = {
   "Jeju United FC": "濟州SK", "Jeju United": "濟州SK", "FC Anyang": "安養FC", "Ulsan HD FC": "蔚山HD", "Jeonbuk Hyundai Motors": "全北現代", "Pohang Steelers": "浦項製鐵", "FC Seoul": "FC首爾",
   "Melbourne Victory": "墨爾本勝利", "Melbourne City": "墨爾本城", "Sydney FC": "悉尼FC", "Western Sydney Wanderers": "西悉尼流浪者", "Central Coast Mariners": "中岸水手",
   "Shanghai Port": "上海海港", "Shanghai Shenhua": "上海申花", "Beijing Guoan": "北京國安", "Shandong Luneng": "山東泰山", "Chengdu Rongcheng": "成都蓉城", "Shenyang Urban": "瀋陽城市", "Sichuan Jiuniu": "四川九牛",
-  Flamengo: "法林明高", Palmeiras: "彭美拉斯", Corinthians: "哥連泰斯", "Sao Paulo": "聖保羅", Fluminense: "富明尼斯", Cruzeiro: "高士路",
+  Flamengo: "法林明高", Palmeiras: "彭美拉斯", Corinthians: "哥連泰斯", "Sao Paulo": "聖保羅", Fluminense: "富明尼斯", "America Mineiro": "明尼路美洲", Cruzeiro: "高士路",
+  "Fluminense W": "富明尼斯女足", "Fluminense Women": "富明尼斯女足", "America Mineiro W": "明尼路美洲女足", "America Mineiro Women": "明尼路美洲女足", "América Mineiro W": "明尼路美洲女足", "América Mineiro Women": "明尼路美洲女足",
   "Club America": "墨西哥美洲", Guadalajara: "瓜達拉哈拉", "Cruz Azul": "藍十字", Monterrey: "蒙特雷", Tigres: "堤格雷斯", Tijuana: "提華納",
 };
 
 const normalizedNames = new Map(Object.entries(TRADITIONAL_TEAM_NAMES).map(([english, chinese]) => [english.trim().toLocaleLowerCase(), chinese]));
 
 export function localizeTeamName(englishName: string): string {
-  return normalizedNames.get(englishName.trim().toLocaleLowerCase()) ?? englishName.trim();
+  const original = englishName.trim();
+  const direct = normalizedNames.get(original.toLocaleLowerCase());
+  if (direct) return direct;
+  const womenSuffix = /\s+(?:w|women)$/i.exec(original);
+  if (!womenSuffix) return original;
+  const base = original.slice(0, womenSuffix.index).trim();
+  const localizedBase = normalizedNames.get(base.toLocaleLowerCase());
+  return localizedBase ? `${localizedBase}女足` : original;
 }
 
 export function formatTeamDisplay(englishName: string): string {

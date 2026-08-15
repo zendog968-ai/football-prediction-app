@@ -29,11 +29,12 @@ export function hasCompleteLiveResearch(research: LiveTeamResearch): boolean {
   const outcomes = [research.outcomes.homeWin, research.outcomes.draw, research.outcomes.awayWin];
   const totals = research.compactMarkets.find(item => item.market === "入球大細 2.5");
   const handicap = research.compactMarkets.find(item => item.market === "讓球盤 (Handicap)");
-  return outcomes.every(value => Number.isFinite(value) && value >= 0 && value <= 1)
-    && Boolean(totals && Number.isFinite(totals.probability))
-    && Boolean(handicap && Number.isFinite(handicap.probability))
+  const validProbability = (value: number | undefined) => Number.isFinite(value) && value! > 0 && value! < 1;
+  return outcomes.every(validProbability) && Math.abs(outcomes.reduce((total, value) => total + value, 0) - 1) < 0.02
+    && Boolean(totals?.selection && validProbability(totals.probability))
+    && Boolean(handicap?.selection && validProbability(handicap.probability))
     && research.topScorelines.length >= 3
-    && research.topScorelines.slice(0, 3).every(item => Boolean(item.score) && Number.isFinite(item.probability));
+    && research.topScorelines.slice(0, 3).every(item => Boolean(item.score) && validProbability(item.probability));
 }
 
 type TeamGoals = { matches: number; goalsFor: number; goalsAgainst: number };

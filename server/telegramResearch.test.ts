@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatLiveTeamResearch, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatLiveTeamResearch, formatTeamResearch, formatTelegramStatus, hasCompleteDigestCandidate, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -114,6 +114,8 @@ describe("Telegram系統指令", () => {
     expect(formatFixtureDisplay("Jeju United FC", "FC Anyang")).toBe("濟州SK (Jeju United FC) vs 安養FC (FC Anyang)");
     expect(formatFixtureDisplay("Shenyang Urban", "Sichuan Jiuniu")).toBe("瀋陽城市 (Shenyang Urban) vs 四川九牛 (Sichuan Jiuniu)");
     expect(formatFixtureDisplay("Unknown FC", "FC Tokyo")).toBe("Unknown FC vs FC東京 (FC Tokyo)");
+    expect(formatFixtureDisplay("Fluminense W", "America Mineiro W")).toBe("富明尼斯女足 (Fluminense W) vs 明尼路美洲女足 (America Mineiro W)");
+    expect(formatFixtureDisplay("Fluminense Women", "America Mineiro Women")).toBe("富明尼斯女足 (Fluminense Women) vs 明尼路美洲女足 (America Mineiro Women)");
   });
 
   it("解析/team並以中文別名找到下一場已同步賽事，缺少賽事時回覆明確警示", () => {
@@ -226,6 +228,20 @@ describe("Telegram系統指令", () => {
     const candidate = (probability: number, risk: "low" | "medium" | "high", samples: number, available: boolean) => ({ prediction: { lean: { probability, risk_level: risk }, diagnostics: { dc_available: available, dc_history_match_count: samples } } }) as never;
     const candidates = [candidate(0.62, "low", 25, true), candidate(0.59, "high", 6, true), candidate(0.55, "medium", 4, false), candidate(0.49, "high", 2, false)];
     expect(selectDailyDigestPicks(candidates).map(item => item.prediction.lean.probability)).toEqual([0.62, 0.59, 0.55]);
+  });
+
+  it("定時推播只接受具完整勝率、實際盤口與可推導波膽的候選", () => {
+    const prediction = {
+      probabilities: { home_win: 0.5, draw: 0.27, away_win: 0.23 },
+      selected_features: { dc_expected_home_goals: 1.4, dc_expected_away_goals: 0.9 },
+    } as never;
+    const complete = { prediction, marketContext: [
+      { marketName: "Goals Over/Under", selection: "Over 2.5", decimalOdds: 1.9 },
+      { marketName: "Asian Handicap", selection: "Home -0.5", decimalOdds: 1.85 },
+    ] } as never;
+    expect(hasCompleteDigestCandidate(complete)).toBe(true);
+    expect(hasCompleteDigestCandidate({ ...complete, marketContext: [] })).toBe(false);
+    expect(hasCompleteDigestCandidate({ ...complete, prediction: { ...prediction, probabilities: { home_win: 0.5, draw: Number.NaN, away_win: 0.5 } } })).toBe(false);
   });
 
   it("只要有未來24小時fixture就列出，部分模型與盤口會以基礎分析而非暫無賽事呈現", () => {
