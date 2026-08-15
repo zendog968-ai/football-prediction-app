@@ -33,6 +33,7 @@ class PoissonPrediction:
     most_likely_score: str
     over_2_5_probability: float
     btts_probability: float
+    top_scorelines: list[dict[str, float | str]]
     research_lean: str
     evidence_stars: int
     data_warning: str | None
@@ -91,6 +92,7 @@ def predict_fixture(fixture: dict[str, Any], home_history: list[dict[str, Any]],
     draw = sum(probability for (h, a), probability in grid.items() if h == a)
     away_win = sum(probability for (h, a), probability in grid.items() if h < a)
     likely_score = max(grid, key=grid.get)
+    top_scores = sorted(grid.items(), key=lambda item: item[1], reverse=True)[:3]
     over_2_5 = sum(probability for (h, a), probability in grid.items() if h + a >= 3)
     btts = sum(probability for (h, a), probability in grid.items() if h > 0 and a > 0)
     labels = [("主隊傾向", home_win), ("和局傾向", draw), ("客隊傾向", away_win)]
@@ -116,6 +118,7 @@ def predict_fixture(fixture: dict[str, Any], home_history: list[dict[str, Any]],
         most_likely_score=f"{likely_score[0]}-{likely_score[1]}",
         over_2_5_probability=round(over_2_5, 6),
         btts_probability=round(btts, 6),
+        top_scorelines=[{"score": f"{home_goals}-{away_goals}", "probability": round(probability, 6)} for (home_goals, away_goals), probability in top_scores],
         research_lean=lean,
         evidence_stars=evidence_stars,
         data_warning=" ".join(warnings),

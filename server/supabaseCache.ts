@@ -1,4 +1,7 @@
+import { handicapSelectionProbability, highestOutcome, topScorelines, totalSelectionProbability, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
 import { ENV } from "./_core/env";
+
+type CachedMarketSelection = { selection: string; odds: number | null };
 
 export type CachedUpcomingFixture = {
   fixtureId: number;
@@ -14,6 +17,8 @@ export type CachedUpcomingFixture = {
   confidence: number;
   predictionUpdatedAt: string | null;
   hasPrediction: boolean;
+  compactMarkets: CompactMarketRow[];
+  topScorelines: ScorelineProbability[];
   odds: {
     home: number | null;
     draw: number | null;
@@ -45,6 +50,31 @@ function normalizeOdds(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed > 1 ? parsed : null;
 }
 
+function parseResearchMetadata(value: unknown) {
+  const recommendation = typeof value === "string" ? value : "";
+  const marker = "\n[AURELIA_META]";
+  const markerIndex = recommendation.indexOf(marker);
+  if (markerIndex < 0) return { recommendation: recommendation || null, metadata: null as Record<string, unknown> | null };
+  try {
+    return {
+      recommendation: recommendation.slice(0, markerIndex) || null,
+      metadata: JSON.parse(recommendation.slice(markerIndex + marker.length)) as Record<string, unknown>,
+    };
+  } catch {
+    return { recommendation: recommendation.slice(0, markerIndex) || null, metadata: null as Record<string, unknown> | null };
+  }
+}
+
+function normalizeScorelines(value: unknown): ScorelineProbability[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): ScorelineProbability[] => {
+    if (!item || typeof item !== "object") return [];
+    const fields = item as Record<string, unknown>;
+    const probability = normalizeProbability(fields.probability);
+    return typeof fields.score === "string" && /^\d+-\d+$/.test(fields.score) && probability !== null ? [{ score: fields.score, probability }] : [];
+  }).slice(0, 3);
+}
+
 function postgrestUrl(path: string): URL {
   if (!ENV.supabaseUrl || !ENV.supabaseSecretKey) throw new Error("Supabase server cache is not configured");
   return new URL(`/rest/v1/${path}`, ENV.supabaseUrl);
@@ -68,7 +98,7 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
   if (!force && cache && cache.expiresAt > Date.now()) return cache.payload;
   const loadedAt = new Date().toISOString();
   try {
-    const fixtures = await queryRows(`fixtures?select=fixture_id,league_name,event_time,home_team,away_team,status,updated_at&order=event_time.asc&limit=100`);
+    const fixtures = await queryRows("fixtures?select=fixture_id,league_name,event_time,home_team,away_team,status,updated_at&order=event_time.asc&limit=100");
     const ids = fixtures.map(row => Number(row.fixture_id)).filter(Number.isInteger);
     if (ids.length === 0) {
       const payload: SupabaseUpcomingCache = { source: "Supabase cache", loadedAt, available: true, fixtures: [], lastSyncAt: null };
@@ -77,14 +107,26 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
     }
     const [predictions, oddsSnapshots] = await Promise.all([
       queryRows(`ai_predictions?select=fixture_id,home_win_prob,draw_prob,away_win_prob,predicted_score,recommendation,confidence,updated_at&fixture_id=in.(${ids.join(",")})`),
-      queryRows(`odds_snapshots?select=fixture_id,market_type,home_odds,draw_odds,away_odds,snapshot_time&fixture_id=in.(${ids.join(",")})&order=snapshot_time.desc&limit=500`),
+      queryRows(`odds_snapshots?select=fixture_id,market_type,handicap,home_odds,draw_odds,away_odds,snapshot_time&fixture_id=in.(${ids.join(",")})&order=snapshot_time.desc&limit=500`),
     ]);
     const byFixture = new Map(predictions.map(row => [Number(row.fixture_id), row]));
     const oddsByFixture = new Map<number, CachedUpcomingFixture["odds"]>();
+    const totalsByFixture = new Map<number, CachedMarketSelection>();
+    const handicapByFixture = new Map<number, CachedMarketSelection>();
+
     for (const snapshot of oddsSnapshots) {
       const fixtureId = Number(snapshot.fixture_id);
       const marketType = typeof snapshot.market_type === "string" ? snapshot.market_type : "";
-      if (!Number.isInteger(fixtureId) || oddsByFixture.has(fixtureId) || !marketType.startsWith("HDA")) continue;
+      if (!Number.isInteger(fixtureId)) continue;
+      const selection = typeof snapshot.handicap === "string" ? snapshot.handicap : "";
+      const selectionOdds = normalizeOdds(snapshot.home_odds) ?? normalizeOdds(snapshot.away_odds);
+      if (marketType.startsWith("TOTALS") && !totalsByFixture.has(fixtureId) && /^(Over|Under)\s+2\.5$/i.test(selection)) {
+        totalsByFixture.set(fixtureId, { selection, odds: selectionOdds });
+      }
+      if (marketType.startsWith("HDC") && !handicapByFixture.has(fixtureId) && /^(Home|Away)\s+[+-]?\d+(?:\.5)?$/i.test(selection)) {
+        handicapByFixture.set(fixtureId, { selection, odds: selectionOdds });
+      }
+      if (oddsByFixture.has(fixtureId) || !marketType.startsWith("HDA")) continue;
       const home = normalizeOdds(snapshot.home_odds);
       const draw = normalizeOdds(snapshot.draw_odds);
       const away = normalizeOdds(snapshot.away_odds);
@@ -96,17 +138,33 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
         capturedAt: typeof snapshot.snapshot_time === "string" ? snapshot.snapshot_time : null,
       });
     }
+
     const rows = fixtures.flatMap((fixture): CachedUpcomingFixture[] => {
-      const prediction = byFixture.get(Number(fixture.fixture_id));
+      const fixtureId = Number(fixture.fixture_id);
+      const prediction = byFixture.get(fixtureId);
       const homeWin = normalizeProbability(prediction?.home_win_prob);
       const draw = normalizeProbability(prediction?.draw_prob);
       const awayWin = normalizeProbability(prediction?.away_win_prob);
+      const { recommendation, metadata } = parseResearchMetadata(prediction?.recommendation);
+      const expectedHomeGoals = normalizeProbability(metadata?.expected_home_goals) ?? null;
+      const expectedAwayGoals = normalizeProbability(metadata?.expected_away_goals) ?? null;
+      const storedScorelines = normalizeScorelines(metadata?.top_scorelines);
+      const totals = totalsByFixture.get(fixtureId);
+      const handicap = handicapByFixture.get(fixtureId);
+      const totalProbability = totalSelectionProbability(totals?.selection, expectedHomeGoals, expectedAwayGoals);
+      const handicapProbability = handicapSelectionProbability(handicap?.selection, expectedHomeGoals, expectedAwayGoals);
+      const outcome = homeWin !== null && draw !== null && awayWin !== null ? highestOutcome(homeWin, draw, awayWin) : null;
+      const compactMarkets = [
+        outcome,
+        totalProbability !== null && totals ? { market: "入球大細 (Over/Under)" as const, selection: totals.selection.replace(/^Over/i, "大").replace(/^Under/i, "小"), probability: totalProbability } : null,
+        handicapProbability !== null && handicap ? { market: "讓球盤 (Handicap)" as const, selection: handicap.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicapProbability } : null,
+      ].filter((item): item is CompactMarketRow => item !== null);
       const eventTime = typeof fixture.event_time === "string" ? fixture.event_time : "";
       const homeTeam = typeof fixture.home_team === "string" ? fixture.home_team : "";
       const awayTeam = typeof fixture.away_team === "string" ? fixture.away_team : "";
-      if (!eventTime || !homeTeam || !awayTeam) return [];
+      if (!Number.isInteger(fixtureId) || !eventTime || !homeTeam || !awayTeam) return [];
       return [{
-        fixtureId: Number(fixture.fixture_id),
+        fixtureId,
         leagueName: typeof fixture.league_name === "string" ? fixture.league_name : "Unknown league",
         eventTime,
         homeTeam,
@@ -115,17 +173,27 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
         draw: draw ?? Number.NaN,
         awayWin: awayWin ?? Number.NaN,
         predictedScore: typeof prediction?.predicted_score === "string" ? prediction.predicted_score : null,
-        recommendation: typeof prediction?.recommendation === "string" ? prediction.recommendation : null,
+        recommendation,
         confidence: Math.max(0, Math.min(5, Number(prediction?.confidence) || 0)),
         predictionUpdatedAt: typeof prediction?.updated_at === "string" ? prediction.updated_at : null,
         hasPrediction: !!prediction && homeWin !== null && draw !== null && awayWin !== null,
-        odds: oddsByFixture.get(Number(fixture.fixture_id)) ?? null,
+        compactMarkets,
+        topScorelines: storedScorelines.length === 3 ? storedScorelines : topScorelines(expectedHomeGoals, expectedAwayGoals),
+        odds: oddsByFixture.get(fixtureId) ?? null,
       }];
     }).sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime());
     const lastSyncAt = fixtures.map(row => typeof row.updated_at === "string" ? row.updated_at : null).filter(Boolean).sort().at(-1) ?? null;
-    const payload: SupabaseUpcomingCache = { source: "Supabase cache", loadedAt, available: true, fixtures: rows, fallback: !rows.some(row => {
-      const diff = new Date(row.eventTime).getTime() - Date.now(); return diff >= 0 && diff <= 24 * 60 * 60_000;
-    }), lastSyncAt };
+    const payload: SupabaseUpcomingCache = {
+      source: "Supabase cache",
+      loadedAt,
+      available: true,
+      fixtures: rows,
+      fallback: !rows.some(row => {
+        const diff = new Date(row.eventTime).getTime() - Date.now();
+        return diff >= 0 && diff <= 24 * 60 * 60_000;
+      }),
+      lastSyncAt,
+    };
     cache = { expiresAt: Date.now() + CACHE_MS, payload };
     return payload;
   } catch (error) {

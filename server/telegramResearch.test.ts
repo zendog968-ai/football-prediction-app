@@ -44,7 +44,7 @@ describe("Telegram系統指令", () => {
     expect(TELEGRAM_HELP_MESSAGE).toContain("並非投注或資金建議");
   });
 
-  it("以視覺化主和客長條及星級呈現已同步的未來研究資料", () => {
+  it("以極簡市場表格及Top 3波膽呈現已同步的未來研究資料", () => {
     const bars = probabilityBars({ homeWin: 0.62, draw: 0.21, awayWin: 0.17 });
     expect(bars).toContain("🟢 主勝");
     expect(bars).toContain("🟡 和局");
@@ -63,12 +63,18 @@ describe("Telegram系統指令", () => {
       confidence: 4,
       predictionUpdatedAt: "2026-08-15T10:00:00Z",
       hasPrediction: true,
+      compactMarkets: [
+        { market: "主客和 (1X2)", selection: "主勝", probability: 0.62 },
+        { market: "入球大細 (Over/Under)", selection: "大 2.5", probability: 0.56 },
+        { market: "讓球盤 (Handicap)", selection: "主隊 -0.5", probability: 0.62 },
+      ],
+      topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
       odds: { home: 1.82, draw: 3.55, away: 4.4, capturedAt: "2026-08-15T10:00:00Z" },
     }], new Date("2026-08-15T00:00:00Z"));
     expect(message).toContain("Example Home vs Example Away");
-    expect(message).toContain("⭐⭐⭐⭐");
-    expect(message).toContain("目前1X2賠率：主 1.82｜和 3.55｜客 4.40");
-    expect(message).toContain("並非投注或資金建議");
+    expect(message).toContain("| 主客和 (1X2) | 主勝 | 62.0% |");
+    expect(message).toContain("【最高機率波膽 Top 3】");
+    expect(message).toContain("1. 2-1：12.0%");
   });
 
   it("只要有未來24小時fixture就列出，部分模型與盤口會以基礎分析而非暫無賽事呈現", () => {
@@ -86,6 +92,8 @@ describe("Telegram系統指令", () => {
       confidence: 0,
       predictionUpdatedAt: null,
       hasPrediction: false,
+      compactMarkets: [],
+      topScorelines: [],
       odds: { home: 2.05, draw: null, away: 3.6, capturedAt: "2026-08-15T09:00:00Z" },
     }, {
       fixtureId: 103,
@@ -101,12 +109,13 @@ describe("Telegram系統指令", () => {
       confidence: 0,
       predictionUpdatedAt: null,
       hasPrediction: false,
+      compactMarkets: [],
+      topScorelines: [],
       odds: null,
     }], new Date("2026-08-15T01:00:00Z"));
     expect(message).toContain("Fallback Home vs Fallback Away");
-    expect(message).toContain("【基礎分析】");
-    expect(message).toContain("主 48.0%｜和 待同步｜客 28.0%");
-    expect(message).toContain("主 2.05｜和 待同步｜客 3.60");
+    expect(message).toContain("| 主客和 (1X2) | 資料不足 | — |");
+    expect(message).toContain("3. 資料不足");
     expect(message).not.toContain("Outside Window");
     expect(message).not.toContain("暫無已同步且證據充分");
   });

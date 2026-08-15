@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from supabase import Client, create_client
@@ -71,13 +72,20 @@ def odds_to_existing_schema(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def prediction_to_existing_schema(row: dict[str, Any]) -> dict[str, Any]:
     warning = row.get("data_warning") or "未校準Poisson研究值；不可解讀為公平賠率、EV或命中率。"
+    metadata = json.dumps({
+        "version": 1,
+        "expected_home_goals": row.get("expected_home_goals"),
+        "expected_away_goals": row.get("expected_away_goals"),
+        "over_2_5_probability": row.get("over_2_5_probability"),
+        "top_scorelines": row.get("top_scorelines", []),
+    }, ensure_ascii=False, separators=(",", ":"))
     return {
         "fixture_id": row["api_fixture_id"],
         "home_win_prob": row["home_win_probability"],
         "draw_prob": row["draw_probability"],
         "away_win_prob": row["away_win_probability"],
         "predicted_score": row["most_likely_score"],
-        "recommendation": f"研究傾向：{row['research_lean']}（{warning}）",
+        "recommendation": f"研究傾向：{row['research_lean']}（{warning}）\n[AURELIA_META]{metadata}",
         "confidence": row["evidence_stars"],
         "updated_at": row["generated_at"],
     }

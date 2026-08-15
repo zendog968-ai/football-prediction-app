@@ -24,6 +24,8 @@ def test_poisson_prediction_is_normalized_and_research_only() -> None:
     assert 1 <= prediction.evidence_stars <= 2
     assert prediction.data_warning is not None
     assert "未校準Poisson" in prediction.data_warning
+    assert len(prediction.top_scorelines) == 3
+    assert prediction.top_scorelines[0]["probability"] >= prediction.top_scorelines[1]["probability"]
 
 
 def test_insufficient_real_history_stops_prediction() -> None:

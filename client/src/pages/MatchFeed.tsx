@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { CalendarDays, ChevronDown, Clock3, ShieldAlert, Sparkles } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 
@@ -12,6 +12,14 @@ const zh: Record<string, string> = {
   "Orlando City SC": "奧蘭多城", "FC Cincinnati": "辛辛那提FC", "Inter Miami": "國際邁阿密", "LA Galaxy": "洛杉磯銀河", "Los Angeles FC": "洛杉磯FC", "Seattle Sounders": "西雅圖海灣者", "Portland Timbers": "波特蘭伐木者", "Club Tijuana": "提華納", "Cruz Azul": "藍十字", "Chicago Fire": "芝加哥火焰",
 };
 const localize = (name: string) => zh[name] || name;
+
+function CompactTable({ item }: { item: { compactMarkets: Array<{ market: string; selection: string; probability: number }>; topScorelines: Array<{ score: string; probability: number }> } }) {
+  const row = (market: string) => {
+    const found = item.compactMarkets.find(entry => entry.market === market);
+    return <tr key={market} className="border-t border-white/10"><td className="py-2 pr-2 text-zinc-400">{market}</td><td className="py-2 pr-2 text-zinc-100">{found?.selection || "資料不足"}</td><td className="py-2 text-right text-emerald-300">{found ? pct(found.probability) : "—"}</td></tr>;
+  };
+  return <div className="space-y-4 text-xs"><table className="w-full border-collapse"><thead className="text-left text-[10px] uppercase tracking-[.12em] text-zinc-500"><tr><th className="pb-2">盤口種類</th><th className="pb-2">預測選項</th><th className="pb-2 text-right">命中機率</th></tr></thead><tbody>{row("主客和 (1X2)")}{row("入球大細 (Over/Under)")}{row("讓球盤 (Handicap)")}</tbody></table><div><div className="mb-2 font-bold text-emerald-300">【最高機率波膽 Top 3】</div><ol className="space-y-1 text-zinc-300">{[0, 1, 2].map(index => <li key={index}>{index + 1}. {item.topScorelines[index] ? `${item.topScorelines[index]!.score}：${pct(item.topScorelines[index]!.probability)}` : "資料不足"}</li>)}</ol></div></div>;
+}
 
 export default function MatchFeed() {
   const [league, setLeague] = useState("全部");
@@ -42,10 +50,9 @@ export default function MatchFeed() {
         <button className="w-full p-4 text-left" onClick={() => setOpenId(openId === item.fixtureId ? null : item.fixtureId)}>
           <div className="flex items-center justify-between text-[11px] font-bold text-zinc-500"><span>{localize(item.leagueName)}</span><span className="flex items-center gap-1"><Clock3 size={13}/>{labelTime(item.eventTime)} · 未開賽</span></div>
           <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3"><div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-xs font-black text-emerald-300">{initials(item.homeTeam)}</span><span className="font-bold leading-tight">{localize(item.homeTeam)}</span></div><div className="rounded-lg bg-black/30 px-3 py-1 text-center font-serif text-lg text-emerald-300">{item.hasPrediction ? item.predictedScore || "—" : "待同步"}</div><div className="flex items-center justify-end gap-3 text-right"><span className="font-bold leading-tight">{localize(item.awayTeam)}</span><span className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-xs font-black text-amber-200">{initials(item.awayTeam)}</span></div></div>
-          {item.hasPrediction ? <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs"><span className="rounded-lg bg-emerald-400/10 py-2 text-emerald-200">主 {pct(item.homeWin ?? 0)}</span><span className="rounded-lg bg-amber-300/10 py-2 text-amber-100">和 {pct(item.draw ?? 0)}</span><span className="rounded-lg bg-rose-400/10 py-2 text-rose-200">客 {pct(item.awayWin ?? 0)}</span></div> : <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/5 py-2 text-center text-xs text-amber-100">Poisson 預測資料尚未同步</div>}
-          <div className="mt-3 flex items-center justify-between text-xs text-zinc-500"><span>{item.hasPrediction ? item.recommendation || "研究傾向待確認" : "等待 ai_predictions 同步"}</span><span>{item.hasPrediction ? "⭐".repeat(item.confidence) : ""}<ChevronDown className={`ml-2 inline transition ${openId === item.fixtureId ? "rotate-180" : ""}`} size={14}/></span></div>
+          <div className="mt-3 flex justify-end text-xs text-zinc-500"><ChevronDown className={`transition ${openId === item.fixtureId ? "rotate-180" : ""}`} size={14}/></div>
         </button>
-        {openId === item.fixtureId && <div className="border-t border-white/10 bg-black/20 p-4">{item.hasPrediction ? <><div className="flex items-center gap-2 text-sm font-bold text-emerald-300"><Sparkles size={15}/>Poisson 研究分佈</div><div className="mt-4 space-y-3">{[["主勝", item.homeWin ?? 0, "bg-emerald-400"], ["和局", item.draw ?? 0, "bg-amber-300"], ["客勝", item.awayWin ?? 0, "bg-rose-400"]].map(([name, value, color]) => <div key={String(name)}><div className="mb-1 flex justify-between text-xs text-zinc-400"><span>{String(name)}</span><span>{pct(value as number)}</span></div><div className="h-2 rounded-full bg-white/10"><div className={`h-2 rounded-full ${String(color)}`} style={{ width: `${(value as number) * 100}%` }}/></div></div>)}</div></> : <div className="rounded-xl border border-amber-300/20 bg-amber-300/5 p-3 text-xs leading-5 text-amber-100"><strong>【基礎分析】</strong><br/>Poisson機率尚待同步，系統不會以0%或推測值取代。盤口：{item.odds ? `主 ${item.odds.home?.toFixed(2) ?? "待同步"}｜和 ${item.odds.draw?.toFixed(2) ?? "待同步"}｜客 ${item.odds.away?.toFixed(2) ?? "待同步"}` : "尚未同步"}</div>}<div className="mt-5 rounded-xl border border-white/10 bg-white/[.03] p-3 text-xs leading-5 text-zinc-400"><strong className="text-zinc-100">研究標籤</strong><br/>最可能比分：{item.predictedScore || "資料不足"}<br/>研究傾向：{item.recommendation || "資料不足"}<br/>盤口：只有已同步資料會顯示；本頁不生成投注或資金指令。</div></div>}
+        {openId === item.fixtureId && <div className="border-t border-white/10 bg-black/20 p-4"><CompactTable item={item}/></div>}
       </article>)}</div> : <div className="rounded-2xl border border-dashed border-white/10 bg-[#1e1e1e] p-8 text-center text-sm text-zinc-500"><ShieldAlert className="mx-auto mb-3" size={22}/>目前沒有已同步賽事。<p className="mt-2 text-xs">最後同步：{query.data?.lastSyncAt ? new Date(query.data.lastSyncAt).toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong" }) : "未提供"}</p><button onClick={() => query.refetch()} className="mt-4 rounded-lg bg-emerald-400 px-4 py-2 text-xs font-bold text-zinc-950">手動重新讀取同步資料</button></div>}
     </section>
   </main>;

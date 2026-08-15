@@ -47,9 +47,15 @@ def test_prediction_mapping_retains_research_label() -> None:
         "most_likely_score": "1-0",
         "research_lean": "主隊傾向",
         "evidence_stars": 3,
+        "expected_home_goals": 1.5,
+        "expected_away_goals": 0.9,
+        "over_2_5_probability": 0.48,
+        "top_scorelines": [{"score": "1-0", "probability": 0.14}],
         "data_warning": "勝平負、大小球與BTTS均為未校準Poisson研究值；不可解讀為公平賠率、EV或命中率。",
         "generated_at": "2026-08-14T00:00:00+00:00",
     })
     assert mapped["recommendation"].startswith("研究傾向：主隊傾向（")
     assert "未校準Poisson" in mapped["recommendation"]
+    assert "[AURELIA_META]" in mapped["recommendation"]
+    assert '"top_scorelines":[{"score":"1-0","probability":0.14}]' in mapped["recommendation"]
     assert mapped["confidence"] == 3

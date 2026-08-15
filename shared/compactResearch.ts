@@ -1,0 +1,67 @@
+export type ScorelineProbability = { score: string; probability: number };
+
+export type CompactMarketRow = {
+  market: "主客和 (1X2)" | "入球大細 (Over/Under)" | "讓球盤 (Handicap)";
+  selection: string;
+  probability: number;
+};
+
+const MAX_GOALS = 8;
+
+function poisson(goals: number, mean: number) {
+  let factorial = 1;
+  for (let value = 2; value <= goals; value += 1) factorial *= value;
+  return Math.exp(-mean) * mean ** goals / factorial;
+}
+
+function validMean(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0.2 && value <= 4.5;
+}
+
+function scoreGrid(homeMean: number, awayMean: number) {
+  const raw = Array.from({ length: MAX_GOALS + 1 }, (_, homeGoals) => Array.from({ length: MAX_GOALS + 1 }, (_, awayGoals) => ({
+    homeGoals,
+    awayGoals,
+    probability: poisson(homeGoals, homeMean) * poisson(awayGoals, awayMean),
+  }))).flat();
+  const normalizer = raw.reduce((total, item) => total + item.probability, 0);
+  return raw.map(item => ({ ...item, probability: item.probability / normalizer }));
+}
+
+export function topScorelines(homeMean: number | null | undefined, awayMean: number | null | undefined): ScorelineProbability[] {
+  if (!validMean(homeMean) || !validMean(awayMean)) return [];
+  return scoreGrid(homeMean, awayMean)
+    .sort((left, right) => right.probability - left.probability)
+    .slice(0, 3)
+    .map(item => ({ score: `${item.homeGoals}-${item.awayGoals}`, probability: item.probability }));
+}
+
+export function totalSelectionProbability(selection: string | null | undefined, homeMean: number | null | undefined, awayMean: number | null | undefined): number | null {
+  const match = selection?.match(/^(Over|Under)\s+2\.5$/i);
+  if (!match || !validMean(homeMean) || !validMean(awayMean)) return null;
+  const over = scoreGrid(homeMean, awayMean).reduce((total, item) => total + (item.homeGoals + item.awayGoals >= 3 ? item.probability : 0), 0);
+  return match[1]?.toLowerCase() === "over" ? over : 1 - over;
+}
+
+export function handicapSelectionProbability(selection: string | null | undefined, homeMean: number | null | undefined, awayMean: number | null | undefined): number | null {
+  const match = selection?.match(/^(Home|Away)\s+([+-]?\d+(?:\.5)?)$/i);
+  if (!match || !validMean(homeMean) || !validMean(awayMean)) return null;
+  const side = match[1]?.toLowerCase();
+  const line = Number(match[2]);
+  if (!Number.isFinite(line) || !side) return null;
+  return scoreGrid(homeMean, awayMean).reduce((total, item) => {
+    const adjusted = (side === "home" ? item.homeGoals - item.awayGoals : item.awayGoals - item.homeGoals) + line;
+    return total + (adjusted > 0 ? item.probability : 0);
+  }, 0);
+}
+
+export function highestOutcome(homeWin: number, draw: number, awayWin: number): CompactMarketRow | null {
+  const options = [
+    { selection: "主勝", probability: homeWin },
+    { selection: "和局", probability: draw },
+    { selection: "客勝", probability: awayWin },
+  ].filter((item): item is { selection: string; probability: number } => Number.isFinite(item.probability) && item.probability >= 0 && item.probability <= 1);
+  if (options.length !== 3) return null;
+  const best = options.sort((left, right) => right.probability - left.probability)[0]!;
+  return { market: "主客和 (1X2)", ...best };
+}

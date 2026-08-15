@@ -16,6 +16,7 @@ import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
 import { sdk } from "./_core/sdk";
 import { getPrediction, getTeams, type PredictionResult } from "./prediction";
 import { getSupabaseUpcomingCache, type CachedUpcomingFixture } from "./supabaseCache";
+import { handicapSelectionProbability, highestOutcome, topScorelines, totalSelectionProbability, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
 
 export type ResearchWindow = "day" | "evening" | "settlement";
 export type ScheduleKind = "settlement" | "day_digest" | "evening_digest";
@@ -130,29 +131,21 @@ export function probabilityBars(values: { homeWin: number; draw: number; awayWin
   ].join("\n");
 }
 
-function displayProbability(value: number): string {
-  return !Number.isFinite(value) ? "待同步" : `${(value * 100).toFixed(1)}%`;
-}
-
-function formatCachedOdds(item: CachedUpcomingFixture): string {
-  if (!item.odds) return "目前1X2賠率：尚未同步";
-  return `目前1X2賠率：主 ${item.odds.home?.toFixed(2) ?? "待同步"}｜和 ${item.odds.draw?.toFixed(2) ?? "待同步"}｜客 ${item.odds.away?.toFixed(2) ?? "待同步"}`;
-}
-
-function formatCachedAnalysis(item: CachedUpcomingFixture): string[] {
-  if (item.hasPrediction && Number.isFinite(item.homeWin) && Number.isFinite(item.draw) && Number.isFinite(item.awayWin)) {
-    return [
-      probabilityBars({ homeWin: item.homeWin, draw: item.draw, awayWin: item.awayWin }),
-      `最可能比分：${item.predictedScore || "資料不足"}｜${item.recommendation || "研究傾向資料不足"}｜證據 ${"⭐".repeat(item.confidence) || "資料不足"}`,
-      formatCachedOdds(item),
-    ];
-  }
+function formatCompactTable(rows: CompactMarketRow[], scorelines: ScorelineProbability[]): string {
+  const row = (market: CompactMarketRow["market"]) => {
+    const found = rows.find(item => item.market === market);
+    return `| ${market} | ${found?.selection ?? "資料不足"} | ${found ? `${(found.probability * 100).toFixed(1)}%` : "—"} |`;
+  };
   return [
-    "【基礎分析】",
-    `Poisson機率（已同步）：主 ${displayProbability(item.homeWin)}｜和 ${displayProbability(item.draw)}｜客 ${displayProbability(item.awayWin)}`,
-    item.predictedScore ? `現有預測比分：${item.predictedScore}` : "預測比分：待同步（不以零值或推測值替代）",
-    formatCachedOdds(item),
-  ];
+    "| 盤口種類 | 預測選項 | 命中機率 (%) |",
+    "| :--- | :--- | :--- |",
+    row("主客和 (1X2)"),
+    row("入球大細 (Over/Under)"),
+    row("讓球盤 (Handicap)"),
+    "",
+    "【最高機率波膽 Top 3】",
+    ...[0, 1, 2].map(index => `${index + 1}. ${scorelines[index] ? `${scorelines[index]!.score}：${(scorelines[index]!.probability * 100).toFixed(1)}%` : "資料不足"}`),
+  ].join("\n");
 }
 
 export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = new Date()): string {
@@ -163,17 +156,10 @@ export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = ne
     return Number.isFinite(kickoff) && kickoff >= start && kickoff <= end;
   });
   if (!upcoming.length) return "未來24小時暫無已同步賽事。若有新fixture寫入Supabase，/upcoming會優先列出，即使進階研究或盤口尚未完整同步。";
-  return [
-    "Aurelia Football｜未來24小時同步賽事摘要",
-    "",
-    ...upcoming.map((item, index) => [
-      `${index + 1}. ${item.leagueName}｜${item.homeTeam} vs ${item.awayTeam}`,
-      `開賽：${new Date(item.eventTime).toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong", hour12: false })}`,
-      ...formatCachedAnalysis(item),
-    ].join("\n")).flatMap((entry, index) => index === 0 ? [entry] : ["", entry]),
-    "",
-    "完整模型以研究分析呈現；資料未完整時僅列出已同步的【基礎分析】。並非投注或資金建議。",
-  ].join("\n");
+  return upcoming.map((item, index) => [
+    `${index + 1}. ${item.homeTeam} vs ${item.awayTeam}`,
+    formatCompactTable(item.compactMarkets, item.topScorelines),
+  ].join("\n")).join("\n\n");
 }
 
 async function telegramUpcoming(): Promise<string> {
@@ -556,20 +542,21 @@ export function assessMarketAnomaly(points: Array<{ selection: string; decimalOd
 }
 
 function formatCandidate(candidate: Candidate): string {
-  const lean = candidate.prediction.lean;
-  const risk = lean.risk_level === "low" ? "低" : lean.risk_level === "medium" ? "中等" : "高";
-  const reasons = lean.reasons.slice(0, 2).join(" ");
-  const limitation = lean.limitations[0] ? ` 限制：${lean.limitations[0]}` : "";
-  const markets = candidate.marketContext.length > 0
-    ? `盤口快照：${candidate.marketContext.map(item => `${item.marketName} ${describeMarketMovement(item)}${item.trendSummary ? `\n走勢圖：${item.trendSummary}` : ""}${item.anomalySummary ? `\n${item.anomalySummary}` : ""}`).join("；")}。`
-    : "盤口快照：目前沒有可用的亞洲讓球／大小球資料。";
+  const homeMean = candidate.prediction.selected_features.dc_expected_home_goals;
+  const awayMean = candidate.prediction.selected_features.dc_expected_away_goals;
+  const total = candidate.marketContext.find(item => item.marketName === "Goals Over/Under" && /^(Over|Under)\s+2\.5$/i.test(item.selection));
+  const handicap = candidate.marketContext.find(item => item.marketName === "Asian Handicap" && /^(Home|Away)\s+[+-]?\d+(?:\.5)?$/i.test(item.selection));
+  const outcome = highestOutcome(candidate.prediction.probabilities.home_win, candidate.prediction.probabilities.draw, candidate.prediction.probabilities.away_win);
+  const totalProbability = totalSelectionProbability(total?.selection, homeMean, awayMean);
+  const handicapProbability = handicapSelectionProbability(handicap?.selection, homeMean, awayMean);
+  const rows = [
+    outcome,
+    total && totalProbability !== null ? { market: "入球大細 (Over/Under)" as const, selection: total.selection.replace(/^Over/i, "大").replace(/^Under/i, "小"), probability: totalProbability } : null,
+    handicap && handicapProbability !== null ? { market: "讓球盤 (Handicap)" as const, selection: handicap.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicapProbability } : null,
+  ].filter((item): item is CompactMarketRow => item !== null);
   return [
     `${candidate.homeTeam} vs ${candidate.awayTeam}`,
-    `開賽：${candidate.kickoffAt.toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong", hour12: false })}`,
-    probabilityBars({ homeWin: candidate.prediction.probabilities.home_win, draw: candidate.prediction.probabilities.draw, awayWin: candidate.prediction.probabilities.away_win }),
-    `數據傾向：${lean.label}（${(lean.probability * 100).toFixed(1)}%）；風險：${risk}｜證據 ${"⭐".repeat(lean.risk_level === "low" ? 5 : lean.risk_level === "medium" ? 3 : 1)}。`,
-    markets,
-    `${reasons}${limitation}`,
+    formatCompactTable(rows, topScorelines(homeMean, awayMean)),
   ].join("\n");
 }
 
@@ -605,14 +592,10 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
   const anomalyCandidates = candidates
     .filter(candidate => candidate.marketContext.some(market => Boolean(market.anomalySummary)))
     .slice(0, 3);
-  const title = window === "day" ? "日間" : "晚間／歐洲時段";
   const researchSection = selected.length > 0
     ? selected.map((candidate, index) => `${index + 1}. ${formatCandidate(candidate)}`).join("\n\n")
-    : "今日此時段無符合研究品質條件的賽事，建議休息。";
-  const anomalySection = anomalyCandidates.length > 0
-    ? `\n\n盤口異常監測（只反映快照變動）：\n${anomalyCandidates.map(candidate => `• ${candidate.homeTeam} vs ${candidate.awayTeam}\n${candidate.marketContext.filter(market => market.anomalySummary).map(market => `${market.marketName} ${market.anomalySummary}`).join("\n")}`).join("\n\n")}`
-    : "";
-  const content = `Aurelia Football｜${title}研究摘要\n\n${researchSection}${anomalySection}\n\n此訊息只供模型效能與戰術研究，並非投注或資金建議。`;
+    : "資料不足";
+  const content = researchSection;
   const db = await getDb();
   if (!db) throw new Error("資料庫暫時無法使用。");
   const inserted = await db.insert(researchDigests).values({ window, asOf: now, content, signalCount: selected.length });
