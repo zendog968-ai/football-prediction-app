@@ -74,9 +74,25 @@ def run() -> dict[str, Any]:
 
         if fixture_row["status"] not in {"NS", "TBD", "PST"}:
             continue
+        league_id = fixture_row.get("league_id")
+        season = fixture_row.get("season")
+        if not isinstance(league_id, int) or not isinstance(season, int):
+            LOGGER.warning("Skipping fixture %s: competition or season is missing", fixture_row["api_fixture_id"])
+            counts["prediction_skipped"] += 1
+            continue
         try:
-            home_history = client.team_recent_fixtures(fixture_row["home_team_id"], limit=settings.history_matches)
-            away_history = client.team_recent_fixtures(fixture_row["away_team_id"], limit=settings.history_matches)
+            home_history = client.team_recent_fixtures(
+                fixture_row["home_team_id"],
+                limit=settings.history_matches,
+                league_id=league_id,
+                season=season,
+            )
+            away_history = client.team_recent_fixtures(
+                fixture_row["away_team_id"],
+                limit=settings.history_matches,
+                league_id=league_id,
+                season=season,
+            )
             prediction = predict_fixture(fixture_row, home_history, away_history, generated_at=now)
         except InsufficientHistory as exc:
             LOGGER.info("Skipping fixture %s: %s", fixture_row["api_fixture_id"], exc)

@@ -48,8 +48,28 @@ class ApiFootballClient:
     def fixture_odds(self, fixture_id: int) -> list[dict[str, Any]]:
         return self._get("odds", fixture=fixture_id)
 
-    def team_recent_fixtures(self, team_id: int, limit: int) -> list[dict[str, Any]]:
-        return self._get("fixtures", team=team_id, last=limit, timezone="UTC")
+    def team_recent_fixtures(
+        self,
+        team_id: int,
+        limit: int,
+        *,
+        league_id: int,
+        season: int,
+    ) -> list[dict[str, Any]]:
+        """Return only the fixture's own competition and season.
+
+        A team-wide `last` query can mix league, cup and friendly matches.  That is
+        unsuitable for a league-level pre-match baseline, so callers must provide a
+        verified competition and season.
+        """
+        return self._get(
+            "fixtures",
+            team=team_id,
+            league=league_id,
+            season=season,
+            last=limit,
+            timezone="UTC",
+        )
 
 
 def normalize_fixture(raw: dict[str, Any], captured_at: datetime) -> dict[str, Any]:

@@ -315,7 +315,7 @@ describe("Home prediction workflow", () => {
     expect(homeInput.value).toBe("");
   });
 
-  it("shows database update time and research-only model odds after a forecast", async () => {
+  it("shows database update time and labels model odds as a non-probability fair threshold", async () => {
     const user = userEvent.setup();
     render(<Home />);
 
@@ -330,8 +330,9 @@ describe("Home prediction workflow", () => {
     await user.click(screen.getByRole("button", { name: /開始分析這場對戰/ }));
 
     const disclaimer = await screen.findByTestId("research-disclaimer");
-    expect(disclaimer.textContent).toContain("模型賠率 = 1 ÷ 機率");
-    expect(disclaimer.textContent).toContain("只供模型效能驗證與統計學研究");
+    expect(disclaimer.textContent).toContain("模型公平門檻（十進制）= 1 ÷ 機率");
+    expect(disclaimer.textContent).toContain("並非機率、命中率或保證");
+    expect(disclaimer.textContent).toContain("大小球、BTTS與未涵蓋聯賽的研究數字不會被轉換為模型公平門檻或EV");
   });
 
   it("keeps Lean, risk reasoning and the research disclaimer available in a 375px viewport", async () => {
@@ -355,7 +356,8 @@ describe("Home prediction workflow", () => {
       expect(lean.textContent).toContain("主勝傾向 · Palmeiras");
       expect(lean.textContent).toContain("高風險");
       expect(lean.textContent).toContain("Dixon–Coles資料不足");
-      expect((await screen.findByTestId("research-disclaimer")).textContent).toContain("只供模型效能驗證與統計學研究");
+      expect((await screen.findByTestId("research-disclaimer")).textContent).toContain("模型公平門檻（十進制）= 1 ÷ 機率");
+      expect((await screen.findByTestId("research-disclaimer")).textContent).toContain("大小球、BTTS與未涵蓋聯賽的研究數字不會被轉換為模型公平門檻或EV");
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
       window.dispatchEvent(new Event("resize"));

@@ -47,7 +47,9 @@ def test_prediction_mapping_retains_research_label() -> None:
         "most_likely_score": "1-0",
         "research_lean": "主隊傾向",
         "evidence_stars": 3,
+        "data_warning": "勝平負、大小球與BTTS均為未校準Poisson研究值；不可解讀為公平賠率、EV或命中率。",
         "generated_at": "2026-08-14T00:00:00+00:00",
     })
-    assert mapped["recommendation"] == "研究傾向：主隊傾向"
+    assert mapped["recommendation"].startswith("研究傾向：主隊傾向（")
+    assert "未校準Poisson" in mapped["recommendation"]
     assert mapped["confidence"] == 3

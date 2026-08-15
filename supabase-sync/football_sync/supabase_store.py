@@ -70,13 +70,14 @@ def odds_to_existing_schema(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def prediction_to_existing_schema(row: dict[str, Any]) -> dict[str, Any]:
+    warning = row.get("data_warning") or "未校準Poisson研究值；不可解讀為公平賠率、EV或命中率。"
     return {
         "fixture_id": row["api_fixture_id"],
         "home_win_prob": row["home_win_probability"],
         "draw_prob": row["draw_probability"],
         "away_win_prob": row["away_win_probability"],
         "predicted_score": row["most_likely_score"],
-        "recommendation": f"研究傾向：{row['research_lean']}",
+        "recommendation": f"研究傾向：{row['research_lean']}（{warning}）",
         "confidence": row["evidence_stars"],
         "updated_at": row["generated_at"],
     }
