@@ -161,6 +161,10 @@ describe("Telegram系統指令", () => {
     expect(formatTeamResearch(fixture("Cruz Azul"), "藍十字", now)).toContain("Cruz Azul");
     expect(formatTeamResearch(fixture("Flamengo"), "法林明高", now)).toContain("Flamengo");
     expect(formatTeamResearch(fixture("Melbourne Victory"), "墨爾本勝利", now)).toContain("Melbourne Victory");
+    expect(formatTeamResearch(fixture("Bristol City"), "布里斯托城", now)).toContain("Bristol City");
+    expect(formatTeamResearch(fixture("Bristol City"), "布里斯托爾城", now)).toContain("Bristol City");
+    expect(formatTeamResearch(fixture("Bristol City"), "布里斯托尔城", now)).toContain("Bristol City");
+    expect(formatTeamResearch(fixture("Bristol City"), "Bristol City", now)).toContain("Bristol City");
     expect(formatTeamResearch(fixture("Real Madrid"), "米蘭", now)).toBe("⚠️ 暫未找到 米蘭 的近期賽事資料，請確認隊名或嘗試其他熱門隊伍。");
   });
 
@@ -170,7 +174,9 @@ describe("Telegram系統指令", () => {
     expect(extractNaturalLanguageTeamQuery("請分析濟州SK近期賽事")).toBe("濟州SK");
     expect(extractNaturalLanguageTeamQuery("請分析濟州近期賽事")).toBe("濟州");
     expect(extractNaturalLanguageTeamQuery("想知國際邁阿密的賽程")).toBe("國際邁阿密");
+    expect(extractNaturalLanguageTeamQuery("請分析布里斯托城今晚賽事")).toBe("布里斯托城");
     expect(isKnownTeamAlias(extractNaturalLanguageTeamQuery("請分析 神戸勝利船 下一場"))).toBe(true);
+    expect(isKnownTeamAlias("布里斯托城")).toBe(true);
     expect(isKnownTeamAlias("healthcheck")).toBe(false);
   });
 

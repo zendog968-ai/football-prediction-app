@@ -4,6 +4,7 @@ const TRADITIONAL_TEAM_NAMES: Record<string, string> = {
   Juventus: "祖雲達斯", "AC Milan": "AC米蘭", Inter: "國際米蘭", Napoli: "拿玻里", Roma: "羅馬", Lazio: "拉素", Atalanta: "阿特蘭大",
   "Bayern Munich": "拜仁慕尼黑", Dortmund: "多蒙特", "Bayer Leverkusen": "利華古遜", "RB Leipzig": "RB萊比錫", Frankfurt: "法蘭克福",
   "Paris Saint Germain": "巴黎聖日耳門", Marseille: "馬賽", Lyon: "里昂", Monaco: "摩納哥", Lille: "里爾",
+  "Bristol City": "布里斯托城", Millwall: "米爾沃",
   "Inter Miami": "國際邁阿密", "Inter Miami CF": "國際邁阿密", "Los Angeles FC": "洛杉磯FC", "LA Galaxy": "洛杉磯銀河", "Seattle Sounders": "西雅圖海灣者", "Portland Timbers": "波特蘭伐木者", "Orlando City SC": "奧蘭多城", "FC Cincinnati": "辛辛那提FC", "Chicago Fire": "芝加哥火焰",
   "Vissel Kobe": "神戶勝利船", "FC Tokyo": "FC東京", "Yokohama F. Marinos": "橫濱水手", "Urawa Reds": "浦和紅鑽", "Kashima Antlers": "鹿島鹿角", "Kawasaki Frontale": "川崎前鋒", "Gamba Osaka": "大阪飛腳", "Cerezo Osaka": "大阪櫻花", "Sanfrecce Hiroshima": "廣島三箭",
   "Jeju United FC": "濟州SK", "Jeju United": "濟州SK", "FC Anyang": "安養FC", "Ulsan HD FC": "蔚山HD", "Jeonbuk Hyundai Motors": "全北現代", "Pohang Steelers": "浦項製鐵", "FC Seoul": "FC首爾",

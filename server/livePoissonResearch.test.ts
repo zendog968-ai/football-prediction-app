@@ -65,6 +65,30 @@ describe("即時可驗證Poisson回退", () => {
     expect(fetchMock).toHaveBeenCalled();
   });
 
+  it("英冠布里斯托城即使缺少即時賠率，仍只以真實歷史賽果產出完整基礎Poisson研究", async () => {
+    const championshipFixture = {
+      fixture: { id: 1563083, date: "2026-08-15T14:00:00+00:00", status: { short: "NS" } },
+      league: { id: 40, season: 2026, name: "Championship" },
+      teams: { home: { id: 55, name: "Bristol City" }, away: { id: 64, name: "Millwall" } },
+    };
+    const history = [finished(55, 90, 2, 1), finished(91, 55, 0, 1), finished(64, 92, 1, 1), finished(93, 64, 2, 1)];
+    const fetchMock = vi.fn(async (input: string) => ({
+      ok: true,
+      json: async () => {
+        if (input.includes("/teams?search=Bristol%20City")) return { response: [{ team: { id: 55, name: "Bristol City" } }], errors: [] };
+        if (input.includes("/fixtures?team=55&next=10")) return { response: [championshipFixture], errors: [] };
+        if (input.includes("/fixtures?team=55&last=10") || input.includes("/fixtures?team=64&last=10") || input.includes("/fixtures?league=40&season=2026&last=40")) return { response: history, errors: [] };
+        return { response: [], errors: [] };
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await fetchLiveTeamResearch("Bristol City");
+    expect(result?.homeTeam).toBe("Bristol City");
+    expect(result?.awayTeam).toBe("Millwall");
+    expect(result && hasCompleteLiveResearch(result)).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/odds"))).toBe(false);
+  });
+
   it("在短暫API連線失敗後重試並完成即時隊伍研究", async () => {
     const history = [finished(1, 9, 2, 1), finished(8, 1, 0, 1), finished(2, 7, 1, 1), finished(6, 2, 2, 1)];
     let calls = 0;
