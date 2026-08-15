@@ -67,6 +67,16 @@ export const allLeagueSyncJobs = mysqlTable("all_league_sync_jobs", {
   updatedAt: timestamp("updatedAt").defaultNow().notNull().onUpdateNow(),
 });
 
+/** Durable server-generated Traditional Chinese names for clubs absent from the curated dictionary. */
+export const teamNameTranslations = mysqlTable("team_name_translations", {
+  id: int("id").autoincrement().primaryKey(),
+  englishName: varchar("englishName", { length: 160 }).notNull().unique(),
+  traditionalName: varchar("traditionalName", { length: 160 }).notNull(),
+  source: mysqlEnum("source", ["llm", "curated"]).notNull().default("llm"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull().onUpdateNow(),
+});
+
 /** Immutable captured values from the authorised API-Football feed. */
 export const oddsSnapshots = mysqlTable("odds_snapshots", {
   id: int("id").autoincrement().primaryKey(),

@@ -13,18 +13,33 @@ const TRADITIONAL_TEAM_NAMES: Record<string, string> = {
   Flamengo: "法林明高", Palmeiras: "彭美拉斯", Corinthians: "哥連泰斯", "Sao Paulo": "聖保羅", Fluminense: "富明尼斯", "America Mineiro": "明尼路美洲", Cruzeiro: "高士路",
   "Fluminense W": "富明尼斯女足", "Fluminense Women": "富明尼斯女足", "America Mineiro W": "明尼路美洲女足", "America Mineiro Women": "明尼路美洲女足", "América Mineiro W": "明尼路美洲女足", "América Mineiro Women": "明尼路美洲女足",
   "Club America": "墨西哥美洲", Guadalajara: "瓜達拉哈拉", "Cruz Azul": "藍十字", Monterrey: "蒙特雷", Tigres: "堤格雷斯", Tijuana: "提華納",
+  "Atlante FC": "亞特蘭蒂", Atlante: "亞特蘭蒂", Toluca: "托盧卡", "Deportivo Toluca": "托盧卡", "Toluca FC": "托盧卡",
+  "Pumas UNAM": "普馬斯", "Necaxa": "尼卡沙", "Pachuca": "帕丘卡", "Leon": "利昂", "León": "利昂", "Santos Laguna": "山度士拉古納", "Atlas": "阿特拉斯", "Juarez": "華雷斯", "FC Juarez": "華雷斯", "Puebla": "普埃布拉", "Queretaro": "克雷塔羅", "Querétaro": "克雷塔羅", "Mazatlan FC": "馬薩特蘭", "Mazatlán FC": "馬薩特蘭", "Atletico San Luis": "聖路易斯體育會", "Atlético San Luis": "聖路易斯體育會",
+  "Cancun FC": "坎昆FC", "Venados FC": "梅里達雄鹿", "CD Tapatio": "塔帕蒂奧", "Cimarrones de Sonora": "索諾拉野馬",
+  "Toronto FC": "多倫多FC", "CF Montreal": "蒙特利爾CF", "Vancouver Whitecaps": "溫哥華白帽", "Forge FC": "鍛造FC", "Cavalry FC": "騎兵FC", "LD Alajuelense": "阿拉祖蘭斯", "Deportivo Saprissa": "薩普里沙", "CS Herediano": "希雷迪亞諾", "CD Olimpia": "奧林比亞", "FC Motagua": "莫塔瓜", "Comunicaciones": "通訊隊", "Municipal": "市政隊",
 };
 
 const normalizedNames = new Map(Object.entries(TRADITIONAL_TEAM_NAMES).map(([english, chinese]) => [english.trim().toLocaleLowerCase(), chinese]));
+const runtimeTranslations = new Map<string, string>();
+
+/** Server-side translation cache registration. The browser only sees the maintained static dictionary. */
+export function registerRuntimeTeamTranslation(englishName: string, traditionalName: string): void {
+  const original = englishName.trim();
+  const translated = traditionalName.trim();
+  if (!original || !translated) return;
+  runtimeTranslations.set(original.toLocaleLowerCase(), translated);
+}
 
 export function localizeTeamName(englishName: string): string {
   const original = englishName.trim();
   const direct = normalizedNames.get(original.toLocaleLowerCase());
   if (direct) return direct;
+  const runtime = runtimeTranslations.get(original.toLocaleLowerCase());
+  if (runtime) return runtime;
   const womenSuffix = /\s+(?:w|women)$/i.exec(original);
   if (!womenSuffix) return original;
   const base = original.slice(0, womenSuffix.index).trim();
-  const localizedBase = normalizedNames.get(base.toLocaleLowerCase());
+  const localizedBase = normalizedNames.get(base.toLocaleLowerCase()) ?? runtimeTranslations.get(base.toLocaleLowerCase());
   return localizedBase ? `${localizedBase}女足` : original;
 }
 

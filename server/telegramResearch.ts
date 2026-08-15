@@ -20,6 +20,7 @@ import { getPrediction, getTeams, type PredictionResult } from "./prediction";
 import { getSupabaseUpcomingCache, type CachedUpcomingFixture } from "./supabaseCache";
 import { fetchLiveTeamResearch, fetchLiveUpcomingResearch, hasCompleteLiveResearch, type LiveTeamResearch } from "./livePoissonResearch";
 import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
+import { ensureTelegramTeamTranslations } from "./teamTranslation";
 
 export type ResearchWindow = "day" | "evening" | "settlement";
 export type ScheduleKind = "settlement" | "day_digest" | "evening_digest";
@@ -145,11 +146,12 @@ function hasCompleteCachedResearch(item: CachedUpcomingFixture): boolean {
   const outcomes = [item.homeWin, item.draw, item.awayWin];
   const totals = item.compactMarkets.find(row => row.market === "入球大細 2.5");
   const handicap = item.compactMarkets.find(row => row.market === "讓球盤 (Handicap)");
-  return outcomes.every(value => Number.isFinite(value) && value >= 0 && value <= 1)
-    && Boolean(totals && Number.isFinite(totals.probability))
-    && Boolean(handicap && Number.isFinite(handicap.probability))
+  const validProbability = (value: number | undefined) => Number.isFinite(value) && value! > 0 && value! < 1;
+  return outcomes.every(validProbability) && Math.abs(outcomes.reduce((total, value) => total + value, 0) - 1) < 0.02
+    && Boolean(totals?.selection && validProbability(totals.probability))
+    && Boolean(handicap?.selection && validProbability(handicap.probability))
     && item.topScorelines.length >= 3
-    && item.topScorelines.slice(0, 3).every(scoreline => Boolean(scoreline.score) && Number.isFinite(scoreline.probability));
+    && item.topScorelines.slice(0, 3).every(scoreline => Boolean(scoreline.score) && validProbability(scoreline.probability));
 }
 
 function formatCachedResearchSource(item: CachedUpcomingFixture): string | null {
@@ -202,6 +204,11 @@ export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = ne
 async function telegramUpcoming(): Promise<string> {
   const cached = await getSupabaseUpcomingCache();
   const now = Date.now();
+  const cachedDisplayable = cached.fixtures.filter(item => {
+    const kickoff = new Date(item.eventTime).getTime();
+    return Number.isFinite(kickoff) && kickoff >= now && kickoff <= now + 24 * 60 * 60_000 && hasCompleteCachedResearch(item);
+  }).slice(0, 3);
+  await ensureTelegramTeamTranslations(cachedDisplayable.flatMap(item => [item.homeTeam, item.awayTeam]));
   const hasCachedUpcoming = cached.available && cached.fixtures.some(item => {
     const kickoff = new Date(item.eventTime).getTime();
     return Number.isFinite(kickoff) && kickoff >= now && kickoff <= now + 24 * 60 * 60_000 && hasCompleteCachedResearch(item);
@@ -1075,6 +1082,10 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
   }
   const selected = selectDailyDigestPicks(candidates.filter(hasCompleteDigestCandidate));
   const liveFallback = selected.length > 0 || !apiReady ? [] : (await fetchLiveUpcomingResearch(3).catch(() => [])).filter(hasCompleteLiveResearch);
+  await ensureTelegramTeamTranslations([
+    ...selected.flatMap(candidate => [candidate.homeTeam, candidate.awayTeam]),
+    ...liveFallback.flatMap(research => [research.homeTeam, research.awayTeam]),
+  ]);
   const anomalyCandidates = candidates
     .filter(candidate => candidate.marketContext.some(market => Boolean(market.anomalySummary)))
     .slice(0, 3);
