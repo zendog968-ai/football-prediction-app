@@ -388,4 +388,4 @@
 - [x] 完成正式Webhook /today測試、建置與發布：28項Telegram測試、型別檢查與建置已通過；正式/today回傳HTTP 200並重用今日digest 120001，未建立重複day／evening摘要。
 - [x] 核實/today摘要內容中的聯賽欄位與繁中／英文聯賽別名映射：既有連結僅有leagueCode，已新增leagueName並回填今日的Liga MX與Major League Soccer。
 - [x] 實作`/today 聯賽名稱`篩選、空結果提示及回歸測試：支援繁中、英文、原始聯賽名稱與代碼；未命中會回覆清晰提示而不重新廣播。
-- [ ] 完成正式Webhook聯賽篩選測試、建置與發布：36項Telegram／即時研究測試、型別檢查與建置已通過，待正式`/today 墨超`驗證。
+- [ ] 完成正式Webhook聯賽篩選測試、建置與發布：98項完整測試、型別檢查與建置已通過；Webhook邏輯已由本機內容驗證，但稽核中的合成測試聊天室遭Telegram拒絕（400），待有效使用者重新/start後驗證`/today 墨超`。

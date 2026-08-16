@@ -619,7 +619,7 @@ export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedT
 
 export function formatLiveTeamResearch(research: LiveTeamResearch): string {
   const source = research.sourceMode === "team-history" ? "隊伍歷史攻防" : "聯賽平均";
-  return [formatFixtureDisplay(research.homeTeam, research.awayTeam), `📊 【資料來源】${source}`, research.calibrationLabel ? `⚙️ 【校準】${research.calibrationLabel}` : null, formatCompactTable(research.compactMarkets, research.topScorelines, research.outcomes)].filter(Boolean).join("\n");
+  return [formatFixtureDisplay(research.homeTeam, research.awayTeam), `🏆 【聯賽】${formatLeagueDisplay(research.leagueName)}`, `📊 【資料來源】${source}`, research.calibrationLabel ? `⚙️ 【校準】${research.calibrationLabel}` : null, formatCompactTable(research.compactMarkets, research.topScorelines, research.outcomes)].filter(Boolean).join("\n");
 }
 
 function findUpcomingTeamFixture(fixtures: CachedUpcomingFixture[], requestedTeam: string, now = new Date()): CachedUpcomingFixture | null {
@@ -1266,7 +1266,7 @@ export async function telegramToday(request: Request, rawCommand?: string): Prom
   if (existing[0]?.content) {
     if (!filter) return existing[0].content;
     const links = await db.select().from(researchDigestFixtures).where(eq(researchDigestFixtures.digestId, existing[0].id)).orderBy(researchDigestFixtures.id);
-    const cards = existing[0].content.split(/\n\n+/);
+    const cards = existing[0].content.split(/(?=^\d+\. .+ vs .+$)/m).filter(Boolean);
     const filteredCards = cards.filter((card, index) => links[index] && isLeagueMatch(filter, links[index].leagueName, links[index].leagueCode));
     return filteredCards.length > 0
       ? filteredCards.join("\n\n")
