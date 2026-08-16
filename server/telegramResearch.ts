@@ -1241,6 +1241,15 @@ export function todayLeagueFilter(rawCommand?: string): string {
   return (rawCommand || "").replace(/^\/today(?:@\w+)?\s*/i, "").trim();
 }
 
+export function todayLeagueFilters(rawCommand?: string): string[] {
+  const raw = todayLeagueFilter(rawCommand);
+  if (!raw) return [];
+  const explicit = raw.split(/[、,，/|]+/).map(value => value.trim()).filter(Boolean);
+  if (explicit.length > 1) return Array.from(new Set(explicit));
+  const tokens = raw.split(/\s+/).filter(Boolean);
+  return tokens.length > 1 ? Array.from(new Set([raw, ...tokens])) : [raw];
+}
+
 export function isLeagueMatch(filter: string, leagueName?: string | null, leagueCode?: string): boolean {
   const query = filter.trim().toLocaleLowerCase();
   if (!query) return true;
@@ -1249,10 +1258,15 @@ export function isLeagueMatch(filter: string, leagueName?: string | null, league
   return [raw, localized, formatLeagueDisplay(raw), leagueCode || ""].some(value => value.toLocaleLowerCase().includes(query));
 }
 
+export function isAnyLeagueMatch(filters: string[], leagueName?: string | null, leagueCode?: string): boolean {
+  return filters.length === 0 || filters.some(filter => isLeagueMatch(filter, leagueName, leagueCode));
+}
+
 export async function telegramToday(request: Request, rawCommand?: string): Promise<string> {
   const db = await getDb();
   if (!db) throw new Error("資料庫暫時無法使用。");
   const filter = todayLeagueFilter(rawCommand);
+  const filters = todayLeagueFilters(rawCommand);
   const { start, end } = hktDayBounds();
   const existing = await db.select().from(researchDigests)
     .where(and(
@@ -1267,7 +1281,7 @@ export async function telegramToday(request: Request, rawCommand?: string): Prom
     if (!filter) return existing[0].content;
     const links = await db.select().from(researchDigestFixtures).where(eq(researchDigestFixtures.digestId, existing[0].id)).orderBy(researchDigestFixtures.id);
     const cards = existing[0].content.split(/(?=^\d+\. .+ vs .+$)/m).filter(Boolean);
-    const filteredCards = cards.filter((card, index) => links[index] && isLeagueMatch(filter, links[index].leagueName, links[index].leagueCode));
+    const filteredCards = cards.filter((card, index) => links[index] && isAnyLeagueMatch(filters, links[index].leagueName, links[index].leagueCode));
     return filteredCards.length > 0
       ? filteredCards.join("\n\n")
       : `今日已送達的完整研究中，未找到「${filter}」的賽事。可嘗試英文聯賽名稱或其他繁中名稱。`;

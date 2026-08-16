@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatLiveTeamResearch, formatTeamResearch, formatTelegramStatus, hasCompleteDigestCandidate, isKnownTeamAlias, isLeagueMatch, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, todayLeagueFilter, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatLiveTeamResearch, formatTeamResearch, formatTelegramStatus, hasCompleteDigestCandidate, isAnyLeagueMatch, isKnownTeamAlias, isLeagueMatch, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, todayLeagueFilter, todayLeagueFilters, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -66,6 +66,10 @@ describe("Telegram系統指令", () => {
     expect(isLeagueMatch("Premier League", "Premier League", "39")).toBe(true);
     expect(isLeagueMatch("墨超", "Liga MX", "262")).toBe(true);
     expect(isLeagueMatch("英超", "Liga MX", "262")).toBe(false);
+    expect(todayLeagueFilters("/today 英超 西甲")).toEqual(["英超 西甲", "英超", "西甲"]);
+    expect(isAnyLeagueMatch(todayLeagueFilters("/today 英超 西甲"), "La Liga", "140")).toBe(true);
+    expect(isAnyLeagueMatch(todayLeagueFilters("/today 英超 西甲"), "Premier League", "39")).toBe(true);
+    expect(isAnyLeagueMatch(todayLeagueFilters("/today 英超 西甲"), "Liga MX", "262")).toBe(false);
   });
 
   it("以極簡市場表格及Top 3波膽呈現已同步的未來研究資料", () => {
