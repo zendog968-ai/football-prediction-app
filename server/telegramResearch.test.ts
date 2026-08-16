@@ -194,6 +194,9 @@ describe("Telegram系統指令", () => {
 
   it("在基礎Poisson回覆標示隊伍歷史攻防或聯賽平均來源", () => {
     const base = {
+      fixtureId: 901,
+      leagueCode: "40",
+      kickoffAt: new Date("2026-08-16T12:00:00Z"),
       homeTeam: "Bristol City",
       awayTeam: "Millwall",
       outcomes: { homeWin: 0.4, draw: 0.33, awayWin: 0.27 },

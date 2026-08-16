@@ -16,6 +16,9 @@ type ApiPayload<T> = { response?: T[]; errors?: Record<string, unknown> | unknow
 type ApiTeam = { team?: { id?: number; name?: string } };
 
 export type LiveTeamResearch = {
+  fixtureId: number;
+  leagueCode: string;
+  kickoffAt: Date;
   homeTeam: string;
   awayTeam: string;
   outcomes: { homeWin: number; draw: number; awayWin: number };
@@ -125,13 +128,16 @@ function modelHandicapRows(homeMean: number, awayMean: number, outcomes: { homeW
 }
 
 export function deriveLivePoissonResearch(fixture: ApiFixture, homeHistory: ApiFixture[], awayHistory: ApiFixture[], leagueHistory: ApiFixture[]): LiveTeamResearch | null {
+  const fixtureId = fixture.fixture?.id;
+  const kickoffValue = fixture.fixture?.date;
   const homeId = fixture.teams?.home?.id;
   const awayId = fixture.teams?.away?.id;
   const homeTeam = fixture.teams?.home?.name?.trim();
   const awayTeam = fixture.teams?.away?.name?.trim();
   const resolvedHomeId = typeof homeId === "number" ? homeId : null;
   const resolvedAwayId = typeof awayId === "number" ? awayId : null;
-  if (resolvedHomeId === null || resolvedAwayId === null || !Number.isInteger(resolvedHomeId) || !Number.isInteger(resolvedAwayId) || !homeTeam || !awayTeam) return null;
+  const kickoffAt = kickoffValue ? new Date(kickoffValue) : null;
+  if (!Number.isInteger(fixtureId) || !kickoffAt || Number.isNaN(kickoffAt.getTime()) || resolvedHomeId === null || resolvedAwayId === null || !Number.isInteger(resolvedHomeId) || !Number.isInteger(resolvedAwayId) || !homeTeam || !awayTeam) return null;
   const baseline = leagueAverage(leagueHistory);
   if (baseline === null) return null;
   const home = teamGoals(homeHistory, resolvedHomeId);
@@ -148,6 +154,9 @@ export function deriveLivePoissonResearch(fixture: ApiFixture, homeHistory: ApiF
   if (!outcomes) return null;
   const outcome = highestOutcome(outcomes.homeWin, outcomes.draw, outcomes.awayWin);
   return {
+    fixtureId: Number(fixtureId),
+    leagueCode: String(fixture.league?.id ?? "live"),
+    kickoffAt,
     homeTeam,
     awayTeam,
     outcomes,

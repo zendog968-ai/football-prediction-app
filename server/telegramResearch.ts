@@ -1124,6 +1124,22 @@ function modelSettlementRows(candidate: Candidate, digestId: number) {
   return rows;
 }
 
+function liveModelSettlementRows(research: LiveTeamResearch, digestId: number) {
+  const outcome = highestOutcome(research.outcomes.homeWin, research.outcomes.draw, research.outcomes.awayWin);
+  const total = research.compactMarkets.find(row => row.market === "入球大細 2.5");
+  const handicap = research.compactMarkets.find(row => row.market === "讓球盤 (Handicap)");
+  const rows: Array<{ digestId: number; apiFixtureId: number; marketName: string; selection: string }> = [];
+  if (outcome) {
+    const selection = outcome.selection === "主勝" ? "Home" : outcome.selection === "客勝" ? "Away" : "Draw";
+    rows.push({ digestId, apiFixtureId: research.fixtureId, marketName: "Match Winner", selection });
+  }
+  if (total) rows.push({ digestId, apiFixtureId: research.fixtureId, marketName: "Goals Over/Under", selection: total.selection.startsWith("大") ? "Over 2.5" : "Under 2.5" });
+  const handicapMatch = handicap?.selection.match(/^(主隊|客隊)\s*([+-]\d+(?:\.25|\.5|\.75)?)/);
+  if (handicapMatch) rows.push({ digestId, apiFixtureId: research.fixtureId, marketName: "Asian Handicap", selection: `${handicapMatch[1] === "主隊" ? "Home" : "Away"} ${handicapMatch[2]}` });
+  for (const scoreline of research.topScorelines.slice(0, 3)) rows.push({ digestId, apiFixtureId: research.fixtureId, marketName: "Correct Score", selection: scoreline.score });
+  return rows;
+}
+
 function hktDateKey(value: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit" }).format(value);
 }
@@ -1177,16 +1193,29 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
   const signalCount = selected.length || liveFallback.length;
   const inserted = await db.insert(researchDigests).values({ window, asOf: now, content, signalCount });
   const digestId = Number(inserted[0].insertId);
-  const digestFixtureRows = selected.map(candidate => ({
-    digestId,
-    apiFixtureId: candidate.fixtureId,
-    leagueCode: candidate.leagueCode,
-    fixtureKickoffAt: candidate.kickoffAt,
-    homeTeamName: candidate.homeTeam,
-    awayTeamName: candidate.awayTeam,
-  }));
+  const digestFixtureRows = [
+    ...selected.map(candidate => ({
+      digestId,
+      apiFixtureId: candidate.fixtureId,
+      leagueCode: candidate.leagueCode,
+      fixtureKickoffAt: candidate.kickoffAt,
+      homeTeamName: candidate.homeTeam,
+      awayTeamName: candidate.awayTeam,
+    })),
+    ...liveFallback.map(research => ({
+      digestId,
+      apiFixtureId: research.fixtureId,
+      leagueCode: research.leagueCode,
+      fixtureKickoffAt: research.kickoffAt,
+      homeTeamName: research.homeTeam,
+      awayTeamName: research.awayTeam,
+    })),
+  ];
   if (digestFixtureRows.length > 0) await db.insert(researchDigestFixtures).values(digestFixtureRows);
-  const settlementRows = selected.flatMap(candidate => modelSettlementRows(candidate, digestId));
+  const settlementRows = [
+    ...selected.flatMap(candidate => modelSettlementRows(candidate, digestId)),
+    ...liveFallback.flatMap(research => liveModelSettlementRows(research, digestId)),
+  ];
   if (settlementRows.length > 0) await db.insert(researchSettlements).values(settlementRows);
   await deliverDigest(digestId, content);
   return { digestId, signalCount };
