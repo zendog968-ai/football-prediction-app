@@ -385,4 +385,4 @@
 - [x] 修復即時回退候選雖被推播但未持久化fixture連結與市場快照，確保今日及後續推播可自動覆盤：LiveTeamResearch新增fixture、聯賽及開賽識別；今日三場已以真實資料回填，未來回退研究會自動寫入連結與六個核心市場快照。
 - [x] 核實今日已送達研究摘要的查詢範圍、去重條件與Telegram指令分派位置：以香港時區日期、day／evening視窗及deliveryStatus=sent查詢最新摘要。
 - [x] 實作/today優先讀取今日完整研究摘要、缺失時安全建立一次清單的流程與回歸測試：若缺失只建立查閱用digest而不重複廣播，並加入/help指令說明。
-- [ ] 完成正式Webhook /today測試、建置與發布：28項Telegram測試、型別檢查與建置已通過，待正式指令驗證。
+- [x] 完成正式Webhook /today測試、建置與發布：28項Telegram測試、型別檢查與建置已通過；正式/today回傳HTTP 200並重用今日digest 120001，未建立重複day／evening摘要。
