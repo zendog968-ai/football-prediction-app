@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import type { Request, Response } from "express";
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { parse as parseCookie } from "cookie";
 import { COOKIE_NAME } from "@shared/const";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
@@ -8,6 +8,7 @@ import { formatLeagueDisplay } from "@shared/leagueDisplay";
 import {
   oddsSnapshots,
   researchDigests,
+  researchDigestFixtures,
   researchScheduleJobs,
   researchSettlements,
   telegramSubscriptions,
@@ -111,7 +112,7 @@ const LEAGUES: Record<string, { apiLeagueId: number; season: number }> = {
 };
 
 export const RESEARCH_SCHEDULES: Array<{ kind: ScheduleKind; cron: string; path: string; description: string }> = [
-  { kind: "settlement", cron: "0 30 2 * * *", path: "/api/scheduled/research-settlement", description: "每日10:30香港時間研究統計複盤" },
+  { kind: "settlement", cron: "0 */30 * * * *", path: "/api/scheduled/research-settlement", description: "每30分鐘掃描完場賽事並推播研究覆盤" },
   { kind: "day_digest", cron: "0 0 3 * * *", path: "/api/scheduled/research-day", description: "每日11:00香港時間日間研究摘要" },
   { kind: "evening_digest", cron: "0 30 10 * * *", path: "/api/scheduled/research-evening", description: "每日18:30香港時間晚間研究摘要" },
 ];
@@ -1105,6 +1106,24 @@ export function hasCompleteDigestCandidate(candidate: Pick<Candidate, "predictio
     && hasTotals && hasHandicap;
 }
 
+function modelSettlementRows(candidate: Candidate, digestId: number) {
+  const homeMean = candidate.prediction.selected_features.dc_expected_home_goals;
+  const awayMean = candidate.prediction.selected_features.dc_expected_away_goals;
+  const outcome = highestOutcome(candidate.prediction.probabilities.home_win, candidate.prediction.probabilities.draw, candidate.prediction.probabilities.away_win);
+  const total = mainstreamTotals(homeMean, awayMean).find(row => row.market === "入球大細 2.5");
+  const handicap = candidate.marketContext.find(item => item.marketName === "Asian Handicap" && /^(Home|Away)\s+[+-]?\d+(?:\.25|\.5|\.75)?$/i.test(item.selection));
+  const scorelines = topScorelines(homeMean, awayMean);
+  const rows: Array<{ digestId: number; apiFixtureId: number; marketName: string; selection: string }> = [];
+  if (outcome) {
+    const selection = outcome.selection === "主勝" ? "Home" : outcome.selection === "客勝" ? "Away" : "Draw";
+    rows.push({ digestId, apiFixtureId: candidate.fixtureId, marketName: "Match Winner", selection });
+  }
+  if (total) rows.push({ digestId, apiFixtureId: candidate.fixtureId, marketName: "Goals Over/Under", selection: total.selection.startsWith("大") ? "Over 2.5" : "Under 2.5" });
+  if (handicap) rows.push({ digestId, apiFixtureId: candidate.fixtureId, marketName: "Asian Handicap", selection: handicap.selection });
+  for (const scoreline of scorelines) rows.push({ digestId, apiFixtureId: candidate.fixtureId, marketName: "Correct Score", selection: scoreline.score });
+  return rows;
+}
+
 function hktDateKey(value: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit" }).format(value);
 }
@@ -1158,12 +1177,16 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
   const signalCount = selected.length || liveFallback.length;
   const inserted = await db.insert(researchDigests).values({ window, asOf: now, content, signalCount });
   const digestId = Number(inserted[0].insertId);
-  const settlementRows = selected.flatMap(candidate => candidate.marketContext.map(market => ({
+  const digestFixtureRows = selected.map(candidate => ({
     digestId,
     apiFixtureId: candidate.fixtureId,
-    marketName: market.marketName,
-    selection: market.selection,
-  })));
+    leagueCode: candidate.leagueCode,
+    fixtureKickoffAt: candidate.kickoffAt,
+    homeTeamName: candidate.homeTeam,
+    awayTeamName: candidate.awayTeam,
+  }));
+  if (digestFixtureRows.length > 0) await db.insert(researchDigestFixtures).values(digestFixtureRows);
+  const settlementRows = selected.flatMap(candidate => modelSettlementRows(candidate, digestId));
   if (settlementRows.length > 0) await db.insert(researchSettlements).values(settlementRows);
   await deliverDigest(digestId, content);
   return { digestId, signalCount };
@@ -1181,6 +1204,12 @@ function splitAsianLine(line: number): number[] {
 export function settlementForScores(marketName: string, selection: string, homeGoals: number, awayGoals: number): typeof researchSettlements.$inferInsert.outcome {
   const asian = selection.match(/^(Home|Away)\s+([+-]?\d+(?:\.\d+)?)$/i);
   const total = selection.match(/^(Over|Under)\s+(\d+(?:\.\d+)?)$/i);
+  const score = selection.match(/^(\d+)-(\d+)$/);
+  if (marketName === "Match Winner") {
+    const actual = homeGoals > awayGoals ? "Home" : homeGoals < awayGoals ? "Away" : "Draw";
+    return selection === actual ? "win" : "loss";
+  }
+  if (marketName === "Correct Score") return score && Number(score[1]) === homeGoals && Number(score[2]) === awayGoals ? "win" : "loss";
   if (marketName !== "Asian Handicap" && marketName !== "Goals Over/Under") return "void";
   if ((marketName === "Asian Handicap" && !asian) || (marketName === "Goals Over/Under" && !total)) return "void";
   const side = asian?.[1]?.toLowerCase();
@@ -1208,7 +1237,30 @@ function accuracy(rows: Array<{ outcome: string }>): string {
   return `${(units / resolved.length * 100 + 50).toFixed(1)}%`;
 }
 
-export async function runSettlementDigest(): Promise<{ digestId: number; settled: number }> {
+function describeReviewOutcome(outcome: string): string {
+  return outcome === "win" ? "命中" : outcome === "loss" ? "未命中" : outcome === "push" ? "走盤" : outcome === "half_win" ? "半贏" : outcome === "half_loss" ? "半輸" : "不納入";
+}
+
+function formatCompletedFixtureReview(link: typeof researchDigestFixtures.$inferSelect, rows: Array<typeof researchSettlements.$inferSelect>): string {
+  const first = rows[0]!;
+  const primary = rows.find(row => row.marketName === "Match Winner");
+  const total = rows.find(row => row.marketName === "Goals Over/Under");
+  const handicap = rows.find(row => row.marketName === "Asian Handicap");
+  const scorelines = rows.filter(row => row.marketName === "Correct Score");
+  const outcomes = [
+    primary && `【主客和】${primary.selection}：${describeReviewOutcome(primary.outcome)}`,
+    total && `【大細球】${total.selection}：${describeReviewOutcome(total.outcome)}`,
+    handicap && `【讓球盤】${handicap.selection}：${describeReviewOutcome(handicap.outcome)}`,
+    scorelines.length > 0 && `【Top 3波膽】${scorelines.some(row => row.outcome === "win") ? "命中" : "未命中"}`,
+  ].filter(Boolean);
+  return [
+    `⚽ <b>${formatFixtureDisplay(link.homeTeamName, link.awayTeamName)}</b>`,
+    `【完場】${first.homeGoals}-${first.awayGoals}`,
+    ...outcomes,
+  ].join("\n");
+}
+
+export async function runSettlementDigest(): Promise<{ digestId: number | null; settled: number; reviewed: number }> {
   await verifyApiFootballReadiness();
   const db = await getDb();
   if (!db) throw new Error("資料庫暫時無法使用。");
@@ -1221,17 +1273,32 @@ export async function runSettlementDigest(): Promise<{ digestId: number; settled
     await db.update(researchSettlements).set({ homeGoals: details.homeGoals, awayGoals: details.awayGoals, outcome, settledAt: new Date(), sourcePayload: { status: details.status } }).where(eq(researchSettlements.id, row.id));
     settled += 1;
   }
+  const pendingReviews = await db.select().from(researchDigestFixtures).where(isNull(researchDigestFixtures.reviewDigestId)).orderBy(researchDigestFixtures.fixtureKickoffAt).limit(12);
+  const completed: Array<{ link: typeof researchDigestFixtures.$inferSelect; rows: Array<typeof researchSettlements.$inferSelect> }> = [];
+  for (const link of pendingReviews) {
+    const rows = await db.select().from(researchSettlements).where(and(eq(researchSettlements.digestId, link.digestId), eq(researchSettlements.apiFixtureId, link.apiFixtureId)));
+    if (rows.length === 0 || rows.some(row => row.outcome === "pending")) continue;
+    completed.push({ link, rows });
+  }
+  if (completed.length === 0) return { digestId: null, settled, reviewed: 0 };
   const [lastSevenDays, lastThirtyDays] = [new Date(Date.now() - 7 * 24 * 60 * 60_000), new Date(Date.now() - 30 * 24 * 60 * 60_000)];
   const [sevenRows, thirtyRows, allRows] = await Promise.all([
     db.select({ outcome: researchSettlements.outcome }).from(researchSettlements).where(gte(researchSettlements.settledAt, lastSevenDays)),
     db.select({ outcome: researchSettlements.outcome }).from(researchSettlements).where(gte(researchSettlements.settledAt, lastThirtyDays)),
     db.select({ outcome: researchSettlements.outcome }).from(researchSettlements),
   ]);
-  const content = `Aurelia Football｜賽後研究統計\n\n近7日：${accuracy(sevenRows)}｜近30日：${accuracy(thirtyRows)}｜累積：${accuracy(allRows)}。\n\n只計入具備已驗證盤口線與最終賽果的資料；走盤與無法辨識的盤口不納入命中率。\n\n此訊息只供模型效能與戰術研究，並非投注或資金建議。`;
+  const content = [
+    "🏁 <b>Aurelia Football｜賽後研究覆盤</b>",
+    ...completed.map(item => formatCompletedFixtureReview(item.link, item.rows)),
+    `近7日：${accuracy(sevenRows)}｜近30日：${accuracy(thirtyRows)}｜累積：${accuracy(allRows)}。`,
+    "只計入已推播並具備最終賽果的研究市場；走盤與無法辨識盤口不納入命中率。",
+    "此訊息只供模型效能與戰術研究，並非投注或資金建議。",
+  ].join("\n\n");
   const inserted = await db.insert(researchDigests).values({ window: "settlement", asOf: new Date(), content, signalCount: sevenRows.length });
   const digestId = Number(inserted[0].insertId);
+  await Promise.all(completed.map(item => db.update(researchDigestFixtures).set({ reviewDigestId: digestId, reviewedAt: new Date() }).where(eq(researchDigestFixtures.id, item.link.id))));
   await deliverDigest(digestId, content);
-  return { digestId, settled };
+  return { digestId, settled, reviewed: completed.length };
 }
 
 export async function handleTelegramWebhook(req: Request, res: Response): Promise<void> {

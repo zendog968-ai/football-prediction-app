@@ -50,6 +50,13 @@
       "when": 1786814901953,
       "tag": "0006_sweet_iron_monger",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1786839343012,
+      "tag": "0007_large_medusa",
+      "breakpoints": true
     }
   ]
 }

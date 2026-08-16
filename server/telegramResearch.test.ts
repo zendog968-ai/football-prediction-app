@@ -17,6 +17,13 @@ describe("研究型盤口結算", () => {
     expect(settlementForScores("Asian Handicap", "Home +0.25", 1, 1)).toBe("half_win");
   });
 
+  it("結算推播的主客和與Top 3波膽快照", () => {
+    expect(settlementForScores("Match Winner", "Away", 1, 2)).toBe("win");
+    expect(settlementForScores("Match Winner", "Home", 1, 2)).toBe("loss");
+    expect(settlementForScores("Correct Score", "1-2", 1, 2)).toBe("win");
+    expect(settlementForScores("Correct Score", "2-1", 1, 2)).toBe("loss");
+  });
+
   it("拒絕未記錄完整格式的市場資料，避免杜撰結算", () => {
     expect(settlementForScores("Asian Handicap", "Home to win", 2, 1)).toBe("void");
     expect(settlementForScores("Unknown", "Over 2.5", 3, 0)).toBe("void");
@@ -24,9 +31,9 @@ describe("研究型盤口結算", () => {
 });
 
 describe("Telegram研究排程", () => {
-  it("以UTC六欄位cron對應香港時間10:30、11:00及18:30", () => {
+  it("以UTC六欄位cron每30分鐘掃描完場覆盤，並保留日間及晚間摘要", () => {
     expect(RESEARCH_SCHEDULES).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: "settlement", cron: "0 30 2 * * *", path: "/api/scheduled/research-settlement" }),
+      expect.objectContaining({ kind: "settlement", cron: "0 */30 * * * *", path: "/api/scheduled/research-settlement" }),
       expect.objectContaining({ kind: "day_digest", cron: "0 0 3 * * *", path: "/api/scheduled/research-day" }),
       expect.objectContaining({ kind: "evening_digest", cron: "0 30 10 * * *", path: "/api/scheduled/research-evening" }),
     ]));

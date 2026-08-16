@@ -128,6 +128,24 @@ export const researchDigests = mysqlTable("research_digests", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+/** Links each pushed research card to its API fixture so completed matches receive one auditable review. */
+export const researchDigestFixtures = mysqlTable("research_digest_fixtures", {
+  id: int("id").autoincrement().primaryKey(),
+  digestId: int("digestId").notNull(),
+  apiFixtureId: int("apiFixtureId").notNull(),
+  leagueCode: varchar("leagueCode", { length: 16 }).notNull(),
+  fixtureKickoffAt: timestamp("fixtureKickoffAt").notNull(),
+  homeTeamName: varchar("homeTeamName", { length: 120 }).notNull(),
+  awayTeamName: varchar("awayTeamName", { length: 120 }).notNull(),
+  reviewDigestId: int("reviewDigestId").unique(),
+  reviewedAt: timestamp("reviewedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, table => [
+  uniqueIndex("digest_fixture_unique").on(table.digestId, table.apiFixtureId),
+  index("digest_fixture_pending_idx").on(table.reviewDigestId, table.fixtureKickoffAt),
+  index("digest_fixture_api_idx").on(table.apiFixtureId),
+]);
+
 /** Settlement is auditable per captured market selection and only uses completed API scores. */
 export const researchSettlements = mysqlTable("research_settlements", {
   id: int("id").autoincrement().primaryKey(),
