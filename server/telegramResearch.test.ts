@@ -50,6 +50,7 @@ describe("Telegram系統指令", () => {
     expect(TELEGRAM_HELP_MESSAGE).toContain("/start");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/status");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/trend");
+    expect(TELEGRAM_HELP_MESSAGE).toContain("/today");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/upcoming");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/report");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/team");

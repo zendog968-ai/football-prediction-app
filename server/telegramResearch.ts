@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import type { Request, Response } from "express";
-import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { parse as parseCookie } from "cookie";
 import { COOKIE_NAME } from "@shared/const";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
@@ -123,6 +123,7 @@ export const TELEGRAM_HELP_MESSAGE = [
   "/start — 啟用研究通知。",
   "/status — 查閱訂閱狀態、Heartbeat任務與API剩餘額度。",
   "/trend <fixture ID> 或 /trend 主隊 vs 客隊 — 查詢已保存盤口走勢。",
+  "/today — 重新查看今日已送達且資料完整的研究清單；若尚未建立，會生成一次僅供查閱的清單。",
   "/upcoming — 查詢未來24小時所有已同步賽事；完整模型以研究分析、部分資料以【基礎分析】呈現。",
   "/report — 顯示最新24小時賽事摘要（與/upcoming相同）。",
   "/team <隊伍名稱> — 查詢該隊最近一場已同步賽事的極簡機率表格與Top 3波膽。",
@@ -1144,7 +1145,7 @@ function hktDateKey(value: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit" }).format(value);
 }
 
-export async function runResearchDigest(request: Request, window: "day" | "evening"): Promise<{ digestId: number; signalCount: number }> {
+export async function runResearchDigest(request: Request, window: "day" | "evening", options: { deliver?: boolean } = {}): Promise<{ digestId: number; signalCount: number }> {
   const now = new Date();
   const db = await getDb();
   if (!db) throw new Error("資料庫暫時無法使用。");
@@ -1217,8 +1218,33 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
     ...liveFallback.flatMap(research => liveModelSettlementRows(research, digestId)),
   ];
   if (settlementRows.length > 0) await db.insert(researchSettlements).values(settlementRows);
-  await deliverDigest(digestId, content);
+  if (options.deliver !== false) await deliverDigest(digestId, content);
   return { digestId, signalCount };
+}
+
+function hktDayBounds(now = new Date()): { start: Date; end: Date } {
+  const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+  const start = new Date(`${date}T00:00:00+08:00`);
+  return { start, end: new Date(start.getTime() + 24 * 60 * 60_000) };
+}
+
+export async function telegramToday(request: Request): Promise<string> {
+  const db = await getDb();
+  if (!db) throw new Error("資料庫暫時無法使用。");
+  const { start, end } = hktDayBounds();
+  const existing = await db.select().from(researchDigests)
+    .where(and(
+      inArray(researchDigests.window, ["day", "evening"]),
+      eq(researchDigests.deliveryStatus, "sent"),
+      gte(researchDigests.asOf, start),
+      lt(researchDigests.asOf, end),
+    ))
+    .orderBy(desc(researchDigests.asOf))
+    .limit(1);
+  if (existing[0]?.content) return existing[0].content;
+  const generated = await runResearchDigest(request, "day", { deliver: false });
+  const created = await db.select({ content: researchDigests.content }).from(researchDigests).where(eq(researchDigests.id, generated.digestId)).limit(1);
+  return created[0]?.content || "今日暫無可驗證未來賽事。";
 }
 
 function splitAsianLine(line: number): number[] {
@@ -1374,6 +1400,8 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     await sendTelegramMessage(String(chatId), await telegramDictionaryForAdmin(String(chatId), message?.text));
   } else if (text === "/trend") {
     await sendTelegramMessage(String(chatId), await telegramTrendForRequest(message?.text));
+  } else if (text === "/today") {
+    await sendTelegramMessage(String(chatId), await telegramToday(req));
   } else if (text === "/upcoming" || text === "/report") {
     await sendTelegramMessage(String(chatId), await telegramUpcoming());
   } else if (text === "/team") {
