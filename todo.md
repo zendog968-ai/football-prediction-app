@@ -386,3 +386,6 @@
 - [x] 核實今日已送達研究摘要的查詢範圍、去重條件與Telegram指令分派位置：以香港時區日期、day／evening視窗及deliveryStatus=sent查詢最新摘要。
 - [x] 實作/today優先讀取今日完整研究摘要、缺失時安全建立一次清單的流程與回歸測試：若缺失只建立查閱用digest而不重複廣播，並加入/help指令說明。
 - [x] 完成正式Webhook /today測試、建置與發布：28項Telegram測試、型別檢查與建置已通過；正式/today回傳HTTP 200並重用今日digest 120001，未建立重複day／evening摘要。
+- [x] 核實/today摘要內容中的聯賽欄位與繁中／英文聯賽別名映射：既有連結僅有leagueCode，已新增leagueName並回填今日的Liga MX與Major League Soccer。
+- [x] 實作`/today 聯賽名稱`篩選、空結果提示及回歸測試：支援繁中、英文、原始聯賽名稱與代碼；未命中會回覆清晰提示而不重新廣播。
+- [ ] 完成正式Webhook聯賽篩選測試、建置與發布：36項Telegram／即時研究測試、型別檢查與建置已通過，待正式`/today 墨超`驗證。

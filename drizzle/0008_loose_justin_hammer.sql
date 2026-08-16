@@ -1,0 +1,1 @@
+ALTER TABLE `research_digest_fixtures` ADD `leagueName` varchar(120);

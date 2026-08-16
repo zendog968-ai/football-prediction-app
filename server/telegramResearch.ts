@@ -4,7 +4,7 @@ import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { parse as parseCookie } from "cookie";
 import { COOKIE_NAME } from "@shared/const";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
-import { formatLeagueDisplay } from "@shared/leagueDisplay";
+import { formatLeagueDisplay, localizeLeagueName } from "@shared/leagueDisplay";
 import {
   oddsSnapshots,
   researchDigests,
@@ -109,6 +109,13 @@ const LEAGUES: Record<string, { apiLeagueId: number; season: number }> = {
   UEL: { apiLeagueId: 3, season: 2026 },
   SUD: { apiLeagueId: 11, season: 2026 },
   LCUP: { apiLeagueId: 772, season: 2026 },
+};
+
+const RESEARCH_LEAGUE_NAMES: Record<string, string> = {
+  BRA1: "Brazil::Serie A", EPL: "Premier League", LL: "La Liga", BL: "Bundesliga", SA: "Italy::Serie A", L1: "Ligue 1",
+  MLS: "Major League Soccer", J1: "J1 League", FIN1: "Veikkausliiga", KOR1: "K League 1", CSL: "Super League",
+  POR1: "Primeira Liga", MEX1: "Liga MX", AUS1: "A-League", UEL: "UEFA Europa League", SUD: "CONMEBOL Sudamericana", LCUP: "Leagues Cup",
+  "253": "Major League Soccer", "262": "Liga MX", "71": "Brazil::Serie A", "39": "Premier League", "140": "La Liga", "78": "Bundesliga", "135": "Italy::Serie A",
 };
 
 export const RESEARCH_SCHEDULES: Array<{ kind: ScheduleKind; cron: string; path: string; description: string }> = [
@@ -1199,6 +1206,7 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
       digestId,
       apiFixtureId: candidate.fixtureId,
       leagueCode: candidate.leagueCode,
+      leagueName: RESEARCH_LEAGUE_NAMES[candidate.leagueCode] ?? candidate.leagueCode,
       fixtureKickoffAt: candidate.kickoffAt,
       homeTeamName: candidate.homeTeam,
       awayTeamName: candidate.awayTeam,
@@ -1207,6 +1215,7 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
       digestId,
       apiFixtureId: research.fixtureId,
       leagueCode: research.leagueCode,
+      leagueName: research.leagueName,
       fixtureKickoffAt: research.kickoffAt,
       homeTeamName: research.homeTeam,
       awayTeamName: research.awayTeam,
@@ -1228,9 +1237,22 @@ function hktDayBounds(now = new Date()): { start: Date; end: Date } {
   return { start, end: new Date(start.getTime() + 24 * 60 * 60_000) };
 }
 
-export async function telegramToday(request: Request): Promise<string> {
+export function todayLeagueFilter(rawCommand?: string): string {
+  return (rawCommand || "").replace(/^\/today(?:@\w+)?\s*/i, "").trim();
+}
+
+export function isLeagueMatch(filter: string, leagueName?: string | null, leagueCode?: string): boolean {
+  const query = filter.trim().toLocaleLowerCase();
+  if (!query) return true;
+  const raw = leagueName || RESEARCH_LEAGUE_NAMES[leagueCode || ""] || leagueCode || "";
+  const localized = localizeLeagueName(raw);
+  return [raw, localized, formatLeagueDisplay(raw), leagueCode || ""].some(value => value.toLocaleLowerCase().includes(query));
+}
+
+export async function telegramToday(request: Request, rawCommand?: string): Promise<string> {
   const db = await getDb();
   if (!db) throw new Error("資料庫暫時無法使用。");
+  const filter = todayLeagueFilter(rawCommand);
   const { start, end } = hktDayBounds();
   const existing = await db.select().from(researchDigests)
     .where(and(
@@ -1241,7 +1263,15 @@ export async function telegramToday(request: Request): Promise<string> {
     ))
     .orderBy(desc(researchDigests.asOf))
     .limit(1);
-  if (existing[0]?.content) return existing[0].content;
+  if (existing[0]?.content) {
+    if (!filter) return existing[0].content;
+    const links = await db.select().from(researchDigestFixtures).where(eq(researchDigestFixtures.digestId, existing[0].id)).orderBy(researchDigestFixtures.id);
+    const cards = existing[0].content.split(/\n\n+/);
+    const filteredCards = cards.filter((card, index) => links[index] && isLeagueMatch(filter, links[index].leagueName, links[index].leagueCode));
+    return filteredCards.length > 0
+      ? filteredCards.join("\n\n")
+      : `今日已送達的完整研究中，未找到「${filter}」的賽事。可嘗試英文聯賽名稱或其他繁中名稱。`;
+  }
   const generated = await runResearchDigest(request, "day", { deliver: false });
   const created = await db.select({ content: researchDigests.content }).from(researchDigests).where(eq(researchDigests.id, generated.digestId)).limit(1);
   return created[0]?.content || "今日暫無可驗證未來賽事。";
@@ -1401,7 +1431,7 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
   } else if (text === "/trend") {
     await sendTelegramMessage(String(chatId), await telegramTrendForRequest(message?.text));
   } else if (text === "/today") {
-    await sendTelegramMessage(String(chatId), await telegramToday(req));
+    await sendTelegramMessage(String(chatId), await telegramToday(req, message?.text));
   } else if (text === "/upcoming" || text === "/report") {
     await sendTelegramMessage(String(chatId), await telegramUpcoming());
   } else if (text === "/team") {

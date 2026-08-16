@@ -134,6 +134,7 @@ export const researchDigestFixtures = mysqlTable("research_digest_fixtures", {
   digestId: int("digestId").notNull(),
   apiFixtureId: int("apiFixtureId").notNull(),
   leagueCode: varchar("leagueCode", { length: 16 }).notNull(),
+  leagueName: varchar("leagueName", { length: 120 }),
   fixtureKickoffAt: timestamp("fixtureKickoffAt").notNull(),
   homeTeamName: varchar("homeTeamName", { length: 120 }).notNull(),
   awayTeamName: varchar("awayTeamName", { length: 120 }).notNull(),

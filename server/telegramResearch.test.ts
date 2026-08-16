@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatLiveTeamResearch, formatTeamResearch, formatTelegramStatus, hasCompleteDigestCandidate, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatLiveTeamResearch, formatTeamResearch, formatTelegramStatus, hasCompleteDigestCandidate, isKnownTeamAlias, isLeagueMatch, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, todayLeagueFilter, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -57,6 +57,15 @@ describe("Telegram系統指令", () => {
     expect(TELEGRAM_HELP_MESSAGE).toContain("/stop");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/help");
     expect(TELEGRAM_HELP_MESSAGE).toContain("並非投注或資金建議");
+  });
+
+  it("解析/today聯賽篩選並支援繁中與英文聯賽名稱", () => {
+    expect(todayLeagueFilter("/today 英超")).toBe("英超");
+    expect(todayLeagueFilter("/today@AureliaBot Premier League")).toBe("Premier League");
+    expect(isLeagueMatch("英超", "Premier League", "39")).toBe(true);
+    expect(isLeagueMatch("Premier League", "Premier League", "39")).toBe(true);
+    expect(isLeagueMatch("墨超", "Liga MX", "262")).toBe(true);
+    expect(isLeagueMatch("英超", "Liga MX", "262")).toBe(false);
   });
 
   it("以極簡市場表格及Top 3波膽呈現已同步的未來研究資料", () => {
@@ -195,9 +204,8 @@ describe("Telegram系統指令", () => {
 
   it("在基礎Poisson回覆標示隊伍歷史攻防或聯賽平均來源", () => {
     const base = {
-      fixtureId: 901,
-      leagueCode: "40",
-      kickoffAt: new Date("2026-08-16T12:00:00Z"),
+      fixtureId: 202, leagueCode: "40", kickoffAt: new Date("2026-08-16T12:00:00Z"),
+      leagueName: "Championship",
       homeTeam: "Bristol City",
       awayTeam: "Millwall",
       outcomes: { homeWin: 0.4, draw: 0.33, awayWin: 0.27 },

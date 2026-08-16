@@ -18,6 +18,7 @@ type ApiTeam = { team?: { id?: number; name?: string } };
 export type LiveTeamResearch = {
   fixtureId: number;
   leagueCode: string;
+  leagueName: string;
   kickoffAt: Date;
   homeTeam: string;
   awayTeam: string;
@@ -156,6 +157,7 @@ export function deriveLivePoissonResearch(fixture: ApiFixture, homeHistory: ApiF
   return {
     fixtureId: Number(fixtureId),
     leagueCode: String(fixture.league?.id ?? "live"),
+    leagueName: String(fixture.league?.name ?? "Unknown league"),
     kickoffAt,
     homeTeam,
     awayTeam,
