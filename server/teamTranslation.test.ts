@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { clearRuntimeTeamTranslation, formatFixtureDisplay, registerRuntimeTeamTranslation } from "@shared/teamDisplay";
 import { isValidTraditionalTeamTranslation } from "./teamTranslation";
-import { parseDictionaryCommand } from "./telegramResearch";
+import { parseDictionaryApproveCommand, parseDictionaryCommand } from "./telegramResearch";
 
 describe("Telegram隊名翻譯回退", () => {
   it("優先呈現墨超與中北美已核對的繁中隊名", () => {
@@ -30,6 +30,13 @@ describe("Telegram隊名翻譯回退", () => {
     expect(parseDictionaryCommand("/dict reset Atlante FC")).toEqual({ kind: "reset", englishName: "Atlante FC" });
     expect(parseDictionaryCommand("/dict undo")).toEqual({ kind: "undo" });
     expect(parseDictionaryCommand("/dict undo Atlante FC")).toEqual({ kind: "undo", englishName: "Atlante FC" });
+    expect(parseDictionaryCommand("/dict pending")).toEqual({ kind: "pending" });
     expect(parseDictionaryCommand("/dict modify Atlante FC")).toEqual({ kind: "invalid" });
+  });
+
+  it("解析管理員待審翻譯批核語法", () => {
+    expect(parseDictionaryApproveCommand("/approve 1 國際體育會")).toEqual({ id: 1, traditionalName: "國際體育會" });
+    expect(parseDictionaryApproveCommand("/approve 0 國際體育會")).toBeNull();
+    expect(parseDictionaryApproveCommand("/approve 1")).toBeNull();
   });
 });

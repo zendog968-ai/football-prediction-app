@@ -38,6 +38,21 @@ export const telegramSubscriptions = mysqlTable("telegram_subscriptions", {
   updatedAt: timestamp("updatedAt").defaultNow().notNull().onUpdateNow(),
 });
 
+/** Privacy-preserving Telegram webhook audit: command metadata only, never raw message content. */
+export const telegramInboundEvents = mysqlTable("telegram_inbound_events", {
+  id: int("id").autoincrement().primaryKey(),
+  telegramUpdateId: varchar("telegramUpdateId", { length: 32 }).notNull().unique(),
+  chatId: varchar("chatId", { length: 64 }),
+  command: varchar("command", { length: 64 }).notNull(),
+  status: mysqlEnum("status", ["received", "processed", "rejected", "failed", "ignored"]).notNull().default("received"),
+  errorSummary: varchar("errorSummary", { length: 255 }),
+  receivedAt: timestamp("receivedAt").defaultNow().notNull(),
+  handledAt: timestamp("handledAt"),
+}, table => [
+  index("telegram_inbound_chat_received_idx").on(table.chatId, table.receivedAt),
+  index("telegram_inbound_status_received_idx").on(table.status, table.receivedAt),
+]);
+
 /** Project-level Heartbeat jobs; handlers look rows up by task UID, never request bodies. */
 export const researchScheduleJobs = mysqlTable("research_schedule_jobs", {
   id: int("id").autoincrement().primaryKey(),
@@ -133,13 +148,30 @@ export const teamNameTranslations = mysqlTable("team_name_translations", {
   updatedAt: timestamp("updatedAt").defaultNow().notNull().onUpdateNow(),
 });
 
+/** LLM transliterations are queued here until an administrator explicitly promotes them to the main dictionary. */
+export const pendingTeamNameTranslations = mysqlTable("pending_team_name_translations", {
+  id: int("id").autoincrement().primaryKey(),
+  englishName: varchar("englishName", { length: 160 }).notNull().unique(),
+  suggestedTraditionalName: varchar("suggestedTraditionalName", { length: 160 }).notNull(),
+  source: mysqlEnum("source", ["llm", "test"]).notNull().default("llm"),
+  status: mysqlEnum("status", ["pending", "approved", "dismissed"]).notNull().default("pending"),
+  seenCount: int("seenCount").notNull().default(1),
+  approvedTraditionalName: varchar("approvedTraditionalName", { length: 160 }),
+  approvedByChatId: varchar("approvedByChatId", { length: 64 }),
+  approvedAt: timestamp("approvedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull().onUpdateNow(),
+}, table => [
+  index("pending_translation_status_created_idx").on(table.status, table.createdAt),
+]);
+
 /** Every administrator override or reset of an automated team-name translation is auditable. */
 export const teamNameTranslationAudits = mysqlTable("team_name_translation_audits", {
   id: int("id").autoincrement().primaryKey(),
   englishName: varchar("englishName", { length: 160 }).notNull(),
   previousTraditionalName: varchar("previousTraditionalName", { length: 160 }),
   nextTraditionalName: varchar("nextTraditionalName", { length: 160 }),
-  action: mysqlEnum("action", ["override", "reset", "undo"]).notNull(),
+  action: mysqlEnum("action", ["override", "reset", "undo", "approve"]).notNull(),
   revertsAuditId: int("revertsAuditId").unique(),
   adminChatId: varchar("adminChatId", { length: 64 }).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

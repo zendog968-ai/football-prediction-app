@@ -12,6 +12,7 @@ import {
   researchDigestFixtures,
   researchScheduleJobs,
   researchSettlements,
+  telegramInboundEvents,
   telegramSubscriptions,
   weeklyModelReports,
 } from "../drizzle/schema";
@@ -23,7 +24,7 @@ import { getPrediction, getTeams, type PredictionResult } from "./prediction";
 import { getSupabaseUpcomingCache, type CachedUpcomingFixture } from "./supabaseCache";
 import { fetchLiveTeamResearch, fetchLiveUpcomingResearch, hasCompleteLiveResearch, type LiveTeamResearch } from "./livePoissonResearch";
 import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
-import { ensureTelegramTeamTranslations, listRecentTeamTranslations, overrideTeamTranslation, resetTeamTranslation, undoLastTeamTranslationOverride } from "./teamTranslation";
+import { approvePendingTeamTranslation, ensureTelegramTeamTranslations, listPendingTeamTranslations, listRecentTeamTranslations, overrideTeamTranslation, resetTeamTranslation, undoLastTeamTranslationOverride } from "./teamTranslation";
 
 export type ResearchWindow = "day" | "evening" | "settlement";
 export type ScheduleKind = "settlement" | "day_digest" | "evening_digest";
@@ -141,7 +142,8 @@ export const TELEGRAM_HELP_MESSAGE = [
   "/upcoming — 查詢未來24小時所有已同步賽事；完整模型以研究分析、部分資料以【基礎分析】呈現。",
   "/report — 顯示最新24小時賽事摘要（與/upcoming相同）。",
   "/team <隊伍名稱> — 查詢該隊最近一場已同步賽事的極簡機率表格與Top 3波膽。",
-  "/dict — 管理員查看近期自動隊名譯名；可用 /dict set 英文隊名 => 繁中譯名 覆寫、/dict reset 英文隊名 重設、/dict undo 復原最近覆寫，或 /dict undo 英文隊名 復原指定隊伍。",
+  "/dict — 管理員查看詞典；/dict pending 查閱待審音譯，/approve <ID> <繁中譯名> 批核。亦可用 /dict set、reset、undo 管理已存詞典。",
+  "/inbound — 管理員查閱近期Telegram入站指令接收與處理狀態（不保存訊息內容）。",
   "/stop — 停止研究通知；可隨時以/start重新啟用。",
   "/help — 顯示本指令說明。",
   "",
@@ -378,12 +380,14 @@ export function normalizeTelegramCommand(text: string | undefined): string | und
 
 export function parseDictionaryCommand(rawText: string | undefined):
   | { kind: "list" }
+  | { kind: "pending" }
   | { kind: "set"; englishName: string; traditionalName: string }
   | { kind: "reset"; englishName: string }
   | { kind: "undo"; englishName?: string }
   | { kind: "invalid" } {
   const body = rawText?.trim().replace(/^\/dict(?:@[a-z0-9_]+)?\s*/i, "") ?? "";
   if (!body) return { kind: "list" };
+  if (/^pending$/i.test(body)) return { kind: "pending" };
   const undo = /^undo(?:\s+(.+))?$/i.exec(body);
   if (undo) return { kind: "undo", ...(undo[1]?.trim() ? { englishName: undo[1].trim() } : {}) };
   const set = /^set\s+(.+?)\s*=>\s*(.+)$/i.exec(body);
@@ -393,14 +397,34 @@ export function parseDictionaryCommand(rawText: string | undefined):
   return { kind: "invalid" };
 }
 
+export function parseDictionaryApproveCommand(rawText: string | undefined): { id: number; traditionalName: string } | null {
+  const match = rawText?.trim().match(/^\/approve(?:@[a-z0-9_]+)?\s+(\d+)\s+(.+)$/i);
+  if (!match) return null;
+  const id = Number(match[1]);
+  const traditionalName = match[2]?.trim();
+  return Number.isInteger(id) && id > 0 && traditionalName ? { id, traditionalName } : null;
+}
+
+function isDictionaryAdmin(chatId: string): boolean {
+  return Boolean(ENV.telegramAdminChatId) && chatId === ENV.telegramAdminChatId;
+}
+
 async function telegramDictionaryForAdmin(chatId: string, rawText: string | undefined): Promise<string> {
-  const db = await getDb();
-  if (!db) throw new Error("資料庫暫時無法使用。");
-  const subscription = (await db.select().from(telegramSubscriptions).where(eq(telegramSubscriptions.chatId, chatId)).limit(1))[0];
-  if (!subscription?.isAdmin) return "🔒 /dict 僅限管理員使用。";
+  if (!isDictionaryAdmin(chatId)) return "🔒 無權限：此詞典指令僅限系統管理員使用。";
   const command = parseDictionaryCommand(rawText);
   if (command.kind === "invalid") {
-    return "用法：\n/dict\n/dict set Atlante FC => 亞特蘭蒂\n/dict reset Atlante FC\n/dict undo\n/dict undo Atlante FC";
+    return "用法：\n/dict\n/dict pending\n/approve 1 國際體育會\n/dict set Atlante FC => 繁中譯名\n/dict reset Atlante FC\n/dict undo\n/dict undo Atlante FC";
+  }
+  if (command.kind === "pending") {
+    const pending = await listPendingTeamTranslations();
+    if (!pending.length) return "📥 【待審核隊名】\n目前沒有待審核音譯。";
+    return [
+      "📥 【待審核隊名】",
+      "──────────────────",
+      ...pending.map(entry => `${entry.id}. ${entry.englishName} → ${entry.suggestedTraditionalName}（${entry.source === "test" ? "測試" : "安全音譯"}｜出現${entry.seenCount}次）`),
+      "",
+      "批核：/approve [ID] [正確繁中譯名]",
+    ].join("\n");
   }
   if (command.kind === "set") {
     await overrideTeamTranslation({ ...command, adminChatId: chatId });
@@ -429,9 +453,66 @@ async function telegramDictionaryForAdmin(chatId: string, rawText: string | unde
     ...recent.map((entry, index) => `${index + 1}. ${entry.englishName} → ${entry.traditionalName} ${entry.source === "llm" ? "🤖" : "✍️"}`),
     "",
     "覆寫：/dict set 英文隊名 => 繁中譯名",
+    "待審音譯：/dict pending",
+    "批核待審：/approve 1 國際體育會",
     "重設：/dict reset 英文隊名",
     "復原最近覆寫：/dict undo",
     "復原指定隊名：/dict undo Atlante FC",
+  ].join("\n");
+}
+
+async function telegramApproveForAdmin(chatId: string, rawText: string | undefined): Promise<string> {
+  if (!isDictionaryAdmin(chatId)) return "🔒 無權限：此詞典指令僅限系統管理員使用。";
+  const input = parseDictionaryApproveCommand(rawText);
+  if (!input) return "用法：/approve [待審ID] [正確繁中譯名]\n例如：/approve 1 國際體育會";
+  const approved = await approvePendingTeamTranslation({ ...input, adminChatId: chatId });
+  return approved
+    ? `✅ 已批核 #${input.id}\n${approved.englishName} → ${approved.traditionalName}\n\n翻譯快取已刷新，後續 /upcoming 與定時推播會立即使用此名稱。`
+    : `找不到待審核項目 #${input.id}，或該項目已處理。`;
+}
+
+type InboundAuditStatus = typeof telegramInboundEvents.$inferSelect.status;
+
+async function recordTelegramInboundEvent(input: { updateId: string; chatId: string | null; command: string }): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(telegramInboundEvents).values({
+    telegramUpdateId: input.updateId,
+    chatId: input.chatId,
+    command: input.command.slice(0, 64),
+    status: "received",
+  }).onDuplicateKeyUpdate({
+    set: { chatId: input.chatId, command: input.command.slice(0, 64), status: "received", errorSummary: null, receivedAt: new Date(), handledAt: null },
+  });
+}
+
+async function completeTelegramInboundEvent(updateId: string, status: InboundAuditStatus, errorSummary?: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(telegramInboundEvents).set({
+    status,
+    errorSummary: errorSummary?.replace(/[\r\n]+/g, " ").slice(0, 255) ?? null,
+    handledAt: new Date(),
+  }).where(eq(telegramInboundEvents.telegramUpdateId, updateId));
+}
+
+function safeInboundError(error: unknown): string {
+  return error instanceof Error ? error.message : "未知處理錯誤";
+}
+
+async function telegramInboundForAdmin(chatId: string): Promise<string> {
+  if (!isDictionaryAdmin(chatId)) return "🔒 無權限：入站稽核僅限系統管理員使用。";
+  const db = await getDb();
+  if (!db) throw new Error("入站稽核資料暫時無法使用。");
+  const rows = await db.select().from(telegramInboundEvents).orderBy(desc(telegramInboundEvents.receivedAt)).limit(20);
+  if (!rows.length) return "📨 【入站事件稽核】\n目前沒有已記錄的Webhook事件。";
+  const statusLabel: Record<InboundAuditStatus, string> = { received: "已接收", processed: "已處理", rejected: "已拒絕", failed: "失敗", ignored: "已忽略" };
+  return [
+    "📨 【入站事件稽核】",
+    "──────────────────",
+    ...rows.map(row => `${new Date(row.receivedAt).toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong", hour12: false })}｜${row.chatId ?? "無聊天室"}｜${row.command}｜${statusLabel[row.status]}${row.errorSummary ? `\n　↳ ${row.errorSummary}` : ""}`),
+    "",
+    "註：僅保存指令類型與處理狀態，不保存原始訊息內容。",
   ].join("\n");
 }
 
@@ -1728,6 +1809,7 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     return;
   }
   const update = req.body as {
+    update_id?: number | string;
     message?: { chat?: { id?: number | string }; from?: { first_name?: string; username?: string }; text?: string };
     callback_query?: { id?: string; data?: string; message?: { chat?: { id?: number | string } } };
   };
@@ -1746,22 +1828,31 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
   const message = update.message;
   const chatId = message?.chat?.id;
   const text = normalizeTelegramCommand(message?.text);
+  const auditUpdateId = String(update.update_id ?? `message-${Date.now()}`);
+  await recordTelegramInboundEvent({ updateId: auditUpdateId, chatId: chatId ? String(chatId) : null, command: text || "non_command" });
   if (!chatId || !text) {
+    await completeTelegramInboundEvent(auditUpdateId, "ignored");
     res.status(200).json({ ok: true, ignored: true });
     return;
   }
-  const db = await getDb();
-  if (!db) throw new Error("資料庫暫時無法使用。");
-  const displayName = message.from?.username || message.from?.first_name || null;
-  if (text === "/start") {
-    await db.insert(telegramSubscriptions).values({ chatId: String(chatId), displayName, isActive: true, stoppedAt: null })
-      .onDuplicateKeyUpdate({ set: { displayName, isActive: true, stoppedAt: null } });
+  try {
+    const db = await getDb();
+    if (!db) throw new Error("資料庫暫時無法使用。");
+    const displayName = message.from?.username || message.from?.first_name || null;
+    if (text === "/start") {
+    const isAdmin = isDictionaryAdmin(String(chatId));
+    await db.insert(telegramSubscriptions).values({ chatId: String(chatId), displayName, isActive: true, isAdmin, stoppedAt: null })
+      .onDuplicateKeyUpdate({ set: { displayName, isActive: true, isAdmin, stoppedAt: null } });
     await sendTelegramMessage(String(chatId), "Aurelia Football研究通知已啟用。你會收到經資料品質檢核的研究摘要與賽後統計；回覆 /stop 可停止通知。所有內容僅供研究，並非投注或資金建議。");
   } else if (text === "/help") {
     await sendTelegramMessage(String(chatId), TELEGRAM_HELP_MESSAGE);
   // Dictionary commands are admin-gated inside telegramDictionaryForAdmin, including /dict undo.
   } else if (text === "/dict") {
     await sendTelegramMessage(String(chatId), await telegramDictionaryForAdmin(String(chatId), message?.text));
+  } else if (text === "/approve") {
+    await sendTelegramMessage(String(chatId), await telegramApproveForAdmin(String(chatId), message?.text));
+  } else if (text === "/inbound") {
+    await sendTelegramMessage(String(chatId), await telegramInboundForAdmin(String(chatId)));
   } else if (text === "/trend") {
     await sendTelegramMessage(String(chatId), await telegramTrendForRequest(message?.text));
   } else if (text === "/today") {
@@ -1790,8 +1881,13 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
       await db.update(telegramSubscriptions).set({ isActive: false, stoppedAt: new Date() }).where(eq(telegramSubscriptions.chatId, String(chatId)));
       await sendTelegramMessage(String(chatId), "Aurelia Football研究通知已停止。重新傳送 /start 可再次訂閱。");
     }
+    }
+    await completeTelegramInboundEvent(auditUpdateId, "processed");
+    res.status(200).json({ ok: true });
+  } catch (error) {
+    await completeTelegramInboundEvent(auditUpdateId, "failed", safeInboundError(error));
+    throw error;
   }
-  res.status(200).json({ ok: true });
 }
 
 export async function configureTelegramWebhook(request: Request): Promise<{ webhookUrl: string }> {

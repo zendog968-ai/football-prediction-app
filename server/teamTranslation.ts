@@ -1,5 +1,5 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
-import { teamNameTranslationAudits, teamNameTranslations } from "../drizzle/schema";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { pendingTeamNameTranslations, teamNameTranslationAudits, teamNameTranslations } from "../drizzle/schema";
 import { clearRuntimeTeamTranslation, localizeTeamName, registerRuntimeTeamTranslation } from "@shared/teamDisplay";
 import { getDb } from "./db";
 import { invokeLLM } from "./_core/llm";
@@ -22,11 +22,88 @@ export type TranslationDictionaryEntry = {
   updatedAt: Date;
 };
 
+export type PendingTranslationEntry = {
+  id: number;
+  englishName: string;
+  suggestedTraditionalName: string;
+  source: "llm" | "test";
+  seenCount: number;
+  createdAt: Date;
+};
+
 export async function listRecentTeamTranslations(limit = 10): Promise<TranslationDictionaryEntry[]> {
   const db = await getDb();
   if (!db) throw new Error("資料庫暫時無法使用。");
   const rows = await db.select().from(teamNameTranslations).orderBy(desc(teamNameTranslations.updatedAt)).limit(Math.min(Math.max(limit, 1), 20));
   return rows.map(row => ({ englishName: row.englishName, traditionalName: row.traditionalName, source: row.source, updatedAt: row.updatedAt }));
+}
+
+export async function listPendingTeamTranslations(limit = 20): Promise<PendingTranslationEntry[]> {
+  const db = await getDb();
+  if (!db) throw new Error("資料庫暫時無法使用。");
+  const rows = await db.select().from(pendingTeamNameTranslations)
+    .where(eq(pendingTeamNameTranslations.status, "pending"))
+    .orderBy(desc(pendingTeamNameTranslations.createdAt))
+    .limit(Math.min(Math.max(limit, 1), 30));
+  return rows.map(row => ({
+    id: row.id,
+    englishName: row.englishName,
+    suggestedTraditionalName: row.suggestedTraditionalName,
+    source: row.source,
+    seenCount: row.seenCount,
+    createdAt: row.createdAt,
+  }));
+}
+
+async function queuePendingTeamTranslation(input: { englishName: string; suggestedTraditionalName: string; source?: "llm" | "test" }): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("資料庫暫時無法使用。");
+  const existing = (await db.select().from(pendingTeamNameTranslations)
+    .where(eq(pendingTeamNameTranslations.englishName, input.englishName)).limit(1))[0];
+  if (existing) {
+    if (existing.status === "pending") {
+      await db.update(pendingTeamNameTranslations)
+        .set({ suggestedTraditionalName: input.suggestedTraditionalName, seenCount: sql`${pendingTeamNameTranslations.seenCount} + 1` })
+        .where(eq(pendingTeamNameTranslations.id, existing.id));
+    }
+    return;
+  }
+  await db.insert(pendingTeamNameTranslations).values({
+    englishName: input.englishName,
+    suggestedTraditionalName: input.suggestedTraditionalName,
+    source: input.source ?? "llm",
+  });
+}
+
+export async function approvePendingTeamTranslation(input: { id: number; traditionalName: string; adminChatId: string }): Promise<{ englishName: string; traditionalName: string } | null> {
+  const traditionalName = input.traditionalName.trim();
+  if (!Number.isInteger(input.id) || input.id <= 0) throw new Error("待審核流水號不正確。");
+  if (!isValidTraditionalTeamTranslation(traditionalName)) throw new Error("繁中譯名需為2至80個字元且不可包含換行或標籤。");
+  const db = await getDb();
+  if (!db) throw new Error("資料庫暫時無法使用。");
+  const pending = (await db.select().from(pendingTeamNameTranslations)
+    .where(and(eq(pendingTeamNameTranslations.id, input.id), eq(pendingTeamNameTranslations.status, "pending"))).limit(1))[0];
+  if (!pending) return null;
+  const previous = (await db.select().from(teamNameTranslations)
+    .where(eq(teamNameTranslations.englishName, pending.englishName)).limit(1))[0];
+  await db.insert(teamNameTranslations).values({ englishName: pending.englishName, traditionalName, source: "curated" })
+    .onDuplicateKeyUpdate({ set: { traditionalName, source: "curated" } });
+  await db.insert(teamNameTranslationAudits).values({
+    englishName: pending.englishName,
+    previousTraditionalName: previous?.traditionalName ?? null,
+    nextTraditionalName: traditionalName,
+    action: "approve",
+    adminChatId: input.adminChatId,
+  });
+  await db.update(pendingTeamNameTranslations).set({
+    status: "approved",
+    approvedTraditionalName: traditionalName,
+    approvedByChatId: input.adminChatId,
+    approvedAt: new Date(),
+  }).where(eq(pendingTeamNameTranslations.id, pending.id));
+  clearRuntimeTeamTranslation(pending.englishName);
+  registerRuntimeTeamTranslation(pending.englishName, traditionalName);
+  return { englishName: pending.englishName, traditionalName };
 }
 
 export async function overrideTeamTranslation(input: { englishName: string; traditionalName: string; adminChatId: string }): Promise<void> {
@@ -93,18 +170,22 @@ export async function ensureTelegramTeamTranslations(names: string[]): Promise<v
   if (!unique.length) return;
   const db = await getDb();
   if (!db) return;
-  const stored = await db.select().from(teamNameTranslations).where(inArray(teamNameTranslations.englishName, unique));
+  const [stored, queued] = await Promise.all([
+    db.select().from(teamNameTranslations).where(inArray(teamNameTranslations.englishName, unique)),
+    db.select().from(pendingTeamNameTranslations).where(and(inArray(pendingTeamNameTranslations.englishName, unique), eq(pendingTeamNameTranslations.status, "pending"))),
+  ]);
   const storedNames = new Set(stored.map(row => row.englishName));
   for (const row of stored) registerRuntimeTeamTranslation(row.englishName, row.traditionalName);
-  const pending = unique.filter(name => !storedNames.has(name) && localizeTeamName(name) === name);
-  if (!pending.length) return;
+  for (const row of queued) registerRuntimeTeamTranslation(row.englishName, row.suggestedTraditionalName);
+  const unresolved = unique.filter(name => !storedNames.has(name) && !queued.some(row => row.englishName === name) && localizeTeamName(name) === name);
+  if (!unresolved.length) return;
   try {
     const result = await invokeLLM({
       model: "gpt-5-mini",
       maxTokens: 400,
       messages: [
         { role: "system", content: "你是香港足球編輯。將英文足球會名轉為繁體中文常用譯名或保守音譯。只處理輸入球會名；不可加入解釋、標點、聯賽或國家。" },
-        { role: "user", content: JSON.stringify({ teams: pending }) },
+        { role: "user", content: JSON.stringify({ teams: unresolved }) },
       ],
       response_format: {
         type: "json_schema",
@@ -136,11 +217,10 @@ export async function ensureTelegramTeamTranslations(names: string[]): Promise<v
     const translations = (parsed.translations ?? []).flatMap(item => {
       const english = item.english?.trim();
       const traditional = item.traditional?.trim();
-      return english && pending.includes(english) && traditional && isValidTraditionalTeamTranslation(traditional) ? [{ english, traditional }] : [];
+      return english && unresolved.includes(english) && traditional && isValidTraditionalTeamTranslation(traditional) ? [{ english, traditional }] : [];
     });
     for (const translation of translations) {
-      await db.insert(teamNameTranslations).values({ englishName: translation.english, traditionalName: translation.traditional, source: "llm" })
-        .onDuplicateKeyUpdate({ set: { traditionalName: translation.traditional, source: "llm" } });
+      await queuePendingTeamTranslation({ englishName: translation.english, suggestedTraditionalName: translation.traditional });
       registerRuntimeTeamTranslation(translation.english, translation.traditional);
     }
   } catch {
