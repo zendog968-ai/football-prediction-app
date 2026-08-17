@@ -247,9 +247,9 @@ function formatCachedResearchCard(item: CachedUpcomingFixture, index: number): s
     : "⚖️ 【實時讓球盤】暫無可驗證HKJC／亞洲盤口；不以模型讓球代替市場水位。";
   return [
     `${index}. 🏆 【聯賽】${localizeLeagueName(item.leagueName)}`,
-    `📅 【時間】${formatHktKickoff(item.eventTime)}`,
     "---",
     formatLocalizedFixture(item.homeTeam, item.awayTeam),
+    `⏰ 賽事時間：${formatHktKickoff(item.eventTime)}`,
     "---",
     formatCachedResearchSource(item),
     `🛡️ 【雙重機率】1X: ${percent(oneX)} | X2: ${percent(xTwo)}`,
@@ -288,6 +288,7 @@ async function telegramUpcoming(): Promise<string> {
   if (hasCachedUpcoming) return formatCachedUpcoming(cached.fixtures);
   const live = await fetchLiveUpcomingResearch(3).catch(() => []);
   const completeLive = live.filter(hasCompleteLiveResearch);
+  await ensureTelegramTeamTranslations(completeLive.flatMap(item => [item.homeTeam, item.awayTeam]));
   if (completeLive.length > 0) return completeLive.map((item, index) => `${index + 1}. ${formatLiveTeamResearch(item)}`).join("\n\n");
   return "暫未找到可驗證未來賽事";
 }
@@ -688,9 +689,9 @@ export function formatLiveTeamResearch(research: LiveTeamResearch): string {
   const under25 = over25 === null ? null : 1 - over25;
   return [
     `🏆 【聯賽】${localizeLeagueName(research.leagueName)}`,
-    `📅 【時間】${formatHktKickoff(research.kickoffAt)}`,
     "---",
     formatLocalizedFixture(research.homeTeam, research.awayTeam),
+    `⏰ 賽事時間：${formatHktKickoff(research.kickoffAt)}`,
     "---",
     `📊 【資料來源】${source}`,
     research.calibrationLabel ? `⚙️ 【校準】${research.calibrationLabel}` : null,
@@ -1201,9 +1202,9 @@ function formatCandidate(candidate: Candidate): string {
   const probabilities = candidate.prediction.probabilities;
   return [
     `🏆 【聯賽】${localizeLeagueName(RESEARCH_LEAGUE_NAMES[candidate.leagueCode] ?? candidate.leagueCode)}`,
-    `📅 【時間】${formatHktKickoff(candidate.kickoffAt)}`,
     "---",
     formatLocalizedFixture(candidate.homeTeam, candidate.awayTeam),
+    `⏰ 賽事時間：${formatHktKickoff(candidate.kickoffAt)}`,
     "---",
     "📊 【資料來源】Dixon–Coles 模型 + HDA 賠率融合",
     `🛡️ 【雙重機率】1X: ${percent(probabilities.home_win + probabilities.draw)} | X2: ${percent(probabilities.draw + probabilities.away_win)}`,

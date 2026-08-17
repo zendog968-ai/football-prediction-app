@@ -163,7 +163,7 @@ describe("Telegram研究排程", () => {
       odds: { home: 1.82, draw: 3.55, away: 4.4, capturedAt: "2026-08-15T10:00:00Z" },
       handicapQuote: { source: "Bet365", homeLine: "-0.5", homeOdds: 1.91, awayLine: "+0.5", awayOdds: 1.89, capturedAt: "2026-08-15T10:00:00Z" },
     }], new Date("2026-08-15T00:00:00Z"));
-    expect(message).toContain("📅 【時間】2026-08-16 04:00 (HKT)");
+    expect(message).toContain("⏰ 賽事時間：2026-08-16 04:00 (HKT)");
     expect(message).toContain("⚽️ 【Example Home】  vs  【Example Away】");
     expect(message).toContain("📊 【資料來源】Dixon–Coles 模型 + HDA 賠率融合");
     expect(message).toContain("🛡️ 【雙重機率】1X: 83.0% | X2: 38.0%");
@@ -193,6 +193,7 @@ describe("Telegram研究排程", () => {
   it("在Telegram標題以繁體中文加英文原名顯示已知球隊，未知隊名保留原文", () => {
     expect(formatFixtureDisplay("Jeju United FC", "FC Anyang")).toBe("濟州SK (Jeju United FC) vs 安養FC (FC Anyang)");
     expect(formatFixtureDisplay("Shenyang Urban", "Sichuan Jiuniu")).toBe("瀋陽城市 (Shenyang Urban) vs 四川九牛 (Sichuan Jiuniu)");
+    expect(formatFixtureDisplay("Internacional", "Remo")).toBe("國際體育會 (Internacional) vs 雷莫 (Remo)");
     expect(formatFixtureDisplay("Unknown FC", "FC Tokyo")).toBe("Unknown FC vs FC東京 (FC Tokyo)");
     expect(formatFixtureDisplay("Fluminense W", "America Mineiro W")).toBe("富明尼斯女足 (Fluminense W) vs 明尼路美洲女足 (America Mineiro W)");
     expect(formatFixtureDisplay("Fluminense Women", "America Mineiro Women")).toBe("富明尼斯女足 (Fluminense Women) vs 明尼路美洲女足 (America Mineiro Women)");
