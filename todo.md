@@ -425,3 +425,4 @@
 - [x] 建立不保存原始訊息內容的Telegram入站事件稽核，記錄Chat ID、命令類型、接收時間、處理狀態及安全錯誤摘要：已建立telegram_inbound_events持久化表及索引；開發Webhook測試以Chat ID 5871490170接收/status後記錄為processed，未保存原始訊息內容。
 - [x] 新增管理員可查閱的入站事件狀態輸出，區分Webhook未到達、授權拒絕、處理失敗與成功回覆：已新增`/inbound`格式化查閱，僅呈現時間、Chat ID、指令類型、狀態及安全錯誤摘要。
 - [ ] 完成入站稽核回歸、資料庫遷移、發布與正式Webhook端到端驗證。
+- [ ] 修復正式網域目前回退為靜態前端（GET Webhook端點回傳index.html、正式容器日誌not_found）造成的TelegramWebhook未執行問題，並重新驗證後端服務路由。
