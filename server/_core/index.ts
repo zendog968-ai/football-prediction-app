@@ -40,6 +40,9 @@ async function startServer() {
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   // External Telegram updates are authenticated with Telegram's webhook secret.
+  app.get("/api/integrations/telegram/webhook", (_req, res) => {
+    res.status(200).json({ ok: true, service: "telegram-webhook", inboundAudit: true });
+  });
   app.post("/api/integrations/telegram/webhook", (req, res) => {
     void handleTelegramWebhook(req, res).catch(error => {
       res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
