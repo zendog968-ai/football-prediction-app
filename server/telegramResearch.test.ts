@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatLiveTeamResearch, formatModelHealthSummary, formatTeamResearch, formatTelegramStatus, hasCompleteDigestCandidate, isAnyLeagueMatch, isKnownTeamAlias, isLeagueMatch, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, todayLeagueFilter, todayLeagueFilters, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatJobsStatus, formatLiveTeamResearch, formatModelHealthSummary, formatPreviousDayDeliveryReceipt, formatTeamResearch, formatTelegramStatus, hasCompleteDigestCandidate, isAnyLeagueMatch, isKnownTeamAlias, isLeagueMatch, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, todayLeagueFilter, todayLeagueFilters, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -49,6 +49,7 @@ describe("Telegram研究排程", () => {
 	  it("/help列出全部可用的訂閱及研究指令", () => {
 	    expect(TELEGRAM_HELP_MESSAGE).toContain("/start");
 	    expect(TELEGRAM_HELP_MESSAGE).toContain("/status");
+	    expect(TELEGRAM_HELP_MESSAGE).toContain("/jobs");
 	    expect(TELEGRAM_HELP_MESSAGE).toContain("/health");
 	    expect(TELEGRAM_HELP_MESSAGE).toContain("/trend");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/today");
@@ -76,6 +77,42 @@ describe("Telegram研究排程", () => {
 	    expect(output).toContain("【狀態】樣本不足");
 	    expect(output).toContain("【已結算市場】30 項｜有利結果 33.3%");
 	    expect(output).toContain("【特徵快照】0 筆｜xG缺失 資料不足");
+	  });
+
+	  it("呈現任務下次預期、最後送達與漏發告警原因", () => {
+	    const output = formatJobsStatus([{
+	      kind: "day_digest",
+	      isEnabled: true,
+	      lastStartedAt: new Date("2026-08-17T03:00:00.000Z"),
+	      lastCompletedAt: new Date("2026-08-17T03:00:08.000Z"),
+	      lastError: null,
+	      latestEvent: {
+	        scheduleKind: "day_digest",
+	        eventType: "digest_delivery",
+	        deliveryStatus: "sent",
+	        recipientCount: 1,
+	        deliveredCount: 1,
+	        failedCount: 0,
+	        eventAt: new Date("2026-08-17T03:00:08.000Z"),
+	      },
+	    }], new Date("2026-08-17T04:00:00.000Z"));
+	    expect(output).toContain("日間摘要（11:00）】已啟用");
+	    expect(output).toContain("下次預期：18/8/2026 11:00:00");
+	    expect(output).toContain("最後送達：已送達（1/1 位訂閱者）");
+
+	    const receipt = formatPreviousDayDeliveryReceipt([{
+	      scheduleKind: "evening_digest",
+	      eventType: "schedule_missed",
+	      deliveryStatus: "alert_sent",
+	      recipientCount: 1,
+	      deliveredCount: 1,
+	      failedCount: 0,
+	      detail: "漏發偵測：逾15分鐘仍未完成。",
+	      eventAt: new Date("2026-08-17T11:00:00.000Z"),
+	    }]);
+	    expect(receipt).toContain("前日推播送達回條");
+	    expect(receipt).toContain("告警：1 項");
+	    expect(receipt).toContain("漏發偵測");
 	  });
 
 	  it("解析/today聯賽篩選並支援繁中與英文聯賽名稱", () => {

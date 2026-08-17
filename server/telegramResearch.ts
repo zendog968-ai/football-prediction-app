@@ -7,6 +7,7 @@ import { formatFixtureDisplay } from "@shared/teamDisplay";
 import { formatLeagueDisplay, localizeLeagueName } from "@shared/leagueDisplay";
 import {
   oddsSnapshots,
+  researchDeliveryEvents,
   researchDigests,
   researchDigestFixtures,
   researchScheduleJobs,
@@ -130,6 +131,7 @@ export const TELEGRAM_HELP_MESSAGE = [
   "",
   "/start — 啟用研究通知。",
   "/status — 查閱訂閱狀態、Heartbeat任務與API剩餘額度。",
+  "/jobs — 查閱各推播任務的預期下次執行、最後完成與送達結果。",
   "/health — 查閱最新模型健康度、樣本規模與特徵缺失狀態。",
   "/trend <fixture ID> 或 /trend 主隊 vs 客隊 — 查詢已保存盤口走勢。",
   "/today — 重新查看今日已送達且資料完整的研究清單；若尚未建立，會生成一次僅供查閱的清單。",
@@ -882,27 +884,78 @@ async function getSubscriptionChatIds(): Promise<string[]> {
   return rows.map(row => row.chatId);
 }
 
-async function notifyDigestFailure(kind: ScheduleKind, detail: string): Promise<void> {
-  const chatIds = await getSubscriptionChatIds();
-  const message = `⚠️ Aurelia Football 自動摘要失敗\n時段：${kind}\n系統將依Heartbeat規則重試。\n原因：${detail.slice(0, 300)}`;
-  await Promise.allSettled(chatIds.map(chatId => sendTelegramMessage(chatId, message)));
+type DeliveryEventInput = {
+  kind: ScheduleKind;
+  eventType: "digest_delivery" | "schedule_failure" | "schedule_missed";
+  status: "sent" | "partial" | "failed" | "alert_sent";
+  digestId?: number;
+  recipientCount: number;
+  deliveredCount: number;
+  failedCount: number;
+  detail?: string | null;
+};
+
+async function recordDeliveryEvent(input: DeliveryEventInput): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("推播稽核資料庫暫時無法使用。");
+  await db.insert(researchDeliveryEvents).values({
+    scheduleKind: input.kind,
+    eventType: input.eventType,
+    deliveryStatus: input.status,
+    ...(input.digestId ? { digestId: input.digestId } : {}),
+    recipientCount: input.recipientCount,
+    deliveredCount: input.deliveredCount,
+    failedCount: input.failedCount,
+    detail: input.detail?.slice(0, 4000) || null,
+  });
 }
 
-async function deliverDigest(digestId: number, content: string): Promise<void> {
+async function notifyDigestFailure(kind: ScheduleKind, detail: string, eventType: "schedule_failure" | "schedule_missed" = "schedule_failure"): Promise<void> {
+  const chatIds = await getSubscriptionChatIds();
+  const label = kind === "day_digest" ? "日間摘要" : kind === "evening_digest" ? "晚間摘要" : "賽後結算";
+  const heading = eventType === "schedule_missed" ? "⚠️ Aurelia Football 偵測到漏發" : "🚨 Aurelia Football 自動摘要失敗";
+  const message = `${heading}\n任務：${label}\n系統將依Heartbeat規則重試。\n原因：${detail.slice(0, 300)}`;
+  const results = await Promise.allSettled(chatIds.map(chatId => sendTelegramMessage(chatId, message)));
+  const delivered = results.filter(result => result.status === "fulfilled").length;
+  await recordDeliveryEvent({
+    kind,
+    eventType,
+    status: "alert_sent",
+    recipientCount: chatIds.length,
+    deliveredCount: delivered,
+    failedCount: chatIds.length - delivered,
+    detail,
+  });
+}
+
+async function deliverDigest(digestId: number, content: string, kind: ScheduleKind): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("資料庫暫時無法使用。");
   const chatIds = await getSubscriptionChatIds();
   if (chatIds.length === 0) {
     await db.update(researchDigests).set({ deliveryStatus: "sent", sentAt: new Date() }).where(eq(researchDigests.id, digestId));
+    await recordDeliveryEvent({ kind, eventType: "digest_delivery", status: "sent", digestId, recipientCount: 0, deliveredCount: 0, failedCount: 0, detail: "沒有啟用訂閱者；摘要已保存但未外發。" });
     return;
   }
   const results = await Promise.allSettled(chatIds.map(chatId => sendTelegramMessage(chatId, content)));
   const failed = results.filter(result => result.status === "rejected");
+  const status = failed.length === 0 ? "sent" : failed.length === chatIds.length ? "failed" : "partial";
+  const detail = failed.map(item => String((item as PromiseRejectedResult).reason)).join(" | ").slice(0, 4000) || null;
   await db.update(researchDigests).set({
-    deliveryStatus: failed.length === 0 ? "sent" : failed.length === chatIds.length ? "failed" : "partial",
-    deliveryError: failed.map(item => String((item as PromiseRejectedResult).reason)).join(" | ").slice(0, 4000) || null,
+    deliveryStatus: status,
+    deliveryError: detail,
     sentAt: new Date(),
   }).where(eq(researchDigests.id, digestId));
+  await recordDeliveryEvent({
+    kind,
+    eventType: "digest_delivery",
+    status,
+    digestId,
+    recipientCount: chatIds.length,
+    deliveredCount: chatIds.length - failed.length,
+    failedCount: failed.length,
+    detail,
+  });
   if (failed.length === chatIds.length) throw new Error("所有Telegram研究訊息均未能送達。");
 }
 
@@ -1276,7 +1329,7 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
     ...liveFallback.flatMap(research => liveModelSettlementRows(research, digestId)),
   ];
   if (settlementRows.length > 0) await db.insert(researchSettlements).values(settlementRows);
-  if (options.deliver !== false) await deliverDigest(digestId, content);
+  if (options.deliver !== false) await deliverDigest(digestId, content, window === "day" ? "day_digest" : "evening_digest");
   return { digestId, signalCount };
 }
 
@@ -1284,6 +1337,138 @@ function hktDayBounds(now = new Date()): { start: Date; end: Date } {
   const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
   const start = new Date(`${date}T00:00:00+08:00`);
   return { start, end: new Date(start.getTime() + 24 * 60 * 60_000) };
+}
+
+const SCHEDULE_LABELS: Record<ScheduleKind, string> = {
+  settlement: "賽後結算（每30分鐘）",
+  day_digest: "日間摘要（11:00）",
+  evening_digest: "晚間摘要（18:30）",
+};
+
+function hktTimestamp(value: Date | null | undefined): string {
+  return value ? value.toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong", hour12: false }) : "尚無紀錄";
+}
+
+function expectedNextRun(kind: ScheduleKind, now = new Date()): Date {
+  if (kind === "settlement") {
+    const next = new Date(now);
+    next.setUTCSeconds(0, 0);
+    next.setUTCMinutes(Math.floor(next.getUTCMinutes() / 30) * 30 + 30);
+    return next;
+  }
+  const { start } = hktDayBounds(now);
+  const expected = new Date(start.getTime() + (kind === "day_digest" ? 11 : 18.5) * 60 * 60_000);
+  return expected > now ? expected : new Date(expected.getTime() + 24 * 60 * 60_000);
+}
+
+function expectedRunToday(kind: "day_digest" | "evening_digest", now = new Date()): Date {
+  const { start } = hktDayBounds(now);
+  return new Date(start.getTime() + (kind === "day_digest" ? 11 : 18.5) * 60 * 60_000);
+}
+
+type DeliveryReceipt = {
+  scheduleKind: ScheduleKind;
+  eventType: "digest_delivery" | "schedule_failure" | "schedule_missed";
+  deliveryStatus: "sent" | "partial" | "failed" | "alert_sent";
+  recipientCount: number;
+  deliveredCount: number;
+  failedCount: number;
+  detail?: string | null;
+  eventAt: Date;
+};
+
+function deliveryStatusText(event: DeliveryReceipt): string {
+  if (event.eventType !== "digest_delivery") return `告警已發送｜${event.detail || "未提供原因"}`;
+  const result = event.deliveryStatus === "sent" ? "已送達" : event.deliveryStatus === "partial" ? "部分送達" : "送達失敗";
+  const counts = `${event.deliveredCount}/${event.recipientCount} 位訂閱者`;
+  return `${result}（${counts}）${event.detail ? `｜${event.detail}` : ""}`;
+}
+
+export function formatPreviousDayDeliveryReceipt(events: DeliveryReceipt[]): string {
+  const digestEvents = events.filter(event => event.eventType === "digest_delivery");
+  const alerts = events.filter(event => event.eventType !== "digest_delivery");
+  if (!digestEvents.length && !alerts.length) return "【前日送達回條】沒有日間、晚間或結算推播紀錄。";
+  const latestDigestByKind = new Map<ScheduleKind, DeliveryReceipt>();
+  for (const event of digestEvents) {
+    const current = latestDigestByKind.get(event.scheduleKind);
+    if (!current || event.eventAt > current.eventAt) latestDigestByKind.set(event.scheduleKind, event);
+  }
+  const rows = (["day_digest", "evening_digest", "settlement"] as ScheduleKind[])
+    .map(kind => latestDigestByKind.get(kind))
+    .filter((event): event is DeliveryReceipt => Boolean(event))
+    .map(event => `• ${SCHEDULE_LABELS[event.scheduleKind]}：${deliveryStatusText(event)}`);
+  const alertText = alerts.length > 0
+    ? `• 告警：${alerts.length} 項｜${alerts.at(-1)?.detail || "請以/jobs查看詳情"}`
+    : "• 告警：無";
+  return ["📬 <b>前日推播送達回條</b>", ...rows, alertText].join("\n");
+}
+
+async function previousDayDeliveryReceipt(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, now = new Date()): Promise<string> {
+  const { start } = hktDayBounds(now);
+  const previousStart = new Date(start.getTime() - 24 * 60 * 60_000);
+  const events = await db.select().from(researchDeliveryEvents)
+    .where(and(gte(researchDeliveryEvents.eventAt, previousStart), lt(researchDeliveryEvents.eventAt, start)))
+    .orderBy(desc(researchDeliveryEvents.eventAt));
+  return formatPreviousDayDeliveryReceipt(events);
+}
+
+export function formatJobsStatus(rows: Array<{
+  kind: ScheduleKind;
+  isEnabled: boolean;
+  lastStartedAt: Date | null;
+  lastCompletedAt: Date | null;
+  lastError: string | null;
+  latestEvent?: DeliveryReceipt;
+}>, now = new Date()): string {
+  const body = rows
+    .sort((left, right) => (["settlement", "day_digest", "evening_digest"] as ScheduleKind[]).indexOf(left.kind) - (["settlement", "day_digest", "evening_digest"] as ScheduleKind[]).indexOf(right.kind))
+    .map(row => [
+      `【${SCHEDULE_LABELS[row.kind]}】${row.isEnabled ? "已啟用" : "已停用"}`,
+      `下次預期：${hktTimestamp(expectedNextRun(row.kind, now))}`,
+      `最後完成：${hktTimestamp(row.lastCompletedAt)}`,
+      `最後送達：${row.latestEvent ? deliveryStatusText(row.latestEvent) : "尚無送達回條"}`,
+      row.lastError ? `最近錯誤：${row.lastError.slice(0, 180)}` : null,
+    ].filter(Boolean).join("\n"))
+    .join("\n──────────────────\n");
+  return ["⚙️ <b>Aurelia 推播任務監控</b>", "──────────────────", body || "尚未建立推播任務。", "註：下次預期時間按香港時區排程計算；送達回條來自實際Telegram傳送結果。"].join("\n");
+}
+
+export async function telegramJobs(): Promise<string> {
+  const db = await getDb();
+  if (!db) throw new Error("任務監控資料暫時無法使用。");
+  const [jobs, events] = await Promise.all([
+    db.select().from(researchScheduleJobs),
+    db.select().from(researchDeliveryEvents).orderBy(desc(researchDeliveryEvents.eventAt)).limit(100),
+  ]);
+  const latestEvents = new Map<ScheduleKind, DeliveryReceipt>();
+  for (const event of events) {
+    if (!latestEvents.has(event.scheduleKind)) latestEvents.set(event.scheduleKind, event);
+  }
+  return formatJobsStatus(jobs.map(job => ({
+    kind: job.kind,
+    isEnabled: job.isEnabled,
+    lastStartedAt: job.lastStartedAt,
+    lastCompletedAt: job.lastCompletedAt,
+    lastError: job.lastError,
+    ...(latestEvents.get(job.kind) ? { latestEvent: latestEvents.get(job.kind) } : {}),
+  })));
+}
+
+async function monitorMissedDigestSchedules(now = new Date()): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("排程監控資料庫暫時無法使用。");
+  const jobs = await db.select().from(researchScheduleJobs).where(inArray(researchScheduleJobs.kind, ["day_digest", "evening_digest"]));
+  for (const job of jobs) {
+    if (job.kind === "settlement") continue;
+    const expected = expectedRunToday(job.kind, now);
+    const deadline = new Date(expected.getTime() + 15 * 60_000);
+    if (!job.isEnabled || now < deadline || (job.lastCompletedAt && job.lastCompletedAt >= expected)) continue;
+    if (job.lastStartedAt && job.lastStartedAt >= expected && job.lastError) continue;
+    const marker = `漏發偵測：預期 ${hktTimestamp(expected)}，逾15分鐘仍未完成。`;
+    if (job.lastError === marker) continue;
+    await db.update(researchScheduleJobs).set({ lastError: marker }).where(eq(researchScheduleJobs.id, job.id));
+    await notifyDigestFailure(job.kind, marker, "schedule_missed");
+  }
 }
 
 export function todayLeagueFilter(rawCommand?: string): string {
@@ -1469,17 +1654,19 @@ export async function runSettlementDigest(): Promise<{ digestId: number | null; 
     db.select({ outcome: researchSettlements.outcome }).from(researchSettlements).where(gte(researchSettlements.settledAt, lastThirtyDays)),
     db.select({ outcome: researchSettlements.outcome }).from(researchSettlements),
   ]);
+  const deliveryReceipt = await previousDayDeliveryReceipt(db);
   const content = [
     "🏁 <b>Aurelia Football｜賽後研究覆盤</b>",
     ...completed.map(item => formatCompletedFixtureReview(item.link, item.rows)),
     `近7日：${accuracy(sevenRows)}｜近30日：${accuracy(thirtyRows)}｜累積：${accuracy(allRows)}。`,
     "只計入已推播並具備最終賽果的研究市場；走盤與無法辨識盤口不納入命中率。",
+    deliveryReceipt,
     "此訊息只供模型效能與戰術研究，並非投注或資金建議。",
   ].join("\n\n");
   const inserted = await db.insert(researchDigests).values({ window: "settlement", asOf: new Date(), content, signalCount: sevenRows.length });
   const digestId = Number(inserted[0].insertId);
   await Promise.all(completed.map(item => db.update(researchDigestFixtures).set({ reviewDigestId: digestId, reviewedAt: new Date() }).where(eq(researchDigestFixtures.id, item.link.id))));
-  await deliverDigest(digestId, content);
+  await deliverDigest(digestId, content, "settlement");
   return { digestId, settled, reviewed: completed.length };
 }
 
@@ -1539,6 +1726,8 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     if (result) await sendTelegramMessage(String(chatId), result.text, result.buttons);
   } else if (text === "/status") {
     await sendTelegramMessage(String(chatId), await telegramStatusForChat(String(chatId)));
+  } else if (text === "/jobs") {
+    await sendTelegramMessage(String(chatId), await telegramJobs());
   } else if (text === "/health") {
     await sendTelegramMessage(String(chatId), await telegramHealth());
   } else if (text === "/stop") {
@@ -1610,6 +1799,7 @@ export async function handleScheduledResearch(req: Request, res: Response, kind:
     }
     await db.update(researchScheduleJobs).set({ lastStartedAt: new Date(), lastError: null }).where(eq(researchScheduleJobs.id, job.id));
     const outcome = kind === "settlement" ? await runSettlementDigest() : await runResearchDigest(req, kind === "day_digest" ? "day" : "evening");
+    if (kind === "settlement") await monitorMissedDigestSchedules();
     await db.update(researchScheduleJobs).set({ lastCompletedAt: new Date(), lastError: null }).where(eq(researchScheduleJobs.id, job.id));
     res.json({ ok: true, ...outcome });
   } catch (error) {

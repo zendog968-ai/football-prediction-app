@@ -52,6 +52,23 @@ export const researchScheduleJobs = mysqlTable("research_schedule_jobs", {
   updatedAt: timestamp("updatedAt").defaultNow().notNull().onUpdateNow(),
 });
 
+/** Immutable aggregate delivery and alert events for each Telegram research schedule. */
+export const researchDeliveryEvents = mysqlTable("research_delivery_events", {
+  id: int("id").autoincrement().primaryKey(),
+  scheduleKind: mysqlEnum("scheduleKind", ["settlement", "day_digest", "evening_digest"]).notNull(),
+  eventType: mysqlEnum("eventType", ["digest_delivery", "schedule_failure", "schedule_missed"]).notNull(),
+  digestId: int("digestId"),
+  deliveryStatus: mysqlEnum("deliveryStatus", ["sent", "partial", "failed", "alert_sent"]).notNull(),
+  recipientCount: int("recipientCount").notNull().default(0),
+  deliveredCount: int("deliveredCount").notNull().default(0),
+  failedCount: int("failedCount").notNull().default(0),
+  detail: text("detail"),
+  eventAt: timestamp("eventAt").defaultNow().notNull(),
+}, table => [
+  index("delivery_event_kind_time_idx").on(table.scheduleKind, table.eventAt),
+  index("delivery_event_digest_idx").on(table.digestId),
+]);
+
 /** Project-level daily catalog job. The callback finds this row by Heartbeat task UID only. */
 export const allLeagueSyncJobs = mysqlTable("all_league_sync_jobs", {
   id: int("id").autoincrement().primaryKey(),
