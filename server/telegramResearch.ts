@@ -3,7 +3,7 @@ import type { Request, Response } from "express";
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { parse as parseCookie } from "cookie";
 import { COOKIE_NAME } from "@shared/const";
-import { formatFixtureDisplay } from "@shared/teamDisplay";
+import { formatFixtureDisplay, formatTeamDisplay } from "@shared/teamDisplay";
 import { formatLeagueDisplay, localizeLeagueName } from "@shared/leagueDisplay";
 import {
   oddsSnapshots,
@@ -73,6 +73,9 @@ type MarketContext = {
   selection: string;
   decimalOdds: number;
   capturedAt: Date;
+  bookmakerName?: string;
+  opposingSelection?: string;
+  opposingOdds?: number;
   openingSelection?: string;
   openingOdds?: number;
   openingCapturedAt?: Date;
@@ -168,8 +171,28 @@ function hasCompleteCachedResearch(item: CachedUpcomingFixture): boolean {
     && item.topScorelines.slice(0, 3).every(scoreline => Boolean(scoreline.score) && validProbability(scoreline.probability));
 }
 
-function formatCachedResearchSource(item: CachedUpcomingFixture): string | null {
-  return item.researchSource ? `📊 【資料來源】${item.researchSource}` : null;
+function formatHktKickoff(value: Date | string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "時間待確認";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Hong_Kong",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const valueOf = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value || "00";
+  return `${valueOf("year")}-${valueOf("month")}-${valueOf("day")} ${valueOf("hour")}:${valueOf("minute")} (HKT)`;
+}
+
+function formatLocalizedFixture(homeTeam: string, awayTeam: string): string {
+  return `⚽️ 【${formatTeamDisplay(homeTeam)}】  vs  【${formatTeamDisplay(awayTeam)}】`;
+}
+
+function formatCachedResearchSource(item: CachedUpcomingFixture): string {
+  return `📊 【資料來源】${item.researchSource || "Dixon–Coles 模型 + HDA 賠率融合"}`;
 }
 
 function formatCachedResearchExtras(item: CachedUpcomingFixture): string[] {
@@ -212,6 +235,33 @@ export function toTelegramHtml(text: string): string {
     .replace("🎯 【最高波膽 Top 3】", "🎯 <b>【最高波膽 Top 3】</b>");
 }
 
+function formatCachedResearchCard(item: CachedUpcomingFixture, index: number): string {
+  const percent = (value: number) => Number.isFinite(value) && value >= 0 && value <= 1 ? `${(value * 100).toFixed(1)}%` : "資料待補";
+  const total = item.compactMarkets.find(row => row.market === "入球大細 2.5");
+  const over25 = total?.selection.startsWith("大") ? total.probability : total ? 1 - total.probability : null;
+  const under25 = over25 === null ? null : 1 - over25;
+  const oneX = item.homeWin + item.draw;
+  const xTwo = item.draw + item.awayWin;
+  const handicap = item.handicapQuote
+    ? `⚖️ 【實時讓球盤】${item.handicapQuote.source} 主隊 ${item.handicapQuote.homeLine} (@${item.handicapQuote.homeOdds.toFixed(2)}) / 客隊 ${item.handicapQuote.awayLine} (@${item.handicapQuote.awayOdds.toFixed(2)})`
+    : "⚖️ 【實時讓球盤】暫無可驗證HKJC／亞洲盤口；不以模型讓球代替市場水位。";
+  return [
+    `${index}. 🏆 【聯賽】${localizeLeagueName(item.leagueName)}`,
+    `📅 【時間】${formatHktKickoff(item.eventTime)}`,
+    "---",
+    formatLocalizedFixture(item.homeTeam, item.awayTeam),
+    "---",
+    formatCachedResearchSource(item),
+    `🛡️ 【雙重機率】1X: ${percent(oneX)} | X2: ${percent(xTwo)}`,
+    handicap,
+    `🎯 【模型勝率預測】主勝 ${percent(item.homeWin)} | 和局 ${percent(item.draw)} | 客勝 ${percent(item.awayWin)}`,
+    `🔥 【大小球】${over25 === null || under25 === null ? "暫無可驗證2.5盤口" : `大 2.5 (${percent(over25)}) | 小 2.5 (${percent(under25)})`}`,
+    "---",
+    "💡 【最高波膽 Top 3】",
+    ...item.topScorelines.slice(0, 3).map((scoreline, scoreIndex) => `${scoreIndex + 1}. ${scoreline.score} —— ${percent(scoreline.probability)}`),
+  ].join("\n");
+}
+
 export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = new Date()): string {
   const start = now.getTime();
   const end = start + 24 * 60 * 60_000;
@@ -220,13 +270,7 @@ export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = ne
     return Number.isFinite(kickoff) && kickoff >= start && kickoff <= end && hasCompleteCachedResearch(item);
   }).slice(0, 3);
   if (!upcoming.length) return "";
-  return upcoming.map((item, index) => [
-    `${index + 1}. ${formatFixtureDisplay(item.homeTeam, item.awayTeam)}`,
-    `🏆 【聯賽】${formatLeagueDisplay(item.leagueName)}`,
-    formatCachedResearchSource(item),
-    ...formatCachedResearchExtras(item),
-    formatCompactTable(item.compactMarkets, item.topScorelines, { homeWin: item.homeWin, draw: item.draw, awayWin: item.awayWin }),
-  ].filter(Boolean).join("\n")).join("\n\n");
+  return upcoming.map((item, index) => formatCachedResearchCard(item, index + 1)).join("\n\n");
 }
 
 async function telegramUpcoming(): Promise<string> {
@@ -632,25 +676,31 @@ export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedT
     })
     .sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime())[0];
   if (!match) return noRecentFixtureMessage(requestedTeam);
-  return [formatFixtureDisplay(match.homeTeam, match.awayTeam), `🏆 【聯賽】${formatLeagueDisplay(match.leagueName)}`, formatCachedResearchSource(match), formatCompactTable(match.compactMarkets, match.topScorelines, { homeWin: match.homeWin, draw: match.draw, awayWin: match.awayWin })].filter(Boolean).join("\n");
+  return formatCachedResearchCard(match, 1);
 }
 
 export function formatLiveTeamResearch(research: LiveTeamResearch): string {
   const source = research.sourceMode === "team-history" ? "隊伍歷史攻防" : "聯賽平均";
   const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
   const doubleChance = research.doubleChance ?? { oneX: research.outcomes.homeWin + research.outcomes.draw, xTwo: research.outcomes.draw + research.outcomes.awayWin };
-  const highConfidence = research.highConfidence ?? { winner: false, over15: false, over25: false };
-  const confidence = highConfidence.winner || highConfidence.over15 || highConfidence.over25
-    ? "符合研究分層門檻"
-    : "未達研究分層門檻";
+  const total = research.compactMarkets.find(row => row.market === "入球大細 2.5");
+  const over25 = total?.selection.startsWith("大") ? total.probability : total ? 1 - total.probability : null;
+  const under25 = over25 === null ? null : 1 - over25;
   return [
-    formatFixtureDisplay(research.homeTeam, research.awayTeam),
-    `🏆 【聯賽】${formatLeagueDisplay(research.leagueName)}`,
+    `🏆 【聯賽】${localizeLeagueName(research.leagueName)}`,
+    `📅 【時間】${formatHktKickoff(research.kickoffAt)}`,
+    "---",
+    formatLocalizedFixture(research.homeTeam, research.awayTeam),
+    "---",
     `📊 【資料來源】${source}`,
     research.calibrationLabel ? `⚙️ 【校準】${research.calibrationLabel}` : null,
-    `【雙重機率】1X ${percent(doubleChance.oneX)} | X2 ${percent(doubleChance.xTwo)}`,
-    `🔎 【研究分層】${confidence}`,
-    formatCompactTable(research.compactMarkets, research.topScorelines, research.outcomes),
+    `🛡️ 【雙重機率】1X: ${percent(doubleChance.oneX)} | X2: ${percent(doubleChance.xTwo)}`,
+    "⚖️ 【實時讓球盤】暫無可驗證HKJC／亞洲盤口；不以模型讓球代替市場水位。",
+    `🎯 【模型勝率預測】主勝 ${percent(research.outcomes.homeWin)} | 和局 ${percent(research.outcomes.draw)} | 客勝 ${percent(research.outcomes.awayWin)}`,
+    `🔥 【大小球】${over25 === null || under25 === null ? "暫無可驗證2.5盤口" : `大 2.5 (${percent(over25)}) | 小 2.5 (${percent(under25)})`}`,
+    "---",
+    "💡 【最高波膽 Top 3】",
+    ...research.topScorelines.slice(0, 3).map((scoreline, index) => `${index + 1}. ${scoreline.score} —— ${percent(scoreline.probability)}`),
   ].filter(Boolean).join("\n");
 }
 
@@ -1077,11 +1127,17 @@ async function resolveCandidate(request: Request, leagueCode: string, fixtureId:
       ? renderOddsTrend(sameMarketBookmaker.map(snapshot => Number(snapshot.decimalOdds))) ?? undefined
       : `盤口線已由 ${opening?.selection ?? "未知"} 調整至 ${latest.selection}，不以不同線位繪製同一價格走勢。`;
     const anomalySummary = assessMarketAnomaly(sameMarketBookmaker.map(snapshot => ({ selection: snapshot.selection, decimalOdds: Number(snapshot.decimalOdds) })));
+    const sideAndLine = /^(Home|Away)\s+([+-]?\d+(?:\.25|\.5|\.75)?)$/i.exec(latest.selection);
+    const opposite = sideAndLine
+      ? snapshotRows.find(snapshot => snapshot.marketName === definition.source && snapshot.bookmakerId === latest.bookmakerId && new RegExp(`^${sideAndLine[1]!.toLowerCase() === "home" ? "Away" : "Home"}\\s+${sideAndLine[2]!.startsWith("-") ? `\\+${sideAndLine[2]!.slice(1)}` : sideAndLine[2]!.startsWith("+") ? `-${sideAndLine[2]!.slice(1)}` : `-${sideAndLine[2]}`}$`, "i").test(snapshot.selection))
+      : undefined;
     return [{
       marketName: definition.label,
       selection: latest.selection,
       decimalOdds: Number(latest.decimalOdds),
       capturedAt: latest.capturedAt,
+      bookmakerName: latest.bookmakerName,
+      ...(opposite ? { opposingSelection: opposite.selection, opposingOdds: Number(opposite.decimalOdds) } : {}),
       ...(opening && opening.capturedAt.getTime() !== latest.capturedAt.getTime() ? {
         openingSelection: opening.selection,
         openingOdds: Number(opening.decimalOdds),
@@ -1133,37 +1189,30 @@ function formatCandidate(candidate: Candidate): string {
   const homeMean = candidate.prediction.selected_features.dc_expected_home_goals;
   const awayMean = candidate.prediction.selected_features.dc_expected_away_goals;
   const handicap = candidate.marketContext.find(item => item.marketName === "Asian Handicap" && /^(Home|Away)\s+[+-]?\d+(?:\.5)?$/i.test(item.selection));
-  const handicap025 = candidate.marketContext.find(item => item.marketName === "Asian Handicap 0.25");
-  const handicap075 = candidate.marketContext.find(item => item.marketName === "Asian Handicap 0.75");
-  const handicap125 = candidate.marketContext.find(item => item.marketName === "Asian Handicap 1.25");
-  const handicap175 = candidate.marketContext.find(item => item.marketName === "Asian Handicap 1.75");
-  const outcome = highestOutcome(candidate.prediction.probabilities.home_win, candidate.prediction.probabilities.draw, candidate.prediction.probabilities.away_win);
-  const handicapProbability = handicapSelectionProbability(handicap?.selection, homeMean, awayMean);
-  const handicapDistribution = handicapWinDistribution(handicap?.selection, homeMean, awayMean);
-  const handicap025Probability = handicapSelectionProbability(handicap025?.selection, homeMean, awayMean);
-  const handicap075Probability = handicapSelectionProbability(handicap075?.selection, homeMean, awayMean);
-  const handicap125Probability = handicapSelectionProbability(handicap125?.selection, homeMean, awayMean);
-  const handicap175Probability = handicapSelectionProbability(handicap175?.selection, homeMean, awayMean);
-  const handicap025Distribution = handicapWinDistribution(handicap025?.selection, homeMean, awayMean);
-  const handicap075Distribution = handicapWinDistribution(handicap075?.selection, homeMean, awayMean);
-  const handicap125Distribution = handicapWinDistribution(handicap125?.selection, homeMean, awayMean);
-  const handicap175Distribution = handicapWinDistribution(handicap175?.selection, homeMean, awayMean);
-  const rows = [
-    outcome,
-    ...mainstreamTotals(homeMean, awayMean),
-    handicap && handicapProbability !== null && handicapDistribution ? { market: "讓球盤 (Handicap)" as const, selection: handicap.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicapProbability, distribution: handicapDistribution } : null,
-    handicap025 && handicap025Probability !== null && handicap025Distribution ? { market: "亞洲讓球 0.25" as const, selection: handicap025.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap025Probability, distribution: handicap025Distribution } : null,
-    handicap075 && handicap075Probability !== null && handicap075Distribution ? { market: "亞洲讓球 0.75" as const, selection: handicap075.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap075Probability, distribution: handicap075Distribution } : null,
-    handicap125 && handicap125Probability !== null && handicap125Distribution ? { market: "亞洲讓球 1.25" as const, selection: handicap125.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap125Probability, distribution: handicap125Distribution } : null,
-    handicap175 && handicap175Probability !== null && handicap175Distribution ? { market: "亞洲讓球 1.75" as const, selection: handicap175.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap175Probability, distribution: handicap175Distribution } : null,
-  ].filter((item): item is CompactMarketRow => item !== null);
+  const total = mainstreamTotals(homeMean, awayMean).find(row => row.market === "入球大細 2.5");
+  const over25 = total?.selection.startsWith("大") ? total.probability : total ? 1 - total.probability : null;
+  const under25 = over25 === null ? null : 1 - over25;
+  const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
+  const formatSelection = (value: string) => value.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊");
+  const quote = handicap
+    ? `⚖️ 【實時讓球盤】${handicap.bookmakerName || "API-Football"} ${formatSelection(handicap.selection)} (@${handicap.decimalOdds.toFixed(2)})${handicap.opposingSelection && handicap.opposingOdds ? ` / ${formatSelection(handicap.opposingSelection)} (@${handicap.opposingOdds.toFixed(2)})` : ""}`
+    : "⚖️ 【實時讓球盤】暫無可驗證HKJC／亞洲盤口；不以模型讓球代替市場水位。";
+  const scorelines = topScorelines(homeMean, awayMean);
+  const probabilities = candidate.prediction.probabilities;
   return [
-    formatFixtureDisplay(candidate.homeTeam, candidate.awayTeam),
-    formatCompactTable(rows, topScorelines(homeMean, awayMean), {
-      homeWin: candidate.prediction.probabilities.home_win,
-      draw: candidate.prediction.probabilities.draw,
-      awayWin: candidate.prediction.probabilities.away_win,
-    }),
+    `🏆 【聯賽】${localizeLeagueName(RESEARCH_LEAGUE_NAMES[candidate.leagueCode] ?? candidate.leagueCode)}`,
+    `📅 【時間】${formatHktKickoff(candidate.kickoffAt)}`,
+    "---",
+    formatLocalizedFixture(candidate.homeTeam, candidate.awayTeam),
+    "---",
+    "📊 【資料來源】Dixon–Coles 模型 + HDA 賠率融合",
+    `🛡️ 【雙重機率】1X: ${percent(probabilities.home_win + probabilities.draw)} | X2: ${percent(probabilities.draw + probabilities.away_win)}`,
+    quote,
+    `🎯 【模型勝率預測】主勝 ${percent(probabilities.home_win)} | 和局 ${percent(probabilities.draw)} | 客勝 ${percent(probabilities.away_win)}`,
+    `🔥 【大小球】${over25 === null || under25 === null ? "暫無可驗證2.5盤口" : `大 2.5 (${percent(over25)}) | 小 2.5 (${percent(under25)})`}`,
+    "---",
+    "💡 【最高波膽 Top 3】",
+    ...scorelines.slice(0, 3).map((scoreline, index) => `${index + 1}. ${scoreline.score} —— ${percent(scoreline.probability)}`),
   ].join("\n");
 }
 

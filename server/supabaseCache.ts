@@ -26,6 +26,14 @@ export type CachedUpcomingFixture = {
     away: number | null;
     capturedAt: string | null;
   } | null;
+  handicapQuote: {
+    source: string;
+    homeLine: string;
+    homeOdds: number;
+    awayLine: string;
+    awayOdds: number;
+    capturedAt: string | null;
+  } | null;
 };
 
 export type SupabaseUpcomingCache = {
@@ -54,6 +62,57 @@ function normalizeExpectedGoals(value: unknown): number | null {
 function normalizeOdds(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 1 ? parsed : null;
+}
+
+type RawHandicapSelection = {
+  fixtureId: number;
+  source: string;
+  side: "Home" | "Away";
+  line: number;
+  odds: number;
+  capturedAt: string | null;
+};
+
+function parseHandicapSelection(snapshot: Record<string, unknown>): RawHandicapSelection | null {
+  const fixtureId = Number(snapshot.fixture_id);
+  const marketType = typeof snapshot.market_type === "string" ? snapshot.market_type : "";
+  const selection = typeof snapshot.handicap === "string" ? snapshot.handicap.trim() : "";
+  const match = /^(Home|Away)\s+([+-]?\d+(?:\.25|\.5|\.75)?)$/i.exec(selection);
+  const odds = normalizeOdds(snapshot.home_odds) ?? normalizeOdds(snapshot.away_odds);
+  if (!Number.isInteger(fixtureId) || !marketType.startsWith("HDC") || !match || odds === null) return null;
+  return {
+    fixtureId,
+    source: marketType.split("|").slice(1).join("|").trim() || "API-Football",
+    side: match[1]!.toLowerCase() === "home" ? "Home" : "Away",
+    line: Number(match[2]),
+    odds,
+    capturedAt: typeof snapshot.snapshot_time === "string" ? snapshot.snapshot_time : null,
+  };
+}
+
+function formatHandicapLine(value: number): string {
+  return `${value >= 0 ? "+" : ""}${Number.isInteger(value) ? value.toFixed(0) : value.toString()}`;
+}
+
+function pickHandicapQuote(rows: Array<Record<string, unknown>>, fixtureId: number): CachedUpcomingFixture["handicapQuote"] {
+  const selections = rows.flatMap(row => {
+    const parsed = parseHandicapSelection(row);
+    return parsed?.fixtureId === fixtureId ? [parsed] : [];
+  });
+  for (const home of selections.filter(item => item.side === "Home")) {
+    const away = selections.find(item => item.side === "Away" && item.source === home.source && Math.abs(item.line + home.line) < 0.001);
+    if (away) {
+      return {
+        source: home.source,
+        homeLine: formatHandicapLine(home.line),
+        homeOdds: home.odds,
+        awayLine: formatHandicapLine(away.line),
+        awayOdds: away.odds,
+        capturedAt: home.capturedAt,
+      };
+    }
+  }
+  return null;
 }
 
 function parseResearchMetadata(value: unknown) {
@@ -269,6 +328,7 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
         compactMarkets,
         topScorelines: storedScorelines.length === 3 ? storedScorelines : topScorelines(expectedHomeGoals, expectedAwayGoals),
         odds: oddsByFixture.get(fixtureId) ?? null,
+        handicapQuote: pickHandicapQuote(oddsSnapshots, fixtureId),
       }];
     }).sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime());
     const lastSyncAt = fixtures.map(row => typeof row.updated_at === "string" ? row.updated_at : null).filter(Boolean).sort().at(-1) ?? null;
