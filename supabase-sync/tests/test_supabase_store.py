@@ -71,9 +71,6 @@ def test_prediction_mapping_retains_research_label() -> None:
         "data_warning": "勝平負、大小球與BTTS均為未校準Poisson研究值；不可解讀為公平賠率、EV或命中率。",
         "generated_at": "2026-08-14T00:00:00+00:00",
     })
-    assert "[AURELIA_META]" in mapped["recommendation"]
-    assert '"h":1.5' in mapped["recommendation"]
-    assert '"a":0.9' in mapped["recommendation"]
-    assert '"s":"英冠校準"' in mapped["recommendation"]
+    assert "[M]1.5,0.9,CD,0" in mapped["recommendation"]
     assert len(mapped["recommendation"]) <= 50
     assert mapped["confidence"] == 3

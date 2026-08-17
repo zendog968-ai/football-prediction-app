@@ -60,7 +60,21 @@ function parseResearchMetadata(value: unknown) {
   const recommendation = typeof value === "string" ? value : "";
   const marker = "\n[AURELIA_META]";
   const markerIndex = recommendation.indexOf(marker);
-  if (markerIndex < 0) return { recommendation: recommendation || null, metadata: null as Record<string, unknown> | null };
+  if (markerIndex < 0) {
+    const compactMarker = "\n[M]";
+    const compactIndex = recommendation.indexOf(compactMarker);
+    if (compactIndex < 0) return { recommendation: recommendation || null, metadata: null as Record<string, unknown> | null };
+    const [h, a, s, r] = recommendation.slice(compactIndex + compactMarker.length).split(",");
+    const home = Number(h);
+    const away = Number(a);
+    const rho = Number(r);
+    return {
+      recommendation: recommendation.slice(0, compactIndex) || null,
+      metadata: Number.isFinite(home) && Number.isFinite(away)
+        ? { h: home, a: away, s, r: Number.isFinite(rho) ? rho : null }
+        : null,
+    };
+  }
   try {
     return {
       recommendation: recommendation.slice(0, markerIndex) || null,
@@ -194,9 +208,15 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       const sourceCode = typeof metadata?.s === "string" ? metadata.s : null;
       const researchSource = typeof metadata?.research_source === "string"
         ? metadata.research_source
-        : sourceCode === "英冠校準"
+        : sourceCode === "英冠校準" || sourceCode === "CD"
           ? "英冠正式聯賽樣本＋聯賽平均及主場優勢校準"
-          : sourceCode === "隊史" ? "隊伍歷史攻防" : null;
+          : sourceCode === "CE"
+            ? "英冠正式聯賽樣本＋主場優勢校準；HDA去水融合"
+            : sourceCode === "E"
+              ? "Dixon–Coles模型＋HDA去水融合"
+              : sourceCode === "D"
+                ? "Dixon–Coles模型"
+                : sourceCode === "隊史" ? "隊伍歷史攻防" : null;
       const handicap = handicapByFixture.get(fixtureId);
       const handicap025 = handicap025ByFixture.get(fixtureId);
       const handicap075 = handicap075ByFixture.get(fixtureId);

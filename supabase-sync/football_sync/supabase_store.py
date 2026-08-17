@@ -81,21 +81,22 @@ def odds_to_existing_schema(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def prediction_to_existing_schema(row: dict[str, Any]) -> dict[str, Any]:
     championship = "championship" in str(row.get("model_version", ""))
     legacy = str(row.get("model_version", "")).startswith("poisson-")
-    metadata_payload: dict[str, Any] = {
-        "h": row.get("expected_home_goals"),
-        "a": row.get("expected_away_goals"),
-        "s": "英冠校準" if legacy and championship else ("E" if row.get("ensemble_used") else "D"),
-    }
-    if not legacy and row.get("dc_rho") is not None:
-        metadata_payload["r"] = row.get("dc_rho")
-    metadata = json.dumps(metadata_payload, ensure_ascii=False, separators=(",", ":"))
+    source_code = ("C" if championship else "") + ("E" if row.get("ensemble_used") else "D")
+    # ai_predictions.recommendation is varchar(50).  Keep this compact and let the
+    # server cache decode it; historical verbose AURELIA_META remains supported.
+    metadata = ",".join((
+        f"{float(row.get('expected_home_goals') or 0):.3g}",
+        f"{float(row.get('expected_away_goals') or 0):.3g}",
+        source_code,
+        f"{float(row.get('dc_rho') or 0):.3g}",
+    ))
     return {
         "fixture_id": row["api_fixture_id"],
         "home_win_prob": row["home_win_probability"],
         "draw_prob": row["draw_probability"],
         "away_win_prob": row["away_win_probability"],
         "predicted_score": row["most_likely_score"],
-        "recommendation": f"\n[AURELIA_META]{metadata}",
+        "recommendation": f"\n[M]{metadata}",
         "confidence": row["evidence_stars"],
         "updated_at": row["generated_at"],
     }
