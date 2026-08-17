@@ -114,6 +114,8 @@ describe("Telegram系統指令", () => {
     expect(message).not.toContain("入球大細 1.5");
     expect(message).not.toContain("亞洲讓球 0.25");
     expect(message).not.toContain("全贏");
+    expect(message).toContain("【雙重機率】1X 83.0% | X2 38.0%");
+    expect(message).toContain("【研究分層】符合研究分層門檻");
     expect(message).toContain("🎯 【最高波膽 Top 3】");
     expect(message).toContain("1. 2-1 ── 12.0%");
   });

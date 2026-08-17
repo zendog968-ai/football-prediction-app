@@ -168,6 +168,19 @@ function formatCachedResearchSource(item: CachedUpcomingFixture): string | null 
   return item.researchSource ? `📊 【資料來源】${item.researchSource}` : null;
 }
 
+function formatCachedResearchExtras(item: CachedUpcomingFixture): string[] {
+  const oneX = item.homeWin + item.draw;
+  const xTwo = item.draw + item.awayWin;
+  const topWinner = Math.max(item.homeWin, item.awayWin);
+  const total = item.compactMarkets.find(row => row.market === "入球大細 2.5");
+  const over25 = total?.selection.startsWith("大") ? total.probability : total ? 1 - total.probability : 0;
+  const high = topWinner > 0.60 || over25 > 0.75;
+  return [
+    `【雙重機率】1X ${(oneX * 100).toFixed(1)}% | X2 ${(xTwo * 100).toFixed(1)}%`,
+    `🔎 【研究分層】${high ? "符合研究分層門檻" : "未達研究分層門檻"}`,
+  ];
+}
+
 function formatCompactTable(rows: CompactMarketRow[], scorelines: ScorelineProbability[], outcomes: OutcomeSnapshot): string {
   const percent = (value: number) => Number.isFinite(value) && value >= 0 && value <= 1 ? `${(value * 100).toFixed(1)}%` : "暫無可驗證機率";
   const total = rows.find(item => item.market === "入球大細 2.5");
@@ -207,6 +220,7 @@ export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = ne
     `${index + 1}. ${formatFixtureDisplay(item.homeTeam, item.awayTeam)}`,
     `🏆 【聯賽】${formatLeagueDisplay(item.leagueName)}`,
     formatCachedResearchSource(item),
+    ...formatCachedResearchExtras(item),
     formatCompactTable(item.compactMarkets, item.topScorelines, { homeWin: item.homeWin, draw: item.draw, awayWin: item.awayWin }),
   ].filter(Boolean).join("\n")).join("\n\n");
 }
@@ -619,7 +633,21 @@ export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedT
 
 export function formatLiveTeamResearch(research: LiveTeamResearch): string {
   const source = research.sourceMode === "team-history" ? "隊伍歷史攻防" : "聯賽平均";
-  return [formatFixtureDisplay(research.homeTeam, research.awayTeam), `🏆 【聯賽】${formatLeagueDisplay(research.leagueName)}`, `📊 【資料來源】${source}`, research.calibrationLabel ? `⚙️ 【校準】${research.calibrationLabel}` : null, formatCompactTable(research.compactMarkets, research.topScorelines, research.outcomes)].filter(Boolean).join("\n");
+  const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
+  const doubleChance = research.doubleChance ?? { oneX: research.outcomes.homeWin + research.outcomes.draw, xTwo: research.outcomes.draw + research.outcomes.awayWin };
+  const highConfidence = research.highConfidence ?? { winner: false, over15: false, over25: false };
+  const confidence = highConfidence.winner || highConfidence.over15 || highConfidence.over25
+    ? "符合研究分層門檻"
+    : "未達研究分層門檻";
+  return [
+    formatFixtureDisplay(research.homeTeam, research.awayTeam),
+    `🏆 【聯賽】${formatLeagueDisplay(research.leagueName)}`,
+    `📊 【資料來源】${source}`,
+    research.calibrationLabel ? `⚙️ 【校準】${research.calibrationLabel}` : null,
+    `【雙重機率】1X ${percent(doubleChance.oneX)} | X2 ${percent(doubleChance.xTwo)}`,
+    `🔎 【研究分層】${confidence}`,
+    formatCompactTable(research.compactMarkets, research.topScorelines, research.outcomes),
+  ].filter(Boolean).join("\n");
 }
 
 function findUpcomingTeamFixture(fixtures: CachedUpcomingFixture[], requestedTeam: string, now = new Date()): CachedUpcomingFixture | null {
@@ -1114,6 +1142,18 @@ export function hasCompleteDigestCandidate(candidate: Pick<Candidate, "predictio
     && hasTotals && hasHandicap;
 }
 
+function hasHighConfidenceDigestCandidate(candidate: Pick<Candidate, "prediction" | "marketContext">): boolean {
+  const outcomes = candidate.prediction.probabilities;
+  const winner = Math.max(outcomes.home_win, outcomes.away_win) > 0.60;
+  const homeMean = candidate.prediction.selected_features.dc_expected_home_goals;
+  const awayMean = candidate.prediction.selected_features.dc_expected_away_goals;
+  const totals = mainstreamTotals(homeMean, awayMean);
+  const highOver = totals.some(row => (row.market === "入球大細 1.5" || row.market === "入球大細 2.5") && row.selection.startsWith("大") && row.probability > 0.75);
+  const handicap = candidate.marketContext.find(item => item.marketName === "Asian Handicap" && /^(Home|Away)\s+[+-]?\d+(?:\.25|\.5|\.75)?$/i.test(item.selection));
+  const handicapProbability = handicap ? handicapSelectionProbability(handicap.selection, homeMean, awayMean) : null;
+  return winner || (handicapProbability !== null && handicapProbability > 0.60) || highOver;
+}
+
 function modelSettlementRows(candidate: Candidate, digestId: number) {
   const homeMean = candidate.prediction.selected_features.dc_expected_home_goals;
   const awayMean = candidate.prediction.selected_features.dc_expected_away_goals;
@@ -1183,7 +1223,7 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
       // Team naming / individual inference failures are intentionally skipped, not inferred.
     }
   }
-  const selected = selectDailyDigestPicks(candidates.filter(hasCompleteDigestCandidate));
+  const selected = selectDailyDigestPicks(candidates.filter(candidate => hasCompleteDigestCandidate(candidate) && hasHighConfidenceDigestCandidate(candidate)));
   const liveFallback = selected.length > 0 || !apiReady ? [] : (await fetchLiveUpcomingResearch(3).catch(() => [])).filter(hasCompleteLiveResearch);
   await ensureTelegramTeamTranslations([
     ...selected.flatMap(candidate => [candidate.homeTeam, candidate.awayTeam]),

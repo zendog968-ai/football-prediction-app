@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { deriveLivePoissonResearch, fetchLiveTeamResearch, fetchLiveUpcomingResearch, hasCompleteLiveResearch } from "./livePoissonResearch";
+import { deriveLivePoissonResearch, fetchLiveTeamResearch, fetchLiveUpcomingResearch, hasCompleteLiveResearch, hasHighConfidenceLiveResearch } from "./livePoissonResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -26,6 +26,19 @@ describe("即時可驗證Poisson回退", () => {
     expect(result?.sourceMode).toBe("team-history");
     expect(result?.compactMarkets).toHaveLength(10);
     expect(result?.topScorelines).toHaveLength(3);
+    expect(result?.doubleChance.oneX).toBeCloseTo(result!.outcomes.homeWin + result!.outcomes.draw, 8);
+    expect(result?.marketEnsembleUsed).toBe(false);
+  });
+
+  it("在存在完整HDA時以去水後機率進行50/50融合，並以研究門檻篩選候選", () => {
+    const home = [finished(1, 9, 4, 0), finished(8, 1, 0, 3), finished(1, 6, 3, 0)];
+    const away = [finished(2, 7, 0, 1), finished(6, 2, 0, 2), finished(2, 5, 1, 3)];
+    const league = Array.from({ length: 20 }, (_, index) => finished(20 + index, 40 + index, 1 + (index % 2), index % 2));
+    const odds = [{ bookmakers: [{ id: 1, bets: [{ name: "Match Winner", values: [{ value: "Home", odd: "1.70" }, { value: "Draw", odd: "3.80" }, { value: "Away", odd: "5.00" }] }] }] }];
+    const result = deriveLivePoissonResearch(upcoming, home, away, league, odds);
+    expect(result?.marketEnsembleUsed).toBe(true);
+    expect(result?.dcRho).toBeGreaterThanOrEqual(-0.18);
+    expect(result && hasHighConfidenceLiveResearch(result)).toBe(true);
   });
 
   it("在隊伍歷史少於兩場但聯賽平均可驗證時安全使用聯賽平均", () => {
@@ -67,7 +80,7 @@ describe("即時可驗證Poisson回退", () => {
 
   it("英冠布里斯托城即使缺少即時賠率，仍只以真實歷史賽果產出完整基礎Poisson研究", async () => {
     const championshipFixture = {
-      fixture: { id: 1563083, date: "2026-08-16T14:00:00+00:00", status: { short: "NS" } },
+      fixture: { id: 1563083, date: "2026-08-18T14:00:00+00:00", status: { short: "NS" } },
       league: { id: 40, season: 2026, name: "Championship" },
       teams: { home: { id: 55, name: "Bristol City" }, away: { id: 64, name: "Millwall" } },
     };

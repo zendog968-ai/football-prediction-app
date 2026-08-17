@@ -79,12 +79,16 @@ def odds_to_existing_schema(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def prediction_to_existing_schema(row: dict[str, Any]) -> dict[str, Any]:
-    championship = str(row.get("model_version", "")).startswith("poisson-v3-championship")
-    metadata = json.dumps({
+    championship = "championship" in str(row.get("model_version", ""))
+    legacy = str(row.get("model_version", "")).startswith("poisson-")
+    metadata_payload: dict[str, Any] = {
         "h": row.get("expected_home_goals"),
         "a": row.get("expected_away_goals"),
-        "s": "英冠校準" if championship else "隊史",
-    }, ensure_ascii=False, separators=(",", ":"))
+        "s": "英冠校準" if legacy and championship else ("E" if row.get("ensemble_used") else "D"),
+    }
+    if not legacy and row.get("dc_rho") is not None:
+        metadata_payload["r"] = row.get("dc_rho")
+    metadata = json.dumps(metadata_payload, ensure_ascii=False, separators=(",", ":"))
     return {
         "fixture_id": row["api_fixture_id"],
         "home_win_prob": row["home_win_probability"],
@@ -117,3 +121,7 @@ class SupabaseStore:
 
     def upsert_predictions(self, rows: list[dict[str, Any]]) -> None:
         self.client.table("ai_predictions").upsert([prediction_to_existing_schema(row) for row in rows], on_conflict="fixture_id").execute()
+
+    def insert_feature_snapshots(self, rows: list[dict[str, Any]]) -> None:
+        if rows:
+            self.client.table("model_feature_snapshots").insert(rows, returning="minimal").execute()

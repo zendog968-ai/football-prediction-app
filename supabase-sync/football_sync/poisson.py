@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
+from football_sync.model_upgrade import blend_probabilities, dc_tau, de_vig_1x2, estimate_dc_rho, high_confidence_research, rest_days
+
 
 FINISHED_STATUSES = {"FT", "AET", "PEN"}
 MIN_BASIC_HISTORY = 2
@@ -45,6 +47,14 @@ class PoissonPrediction:
     research_lean: str
     evidence_stars: int
     data_warning: str | None
+    dc_rho: float = 0.0
+    market_implied_home: float | None = None
+    market_implied_draw: float | None = None
+    market_implied_away: float | None = None
+    ensemble_used: bool = False
+    double_chance_1x_probability: float | None = None
+    double_chance_x2_probability: float | None = None
+    high_confidence: dict[str, float | str | None] | None = None
 
     def to_row(self) -> dict[str, Any]:
         row = asdict(self)
@@ -102,7 +112,40 @@ def poisson_probability(k: int, mean: float) -> float:
     return math.exp(-mean) * mean**k / math.factorial(k)
 
 
-def predict_fixture(fixture: dict[str, Any], home_history: list[dict[str, Any]], away_history: list[dict[str, Any]], generated_at: datetime, league_history: list[dict[str, Any]] | None = None) -> PoissonPrediction:
+def _market_hda(odds_rows: list[dict[str, Any]] | None) -> tuple[float | None, float | None, float | None]:
+    if not odds_rows:
+        return (None, None, None)
+    grouped: dict[int, dict[str, float]] = {}
+    for row in odds_rows:
+        if row.get("market_code") != "HDA":
+            continue
+        bookmaker = row.get("bookmaker_id")
+        selection = str(row.get("selection") or "").strip().lower()
+        odds = row.get("decimal_odds")
+        if not isinstance(bookmaker, int) or not isinstance(odds, (int, float)):
+            continue
+        values = grouped.setdefault(bookmaker, {})
+        if selection in {"home", "1"}:
+            values["home"] = float(odds)
+        elif selection in {"draw", "x"}:
+            values["draw"] = float(odds)
+        elif selection in {"away", "2"}:
+            values["away"] = float(odds)
+    complete = [values for _, values in sorted(grouped.items()) if {"home", "draw", "away"}.issubset(values)]
+    if not complete:
+        return (None, None, None)
+    selected = complete[0]
+    return (selected["home"], selected["draw"], selected["away"])
+
+
+def predict_fixture(
+    fixture: dict[str, Any],
+    home_history: list[dict[str, Any]],
+    away_history: list[dict[str, Any]],
+    generated_at: datetime,
+    league_history: list[dict[str, Any]] | None = None,
+    odds_rows: list[dict[str, Any]] | None = None,
+) -> PoissonPrediction:
     league_id = fixture.get("league_id")
     season = fixture.get("season")
     if not isinstance(league_id, int) or not isinstance(season, int):
@@ -116,12 +159,20 @@ def predict_fixture(fixture: dict[str, Any], home_history: list[dict[str, Any]],
     away_adjustment = (calibration.away_goals / baseline) if calibration else 1.0
     home_lambda = min(4.5, max(0.2, baseline * (home.goals_for / baseline) * (away.goals_against / baseline) * home_advantage))
     away_lambda = min(4.5, max(0.2, baseline * (away.goals_for / baseline) * (home.goals_against / baseline) * away_adjustment))
-    grid = {(h, a): poisson_probability(h, home_lambda) * poisson_probability(a, away_lambda) for h in range(0, 9) for a in range(0, 9)}
+    dc_history = league_history if league_history is not None else [*home_history, *away_history]
+    rho = estimate_dc_rho(dc_history, home_lambda, away_lambda)
+    grid = {
+        (h, a): max(dc_tau(h, a, home_lambda, away_lambda, rho), 1e-8) * poisson_probability(h, home_lambda) * poisson_probability(a, away_lambda)
+        for h in range(0, 9) for a in range(0, 9)
+    }
     normalizer = sum(grid.values())
     grid = {score: probability / normalizer for score, probability in grid.items()}
-    home_win = sum(probability for (h, a), probability in grid.items() if h > a)
-    draw = sum(probability for (h, a), probability in grid.items() if h == a)
-    away_win = sum(probability for (h, a), probability in grid.items() if h < a)
+    model_home_win = sum(probability for (h, a), probability in grid.items() if h > a)
+    model_draw = sum(probability for (h, a), probability in grid.items() if h == a)
+    model_away_win = sum(probability for (h, a), probability in grid.items() if h < a)
+    home_odds, draw_odds, away_odds = _market_hda(odds_rows)
+    implied = de_vig_1x2(home_odds, draw_odds, away_odds)
+    home_win, draw, away_win = blend_probabilities((model_home_win, model_draw, model_away_win), implied)
     likely_score = max(grid, key=grid.get)
     top_scores = sorted(grid.items(), key=lambda item: item[1], reverse=True)[:3]
     over_2_5 = sum(probability for (h, a), probability in grid.items() if h + a >= 3)
@@ -132,7 +183,11 @@ def predict_fixture(fixture: dict[str, Any], home_history: list[dict[str, Any]],
     # This model is a compact research baseline, not a calibrated market-probability
     # model.  Data availability must never be presented as predictive confidence.
     evidence_stars = 2 if sample >= 6 else 1
-    warnings = ["勝平負、大小球與BTTS均為未校準Poisson研究值；不可解讀為公平賠率、EV或命中率。"]
+    warnings = ["勝平負、大小球與BTTS為未經完整外部校準的Dixon–Coles研究機率，不構成投注或資金建議。"]
+    if implied:
+        warnings.append("1X2已以已驗證HDA快照去水後，與Dixon–Coles模型各50%融合；盤口時間與來源應隨快照變動重新核實。")
+    else:
+        warnings.append("未找到完整驗證HDA快照，未套用賠率融合。")
     if sample < 3:
         warnings.append("基礎Poisson僅使用每隊至少兩場同聯賽同賽季完場資料；輸出僅作低證據研究參考。")
     elif sample < 6:
@@ -141,9 +196,10 @@ def predict_fixture(fixture: dict[str, Any], home_history: list[dict[str, Any]],
         warnings.append("同聯賽賽季近況少於10場；未納入完整主客場、xG、陣容或市場校準。")
     if championship:
         warnings.append("英冠研究僅採用API-Football同聯賽正式賽資料，已排除友誼賽；聯賽平均與主場優勢為基礎校準，並非已驗證的完整校準模型。")
+    high_confidence = high_confidence_research(home_win, draw, away_win, sum(probability for (h, a), probability in grid.items() if h + a >= 2), over_2_5)
     return PoissonPrediction(
         api_fixture_id=fixture["api_fixture_id"],
-        model_version=("poisson-v3-championship-basic-research" if sample < 3 else "poisson-v3-championship-research") if championship else ("poisson-v2-basic-league-research" if sample < 3 else "poisson-v2-league-research"),
+        model_version=("dc-v1-championship-ensemble" if implied else "dc-v1-championship") if championship else ("dc-v1-ensemble" if implied else "dc-v1"),
         generated_at=generated_at.isoformat(),
         home_win_probability=round(home_win, 6),
         draw_probability=round(draw, 6),
@@ -157,4 +213,12 @@ def predict_fixture(fixture: dict[str, Any], home_history: list[dict[str, Any]],
         research_lean=lean,
         evidence_stars=evidence_stars,
         data_warning=" ".join(warnings),
+        dc_rho=round(rho, 4),
+        market_implied_home=round(implied.home, 6) if implied else None,
+        market_implied_draw=round(implied.draw, 6) if implied else None,
+        market_implied_away=round(implied.away, 6) if implied else None,
+        ensemble_used=implied is not None,
+        double_chance_1x_probability=round(home_win + draw, 6),
+        double_chance_x2_probability=round(draw + away_win, 6),
+        high_confidence=high_confidence,
     )

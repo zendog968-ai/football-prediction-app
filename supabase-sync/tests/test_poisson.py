@@ -24,7 +24,7 @@ def test_poisson_prediction_is_normalized_and_research_only() -> None:
     assert prediction.research_lean in {"主隊傾向", "和局傾向", "客隊傾向"}
     assert 1 <= prediction.evidence_stars <= 2
     assert prediction.data_warning is not None
-    assert "未校準Poisson" in prediction.data_warning
+    assert "未經完整外部校準" in prediction.data_warning
     assert len(prediction.top_scorelines) == 3
     assert prediction.top_scorelines[0]["probability"] >= prediction.top_scorelines[1]["probability"]
 
@@ -46,7 +46,7 @@ def test_j1_two_match_basic_history_produces_explicit_low_evidence_poisson() -> 
     ]
     fixture = {"api_fixture_id": 98001, "home_team_id": 1, "away_team_id": 2, "league_id": 98, "season": 2026}
     prediction = predict_fixture(fixture, home_history, away_history, datetime(2026, 8, 15, tzinfo=UTC))
-    assert prediction.model_version == "poisson-v2-basic-league-research"
+    assert prediction.model_version == "dc-v1"
     assert prediction.evidence_stars == 1
     assert prediction.data_warning is not None and "基礎Poisson" in prediction.data_warning
 
@@ -69,7 +69,7 @@ def test_championship_uses_league_matches_and_marks_calibrated_research_scope() 
     ]
     fixture = {"api_fixture_id": 1563083, "home_team_id": 55, "away_team_id": 64, "league_id": 40, "season": 2025}
     prediction = predict_fixture(fixture, home_history, away_history, datetime(2026, 8, 15, tzinfo=UTC), league_history=league_history)
-    assert prediction.model_version == "poisson-v3-championship-basic-research"
+    assert prediction.model_version == "dc-v1-championship"
     assert prediction.expected_home_goals < 2
     assert prediction.data_warning is not None and "已排除友誼賽" in prediction.data_warning
 

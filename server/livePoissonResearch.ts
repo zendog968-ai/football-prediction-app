@@ -1,5 +1,5 @@
 import { ENV } from "./_core/env";
-import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, outcomeProbabilities, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
+import { blendOneXTwo, deVigOneXTwo, dixonColesScoreGrid, doubleChanceProbabilities, handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, outcomeProbabilities, outcomesFromScoreGrid, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
 
 const API_BASE = "https://v3.football.api-sports.io";
 const FINISHED = new Set(["FT", "AET", "PEN"]);
@@ -14,6 +14,7 @@ type ApiFixture = {
 
 type ApiPayload<T> = { response?: T[]; errors?: Record<string, unknown> | unknown[] };
 type ApiTeam = { team?: { id?: number; name?: string } };
+type ApiOdds = { bookmakers?: Array<{ id?: number; bets?: Array<{ name?: string; values?: Array<{ value?: string; odd?: string }> }> }> };
 
 export type LiveTeamResearch = {
   fixtureId: number;
@@ -27,6 +28,10 @@ export type LiveTeamResearch = {
   topScorelines: ScorelineProbability[];
   sourceMode: "team-history" | "league-average";
   calibrationLabel?: string;
+  dcRho: number;
+  marketEnsembleUsed: boolean;
+  doubleChance: { oneX: number; xTwo: number };
+  highConfidence: { winner: boolean; over15: boolean; over25: boolean };
 };
 
 export function hasCompleteLiveResearch(research: LiveTeamResearch): boolean {
@@ -39,6 +44,15 @@ export function hasCompleteLiveResearch(research: LiveTeamResearch): boolean {
     && Boolean(handicap?.selection && validProbability(handicap.probability))
     && research.topScorelines.length >= 3
     && research.topScorelines.slice(0, 3).every(item => Boolean(item.score) && validProbability(item.probability));
+}
+
+export function hasHighConfidenceLiveResearch(research: LiveTeamResearch): boolean {
+  const winner = Math.max(research.outcomes.homeWin, research.outcomes.awayWin) > 0.60;
+  const handicap = research.compactMarkets.find(item => item.market === "讓球盤 (Handicap)")?.probability ?? 0;
+  const over15 = research.compactMarkets.find(item => item.market === "入球大細 1.5");
+  const over25 = research.compactMarkets.find(item => item.market === "入球大細 2.5");
+  const highOver = [over15, over25].some(item => item?.selection.startsWith("大") && item.probability > 0.75);
+  return winner || handicap > 0.60 || highOver;
 }
 
 type TeamGoals = { matches: number; goalsFor: number; goalsAgainst: number };
@@ -111,6 +125,48 @@ function leagueAverage(history: ApiFixture[]): number | null {
   return totals.matches >= 2 ? totals.goals / (2 * totals.matches) : null;
 }
 
+function estimateDixonColesRho(history: ApiFixture[], homeMean: number, awayMean: number): number {
+  const scores = history.flatMap(item => {
+    if (!FINISHED.has(item.fixture?.status?.short ?? "")) return [];
+    const home = item.goals?.home;
+    const away = item.goals?.away;
+    return typeof home === "number" && typeof away === "number" ? [[home, away] as const] : [];
+  });
+  if (scores.length < 20) return 0;
+  const tau = (home: number, away: number, rho: number) => {
+    if (home === 0 && away === 0) return 1 - homeMean * awayMean * rho;
+    if (home === 0 && away === 1) return 1 + homeMean * rho;
+    if (home === 1 && away === 0) return 1 + awayMean * rho;
+    if (home === 1 && away === 1) return 1 - rho;
+    return 1;
+  };
+  const candidates = Array.from({ length: 37 }, (_, index) => -0.18 + index * 0.01);
+  return candidates.reduce((best, rho) => {
+    const likelihood = scores.reduce((total, [home, away]) => total + Math.log(Math.max(tau(home, away, rho), 1e-8)), 0);
+    const bestLikelihood = scores.reduce((total, [home, away]) => total + Math.log(Math.max(tau(home, away, best), 1e-8)), 0);
+    return likelihood > bestLikelihood ? rho : best;
+  }, 0);
+}
+
+function firstHdaOdds(rows: ApiOdds[]): [number | null, number | null, number | null] {
+  for (const response of rows) {
+    for (const bookmaker of response.bookmakers ?? []) {
+      const market = bookmaker.bets?.find(item => item.name === "Match Winner");
+      const values = market?.values ?? [];
+      const lookup = (keys: string[]) => {
+        const raw = values.find(item => keys.includes(String(item.value ?? "").toLowerCase()))?.odd;
+        const odds = raw ? Number(raw) : NaN;
+        return Number.isFinite(odds) && odds > 1 ? odds : null;
+      };
+      const home = lookup(["home", "1"]);
+      const draw = lookup(["draw", "x"]);
+      const away = lookup(["away", "2"]);
+      if (home && draw && away) return [home, draw, away];
+    }
+  }
+  return [null, null, null];
+}
+
 function modelHandicapRows(homeMean: number, awayMean: number, outcomes: { homeWin: number; awayWin: number }): CompactMarketRow[] {
   const side = outcomes.homeWin >= outcomes.awayWin ? "Home" : "Away";
   const sign = side === "Home" ? "-" : "+";
@@ -128,7 +184,7 @@ function modelHandicapRows(homeMean: number, awayMean: number, outcomes: { homeW
   });
 }
 
-export function deriveLivePoissonResearch(fixture: ApiFixture, homeHistory: ApiFixture[], awayHistory: ApiFixture[], leagueHistory: ApiFixture[]): LiveTeamResearch | null {
+export function deriveLivePoissonResearch(fixture: ApiFixture, homeHistory: ApiFixture[], awayHistory: ApiFixture[], leagueHistory: ApiFixture[], oddsRows: ApiOdds[] = []): LiveTeamResearch | null {
   const fixtureId = fixture.fixture?.id;
   const kickoffValue = fixture.fixture?.date;
   const homeId = fixture.teams?.home?.id;
@@ -151,7 +207,12 @@ export function deriveLivePoissonResearch(fixture: ApiFixture, homeHistory: ApiF
   const homeAdvantage = championshipCalibration ? 1.08 : 1.08;
   const homeMean = clampMean(baseline * (homeFor / baseline) * (awayAgainst / baseline) * homeAdvantage);
   const awayMean = clampMean(baseline * (awayFor / baseline) * (homeAgainst / baseline));
-  const outcomes = outcomeProbabilities(homeMean, awayMean);
+  const rho = estimateDixonColesRho(leagueHistory, homeMean, awayMean);
+  const dcGrid = dixonColesScoreGrid(homeMean, awayMean, rho);
+  const modelOutcomes = outcomesFromScoreGrid(dcGrid) ?? outcomeProbabilities(homeMean, awayMean);
+  const [homeOdds, drawOdds, awayOdds] = firstHdaOdds(oddsRows);
+  const implied = deVigOneXTwo(homeOdds, drawOdds, awayOdds);
+  const outcomes = modelOutcomes ? blendOneXTwo(modelOutcomes, implied) : null;
   if (!outcomes) return null;
   const outcome = highestOutcome(outcomes.homeWin, outcomes.draw, outcomes.awayWin);
   return {
@@ -163,9 +224,19 @@ export function deriveLivePoissonResearch(fixture: ApiFixture, homeHistory: ApiF
     awayTeam,
     outcomes,
     compactMarkets: [outcome, ...mainstreamTotals(homeMean, awayMean), ...modelHandicapRows(homeMean, awayMean, outcomes)].filter((row): row is CompactMarketRow => row !== null),
-    topScorelines: topScorelines(homeMean, awayMean),
+    topScorelines: dcGrid.length
+      ? dcGrid.sort((left, right) => right.probability - left.probability).slice(0, 3).map(item => ({ score: `${item.homeGoals}-${item.awayGoals}`, probability: item.probability }))
+      : topScorelines(homeMean, awayMean),
     sourceMode: home.matches >= 2 && away.matches >= 2 ? "team-history" : "league-average",
-    calibrationLabel: championshipCalibration ? "英冠正式聯賽樣本＋聯賽平均及主場優勢校準" : undefined,
+    calibrationLabel: `${championshipCalibration ? "英冠正式聯賽樣本＋主場優勢" : "同聯賽歷史"}＋Dixon–Coles低比分校正${implied ? "＋去水HDA 50/50融合" : ""}`,
+    dcRho: rho,
+    marketEnsembleUsed: implied !== null,
+    doubleChance: doubleChanceProbabilities(outcomes),
+    highConfidence: {
+      winner: Math.max(outcomes.homeWin, outcomes.awayWin) > 0.60,
+      over15: Boolean(mainstreamTotals(homeMean, awayMean).find(item => item.market === "入球大細 1.5" && item.selection.startsWith("大") && item.probability > 0.75)),
+      over25: Boolean(mainstreamTotals(homeMean, awayMean).find(item => item.market === "入球大細 2.5" && item.selection.startsWith("大") && item.probability > 0.75)),
+    },
   };
 }
 
@@ -184,15 +255,19 @@ async function researchForFixture(fixture: ApiFixture): Promise<LiveTeamResearch
   if (!Number.isInteger(homeId) || !Number.isInteger(awayId) || !Number.isInteger(leagueId) || !Number.isInteger(season)) return null;
   const resolvedSeason = Number(season);
   const historySeason = leagueId === 40 && resolvedSeason > 0 ? resolvedSeason - 1 : resolvedSeason;
-  const [rawHomeHistory, rawAwayHistory, rawLeagueHistory] = await Promise.all([
+  const oddsPromise = leagueId === 40
+    ? Promise.resolve([] as ApiOdds[])
+    : apiFootball<ApiOdds>(`/odds?fixture=${fixture.fixture?.id}`).catch(() => []);
+  const [rawHomeHistory, rawAwayHistory, rawLeagueHistory, rawOdds] = await Promise.all([
     leagueId === 40 ? apiFootball<ApiFixture>(`/fixtures?team=${homeId}&league=${leagueId}&season=${historySeason}&timezone=UTC`) : apiFootball<ApiFixture>(`/fixtures?team=${homeId}&last=10&timezone=UTC`),
     leagueId === 40 ? apiFootball<ApiFixture>(`/fixtures?team=${awayId}&league=${leagueId}&season=${historySeason}&timezone=UTC`) : apiFootball<ApiFixture>(`/fixtures?team=${awayId}&last=10&timezone=UTC`),
     leagueId === 40 ? apiFootball<ApiFixture>(`/fixtures?league=${leagueId}&season=${historySeason}&timezone=UTC`) : apiFootball<ApiFixture>(`/fixtures?league=${leagueId}&season=${historySeason}&last=40&timezone=UTC`),
+    oddsPromise,
   ]);
   const homeHistory = leagueId === 40 ? rawHomeHistory.slice(-10) : rawHomeHistory;
   const awayHistory = leagueId === 40 ? rawAwayHistory.slice(-10) : rawAwayHistory;
   const leagueHistory = leagueId === 40 ? rawLeagueHistory.slice(-40) : rawLeagueHistory;
-  return deriveLivePoissonResearch(fixture, homeHistory, awayHistory, leagueHistory);
+  return deriveLivePoissonResearch(fixture, homeHistory, awayHistory, leagueHistory, rawOdds);
 }
 
 export async function fetchLiveTeamResearch(teamName: string): Promise<LiveTeamResearch | null> {
@@ -212,7 +287,7 @@ export async function fetchLiveUpcomingResearch(limit = 3): Promise<LiveTeamRese
   const results: LiveTeamResearch[] = [];
   for (const candidate of candidates.slice(0, Math.max(limit * 5, 15))) {
     const research = await researchForFixture(candidate).catch(() => null);
-    if (research && hasCompleteLiveResearch(research)) results.push(research);
+    if (research && hasCompleteLiveResearch(research) && hasHighConfidenceLiveResearch(research)) results.push(research);
     if (results.length === limit) break;
   }
   return results;
