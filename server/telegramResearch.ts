@@ -12,6 +12,7 @@ import {
   researchScheduleJobs,
   researchSettlements,
   telegramSubscriptions,
+  weeklyModelReports,
 } from "../drizzle/schema";
 import { getDb } from "./db";
 import { ENV } from "./_core/env";
@@ -129,6 +130,7 @@ export const TELEGRAM_HELP_MESSAGE = [
   "",
   "/start — 啟用研究通知。",
   "/status — 查閱訂閱狀態、Heartbeat任務與API剩餘額度。",
+  "/health — 查閱最新模型健康度、樣本規模與特徵缺失狀態。",
   "/trend <fixture ID> 或 /trend 主隊 vs 客隊 — 查詢已保存盤口走勢。",
   "/today — 重新查看今日已送達且資料完整的研究清單；若尚未建立，會生成一次僅供查閱的清單。",
   "/upcoming — 查詢未來24小時所有已同步賽事；完整模型以研究分析、部分資料以【基礎分析】呈現。",
@@ -1338,6 +1340,40 @@ export async function telegramToday(request: Request, rawCommand?: string): Prom
   return created[0]?.content || "今日暫無可驗證未來賽事。";
 }
 
+type ModelHealthSummary = Pick<typeof weeklyModelReports.$inferSelect,
+  "createdAt" | "settledMarkets" | "favorableMarkets" | "winnerMarkets" | "favorableWinnerMarkets" | "featureSnapshots" | "xgMissingSnapshots" | "oddsCoveredSnapshots" | "restMissingSnapshots" | "driftStatus">;
+
+function healthPercent(numerator: number, denominator: number): string {
+  return denominator > 0 ? `${(numerator / denominator * 100).toFixed(1)}%` : "資料不足";
+}
+
+/** Formats the latest persisted weekly report without creating new predictive or settlement data. */
+export function formatModelHealthSummary(report: ModelHealthSummary): string {
+  const status = report.driftStatus === "stable"
+    ? "穩定"
+    : report.driftStatus === "watch"
+      ? "留意"
+      : "樣本不足";
+  return [
+    "🩺 <b>Aurelia 模型健康度</b>",
+    "──────────────────",
+    `【狀態】${status}`,
+    `【已結算市場】${report.settledMarkets} 項｜有利結果 ${healthPercent(report.favorableMarkets, report.settledMarkets)}`,
+    `【主客和研究】${report.winnerMarkets} 項｜有利結果 ${healthPercent(report.favorableWinnerMarkets, report.winnerMarkets)}`,
+    `【特徵快照】${report.featureSnapshots} 筆｜xG缺失 ${healthPercent(report.xgMissingSnapshots, report.featureSnapshots)}`,
+    `【資料覆蓋】去水1X2 ${healthPercent(report.oddsCoveredSnapshots, report.featureSnapshots)}｜休養日缺失 ${healthPercent(report.restMissingSnapshots, report.featureSnapshots)}`,
+    `【更新】${new Date(report.createdAt).toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong", hour12: false })}`,
+    "註：本摘要用於模型與資料品質監測，非投注或資金建議。",
+  ].join("\n");
+}
+
+export async function telegramHealth(): Promise<string> {
+  const db = await getDb();
+  if (!db) throw new Error("模型健康資料暫時無法使用。");
+  const report = (await db.select().from(weeklyModelReports).orderBy(desc(weeklyModelReports.createdAt)).limit(1))[0];
+  return report ? formatModelHealthSummary(report) : "📊 尚未產生模型健康週報。系統會在下一個每週排程後提供健康度摘要。";
+}
+
 function splitAsianLine(line: number): number[] {
   const absolute = Math.abs(line);
   const quarter = Math.round((absolute - Math.floor(absolute)) * 100) / 100;
@@ -1503,6 +1539,8 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     if (result) await sendTelegramMessage(String(chatId), result.text, result.buttons);
   } else if (text === "/status") {
     await sendTelegramMessage(String(chatId), await telegramStatusForChat(String(chatId)));
+  } else if (text === "/health") {
+    await sendTelegramMessage(String(chatId), await telegramHealth());
   } else if (text === "/stop") {
     const existing = (await db.select().from(telegramSubscriptions).where(eq(telegramSubscriptions.chatId, String(chatId))).limit(1))[0];
     if (!existing) {

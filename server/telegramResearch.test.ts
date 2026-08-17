@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatLiveTeamResearch, formatTeamResearch, formatTelegramStatus, hasCompleteDigestCandidate, isAnyLeagueMatch, isKnownTeamAlias, isLeagueMatch, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, todayLeagueFilter, todayLeagueFilters, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatLiveTeamResearch, formatModelHealthSummary, formatTeamResearch, formatTelegramStatus, hasCompleteDigestCandidate, isAnyLeagueMatch, isKnownTeamAlias, isLeagueMatch, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, todayLeagueFilter, todayLeagueFilters, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -45,21 +45,40 @@ describe("Telegram研究排程", () => {
   });
 });
 
-describe("Telegram系統指令", () => {
-  it("/help列出全部可用的訂閱及研究指令", () => {
-    expect(TELEGRAM_HELP_MESSAGE).toContain("/start");
-    expect(TELEGRAM_HELP_MESSAGE).toContain("/status");
-    expect(TELEGRAM_HELP_MESSAGE).toContain("/trend");
+	describe("Telegram系統指令", () => {
+	  it("/help列出全部可用的訂閱及研究指令", () => {
+	    expect(TELEGRAM_HELP_MESSAGE).toContain("/start");
+	    expect(TELEGRAM_HELP_MESSAGE).toContain("/status");
+	    expect(TELEGRAM_HELP_MESSAGE).toContain("/health");
+	    expect(TELEGRAM_HELP_MESSAGE).toContain("/trend");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/today");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/upcoming");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/report");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/team");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/stop");
-    expect(TELEGRAM_HELP_MESSAGE).toContain("/help");
-    expect(TELEGRAM_HELP_MESSAGE).toContain("並非投注或資金建議");
-  });
+	    expect(TELEGRAM_HELP_MESSAGE).toContain("/help");
+	    expect(TELEGRAM_HELP_MESSAGE).toContain("並非投注或資金建議");
+	  });
 
-  it("解析/today聯賽篩選並支援繁中與英文聯賽名稱", () => {
+	  it("以最新週報呈現模型健康、樣本與特徵缺失狀態", () => {
+	    const output = formatModelHealthSummary({
+	      createdAt: new Date("2026-08-17T02:15:00.000Z"),
+	      settledMarkets: 30,
+	      favorableMarkets: 10,
+	      winnerMarkets: 5,
+	      favorableWinnerMarkets: 2,
+	      featureSnapshots: 0,
+	      xgMissingSnapshots: 0,
+	      oddsCoveredSnapshots: 0,
+	      restMissingSnapshots: 0,
+	      driftStatus: "insufficient",
+	    });
+	    expect(output).toContain("【狀態】樣本不足");
+	    expect(output).toContain("【已結算市場】30 項｜有利結果 33.3%");
+	    expect(output).toContain("【特徵快照】0 筆｜xG缺失 資料不足");
+	  });
+
+	  it("解析/today聯賽篩選並支援繁中與英文聯賽名稱", () => {
     expect(todayLeagueFilter("/today 英超")).toBe("英超");
     expect(todayLeagueFilter("/today@AureliaBot Premier League")).toBe("Premier League");
     expect(isLeagueMatch("英超", "Premier League", "39")).toBe(true);

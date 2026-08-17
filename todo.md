@@ -401,3 +401,6 @@
 - [x] 實作可稽核的週報計算、資料表與Telegram摘要格式，涵蓋校準／誤差、命中、特徵缺失及覆蓋變化：新增weekly_model_reports及weekly_model_report_jobs，涵蓋市場結果、主客和結果、xG／HDA／休養資料覆蓋與漂移狀態。
 - [x] 建立受保護的每週Heartbeat排程並向已啟用訂閱者推播週報：Heartbeat NmcPz5KTtGJHGNsgwTaY75已啟用，於每週一10:15香港時間（02:15 UTC）呼叫/api/scheduled/model-drift-weekly。
 - [x] 執行週報端到端驗證、完成測試、建置與發布：首份週報report 1已產生並成功送達1名啟用訂閱者；報告基於上個完整週期的30個已結算市場與5個主客和研究。當期尚未有特徵快照屬正常時間範圍，週報會標示樣本／覆蓋限制而不捏造漂移結論。
+- [x] 核實最新週報與特徵快照資料欄位，定義/health即時健康摘要內容。
+- [x] 實作/health健康狀態、樣本與特徵缺失回覆，並補上回歸測試。
+- [ ] 完成正式Webhook /health測試、建置與發布。
