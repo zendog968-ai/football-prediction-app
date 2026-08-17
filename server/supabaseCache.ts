@@ -3,12 +3,29 @@ import { ENV } from "./_core/env";
 
 type CachedMarketSelection = { selection: string; odds: number | null };
 
+export type CachedTranslation = {
+  nameZhHk: string | null;
+  nameZhTw: string | null;
+};
+
+export type CachedHandicapQuote = {
+  source: string;
+  homeSelection: string;
+  homeOdds: number;
+  awaySelection: string;
+  awayOdds: number;
+  capturedAt: string | null;
+};
+
 export type CachedUpcomingFixture = {
   fixtureId: number;
   leagueName: string;
+  leagueTranslation?: CachedTranslation | null;
   eventTime: string;
   homeTeam: string;
+  homeTeamTranslation?: CachedTranslation | null;
   awayTeam: string;
+  awayTeamTranslation?: CachedTranslation | null;
   homeWin: number;
   draw: number;
   awayWin: number;
@@ -26,6 +43,7 @@ export type CachedUpcomingFixture = {
     away: number | null;
     capturedAt: string | null;
   } | null;
+  handicapQuote?: CachedHandicapQuote | null;
 };
 
 export type SupabaseUpcomingCache = {
@@ -54,6 +72,20 @@ function normalizeExpectedGoals(value: unknown): number | null {
 function normalizeOdds(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 1 ? parsed : null;
+}
+
+function normalizeHandicapLine(value: unknown): number | null {
+  const source = typeof value === "string" ? value : "";
+  const match = source.match(/(Home|Away)?\s*([+-]?\d+(?:\.\d+)?)/i);
+  if (!match) return null;
+  const line = Number(match[2]);
+  return Number.isFinite(line) ? line : null;
+}
+
+function displayHandicapSelection(side: "Home" | "Away", line: number): string {
+  const rounded = Math.round(line * 100) / 100;
+  const display = Number.isInteger(rounded) ? String(rounded) : String(rounded);
+  return `${side} ${rounded > 0 ? "+" : ""}${display}`;
 }
 
 function parseResearchMetadata(value: unknown) {
@@ -119,6 +151,38 @@ async function queryFixtureRelatedRows(select: string, ids: number[]): Promise<A
   return rows.flat();
 }
 
+function recordText(row: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function translationIndex(rows: Array<Record<string, unknown>>, identityKeys: string[]): Map<string, CachedTranslation> {
+  const result = new Map<string, CachedTranslation>();
+  for (const row of rows) {
+    const identity = recordText(row, identityKeys)?.toLocaleLowerCase();
+    if (!identity) continue;
+    const nameZhHk = recordText(row, ["name_zh_hk"]);
+    const nameZhTw = recordText(row, ["name_zh_tw"]);
+    if (!nameZhHk && !nameZhTw) continue;
+    result.set(identity, { nameZhHk, nameZhTw });
+  }
+  return result;
+}
+
+async function queryOptionalTranslationRows(table: string): Promise<Array<Record<string, unknown>>> {
+  if (!/^[a-z_][a-z0-9_]*$/i.test(table)) return [];
+  try {
+    return await queryPagedRows(`${table}?select=*`, 1000, 4);
+  } catch {
+    // Translation is an enhancement only. A missing table, RLS denial, or temporary
+    // Supabase failure must not prevent verified English fixture data from being sent.
+    return [];
+  }
+}
+
 export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseUpcomingCache> {
   if (!force && cache && cache.expiresAt > Date.now()) return cache.payload;
   const loadedAt = new Date().toISOString();
@@ -131,10 +195,14 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       cache = { expiresAt: Date.now() + CACHE_MS, payload };
       return payload;
     }
-    const [predictions, oddsSnapshots] = await Promise.all([
+    const [predictions, oddsSnapshots, teamTranslationRows, leagueTranslationRows] = await Promise.all([
       queryFixtureRelatedRows("ai_predictions?select=fixture_id,home_win_prob,draw_prob,away_win_prob,predicted_score,recommendation,confidence,updated_at", ids),
       queryFixtureRelatedRows("odds_snapshots?select=fixture_id,market_type,handicap,home_odds,draw_odds,away_odds,snapshot_time&order=snapshot_time.desc", ids),
+      queryOptionalTranslationRows(ENV.supabaseTeamTranslationsTable),
+      queryOptionalTranslationRows(ENV.supabaseLeagueTranslationsTable),
     ]);
+    const teamTranslations = translationIndex(teamTranslationRows, ["english_name", "team_name", "name"]);
+    const leagueTranslations = translationIndex(leagueTranslationRows, ["english_name", "league_name", "name"]);
     const byFixture = new Map(predictions.map(row => [Number(row.fixture_id), row]));
     const oddsByFixture = new Map<number, CachedUpcomingFixture["odds"]>();
     const totalsByFixture = new Map<number, CachedMarketSelection>();
@@ -143,6 +211,7 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
     const handicap075ByFixture = new Map<number, CachedMarketSelection>();
     const handicap125ByFixture = new Map<number, CachedMarketSelection>();
     const handicap175ByFixture = new Map<number, CachedMarketSelection>();
+    const handicapQuoteByFixture = new Map<number, CachedHandicapQuote>();
 
     for (const snapshot of oddsSnapshots) {
       const fixtureId = Number(snapshot.fixture_id);
@@ -167,6 +236,21 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       }
       if (marketType.startsWith("HDC") && !handicapByFixture.has(fixtureId) && /^(Home|Away)\s+[+-]?\d+(?:\.5)?$/i.test(selection)) {
         handicapByFixture.set(fixtureId, { selection, odds: selectionOdds });
+      }
+      if ((marketType.startsWith("HDC") || marketType.startsWith("HKJC_HDC")) && !handicapQuoteByFixture.has(fixtureId)) {
+        const line = normalizeHandicapLine(snapshot.handicap);
+        const homeOdds = normalizeOdds(snapshot.home_odds);
+        const awayOdds = normalizeOdds(snapshot.away_odds);
+        if (line !== null && homeOdds !== null && awayOdds !== null) {
+          handicapQuoteByFixture.set(fixtureId, {
+            source: marketType.startsWith("HKJC_HDC") ? "HKJC" : "API-Football Asian Handicap",
+            homeSelection: displayHandicapSelection("Home", line),
+            homeOdds,
+            awaySelection: displayHandicapSelection("Away", -line),
+            awayOdds,
+            capturedAt: typeof snapshot.snapshot_time === "string" ? snapshot.snapshot_time : null,
+          });
+        }
       }
       if (oddsByFixture.has(fixtureId) || !marketType.startsWith("HDA")) continue;
       const home = normalizeOdds(snapshot.home_odds);
@@ -202,13 +286,9 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       const handicap075 = handicap075ByFixture.get(fixtureId);
       const handicap125 = handicap125ByFixture.get(fixtureId);
       const handicap175 = handicap175ByFixture.get(fixtureId);
+      const handicapQuote = handicapQuoteByFixture.get(fixtureId) ?? null;
       const handicapProbability = handicapSelectionProbability(handicap?.selection, expectedHomeGoals, expectedAwayGoals);
       const handicapDistribution = handicapWinDistribution(handicap?.selection, expectedHomeGoals, expectedAwayGoals);
-      const fallbackHandicapSelection = homeWin !== null && awayWin !== null && expectedHomeGoals !== null && expectedAwayGoals !== null
-        ? (homeWin >= awayWin ? "Home -0.5" : "Away +0.5")
-        : null;
-      const fallbackHandicapProbability = handicapSelectionProbability(fallbackHandicapSelection, expectedHomeGoals, expectedAwayGoals);
-      const fallbackHandicapDistribution = handicapWinDistribution(fallbackHandicapSelection, expectedHomeGoals, expectedAwayGoals);
       const handicap025Probability = handicapSelectionProbability(handicap025?.selection, expectedHomeGoals, expectedAwayGoals);
       const handicap075Probability = handicapSelectionProbability(handicap075?.selection, expectedHomeGoals, expectedAwayGoals);
       const handicap125Probability = handicapSelectionProbability(handicap125?.selection, expectedHomeGoals, expectedAwayGoals);
@@ -221,22 +301,26 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       const compactMarkets = [
         outcome,
         ...mainstreamTotals(expectedHomeGoals, expectedAwayGoals),
-        handicapProbability !== null && handicap && handicapDistribution ? { market: "讓球盤 (Handicap)" as const, selection: handicap.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicapProbability, distribution: handicapDistribution } : fallbackHandicapProbability !== null && fallbackHandicapSelection && fallbackHandicapDistribution ? { market: "讓球盤 (Handicap)" as const, selection: `${fallbackHandicapSelection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊")}（模型參考）`, probability: fallbackHandicapProbability, distribution: fallbackHandicapDistribution } : null,
+        handicapProbability !== null && handicap && handicapDistribution ? { market: "讓球盤 (Handicap)" as const, selection: handicap.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicapProbability, distribution: handicapDistribution } : null,
         handicap025Probability !== null && handicap025 && handicap025Distribution ? { market: "亞洲讓球 0.25" as const, selection: handicap025.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap025Probability, distribution: handicap025Distribution } : null,
         handicap075Probability !== null && handicap075 && handicap075Distribution ? { market: "亞洲讓球 0.75" as const, selection: handicap075.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap075Probability, distribution: handicap075Distribution } : null,
         handicap125Probability !== null && handicap125 && handicap125Distribution ? { market: "亞洲讓球 1.25" as const, selection: handicap125.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap125Probability, distribution: handicap125Distribution } : null,
         handicap175Probability !== null && handicap175 && handicap175Distribution ? { market: "亞洲讓球 1.75" as const, selection: handicap175.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap175Probability, distribution: handicap175Distribution } : null,
       ].filter((item): item is CompactMarketRow => item !== null);
       const eventTime = typeof fixture.event_time === "string" ? fixture.event_time : "";
+      const leagueName = typeof fixture.league_name === "string" ? fixture.league_name : "Unknown league";
       const homeTeam = typeof fixture.home_team === "string" ? fixture.home_team : "";
       const awayTeam = typeof fixture.away_team === "string" ? fixture.away_team : "";
       if (!Number.isInteger(fixtureId) || !eventTime || !homeTeam || !awayTeam) return [];
       return [{
         fixtureId,
-        leagueName: typeof fixture.league_name === "string" ? fixture.league_name : "Unknown league",
+        leagueName,
+        leagueTranslation: leagueTranslations.get(leagueName.toLocaleLowerCase()) ?? null,
         eventTime,
         homeTeam,
+        homeTeamTranslation: teamTranslations.get(homeTeam.toLocaleLowerCase()) ?? null,
         awayTeam,
+        awayTeamTranslation: teamTranslations.get(awayTeam.toLocaleLowerCase()) ?? null,
         homeWin: homeWin ?? Number.NaN,
         draw: draw ?? Number.NaN,
         awayWin: awayWin ?? Number.NaN,
@@ -249,6 +333,7 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
         compactMarkets,
         topScorelines: storedScorelines.length === 3 ? storedScorelines : topScorelines(expectedHomeGoals, expectedAwayGoals),
         odds: oddsByFixture.get(fixtureId) ?? null,
+        handicapQuote,
       }];
     }).sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime());
     const lastSyncAt = fixtures.map(row => typeof row.updated_at === "string" ? row.updated_at : null).filter(Boolean).sort().at(-1) ?? null;

@@ -21,9 +21,21 @@ const COUNTRY_NAMES: Record<string, string> = {
   England: "英格蘭", Spain: "西班牙", Italy: "意大利", Germany: "德國", France: "法國", Netherlands: "荷蘭", Portugal: "葡萄牙", Belgium: "比利時", Austria: "奧地利", Scotland: "蘇格蘭", Turkey: "土耳其", Greece: "希臘", Denmark: "丹麥", Norway: "挪威", Sweden: "瑞典", Finland: "芬蘭", Poland: "波蘭", "Czech-Republic": "捷克", Switzerland: "瑞士", Argentina: "阿根廷", Brazil: "巴西", USA: "美國", Mexico: "墨西哥", Japan: "日本", "South-Korea": "南韓", China: "中國", Australia: "澳洲", "Saudi-Arabia": "沙特阿拉伯", "United-Arab-Emirates": "阿聯酋", Qatar: "卡塔爾", World: "國際賽",
 };
 
-export function localizeLeagueName(englishName: string, country?: string | null): string {
+export type TraditionalLeagueFields = {
+  nameZhHk?: string | null;
+  nameZhTw?: string | null;
+};
+
+function nonEmpty(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+export function localizeLeagueName(englishName: string, country?: string | null, translation?: TraditionalLeagueFields): string {
   const original = englishName.trim();
   if (!original) return "未知聯賽";
+  const translated = nonEmpty(translation?.nameZhHk) ?? nonEmpty(translation?.nameZhTw);
+  if (translated) return translated;
   const direct = LEAGUE_NAMES[original];
   if (direct) {
     if (original === "Bundesliga" && country === "Austria") return "奧甲";
@@ -35,7 +47,7 @@ export function localizeLeagueName(englishName: string, country?: string | null)
   return localizedCountry ? `${localizedCountry}｜${original}` : original;
 }
 
-export function formatLeagueDisplay(englishName: string, country?: string | null): string {
-  const traditional = localizeLeagueName(englishName, country);
+export function formatLeagueDisplay(englishName: string, country?: string | null, translation?: TraditionalLeagueFields): string {
+  const traditional = localizeLeagueName(englishName, country, translation);
   return traditional === englishName.trim() ? traditional : `${traditional} (${englishName.trim()})`;
 }

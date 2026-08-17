@@ -3,7 +3,7 @@ import type { Request, Response } from "express";
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { parse as parseCookie } from "cookie";
 import { COOKIE_NAME } from "@shared/const";
-import { formatFixtureDisplay } from "@shared/teamDisplay";
+import { formatFixtureDisplay, formatTranslatedTeamDisplay } from "@shared/teamDisplay";
 import { formatLeagueDisplay } from "@shared/leagueDisplay";
 import {
   oddsSnapshots,
@@ -17,8 +17,9 @@ import { ENV } from "./_core/env";
 import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
 import { sdk } from "./_core/sdk";
 import { getPrediction, getTeams, type PredictionResult } from "./prediction";
-import { getSupabaseUpcomingCache, type CachedUpcomingFixture } from "./supabaseCache";
+import { getSupabaseUpcomingCache, type CachedHandicapQuote, type CachedUpcomingFixture } from "./supabaseCache";
 import { fetchLiveTeamResearch, fetchLiveUpcomingResearch, hasCompleteLiveResearch, type LiveTeamResearch } from "./livePoissonResearch";
+import { getHkjcHandicapQuote } from "./hkjcHandicap";
 import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
 
 export type ResearchWindow = "day" | "evening" | "settlement";
@@ -82,11 +83,16 @@ type TeamResearchResponse = { text: string; buttons?: TelegramInlineButton[] };
 type Candidate = {
   fixtureId: number;
   leagueCode: string;
+  leagueName: string;
+  leagueTranslation?: CachedUpcomingFixture["leagueTranslation"];
   homeTeam: string;
+  homeTeamTranslation?: CachedUpcomingFixture["homeTeamTranslation"];
   awayTeam: string;
+  awayTeamTranslation?: CachedUpcomingFixture["awayTeamTranslation"];
   kickoffAt: Date;
   prediction: PredictionResult;
   marketContext: MarketContext[];
+  handicapQuote?: CachedHandicapQuote | null;
 };
 
 const LEAGUES: Record<string, { apiLeagueId: number; season: number }> = {
@@ -144,16 +150,58 @@ type OutcomeSnapshot = { homeWin: number; draw: number; awayWin: number };
 function hasCompleteCachedResearch(item: CachedUpcomingFixture): boolean {
   const outcomes = [item.homeWin, item.draw, item.awayWin];
   const totals = item.compactMarkets.find(row => row.market === "入球大細 2.5");
-  const handicap = item.compactMarkets.find(row => row.market === "讓球盤 (Handicap)");
+  const quote = item.handicapQuote;
   return outcomes.every(value => Number.isFinite(value) && value >= 0 && value <= 1)
     && Boolean(totals && Number.isFinite(totals.probability))
-    && Boolean(handicap && Number.isFinite(handicap.probability))
+    && Boolean(quote && Number.isFinite(quote.homeOdds) && Number.isFinite(quote.awayOdds))
     && item.topScorelines.length >= 3
     && item.topScorelines.slice(0, 3).every(scoreline => Boolean(scoreline.score) && Number.isFinite(scoreline.probability));
 }
 
-function formatCachedResearchSource(item: CachedUpcomingFixture): string | null {
-  return item.researchSource ? `📊 【資料來源】${item.researchSource}` : null;
+export function formatHktKickoff(value: Date | string): string {
+  const kickoff = new Date(value);
+  if (!Number.isFinite(kickoff.getTime())) return "資料不足";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Hong_Kong",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(kickoff);
+  const field = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? "00";
+  return `${field("year")}-${field("month")}-${field("day")} ${field("hour")}:${field("minute")} (HKT)`;
+}
+
+function displayHandicapQuote(quote: CachedHandicapQuote | null | undefined): string {
+  if (!quote || !Number.isFinite(quote.homeOdds) || !Number.isFinite(quote.awayOdds)) return "⚖️ 【實時讓球盤】資料不足（沒有完整主客兩邊實際盤口）";
+  const source = quote.source === "HKJC" ? "HKJC" : quote.source;
+  return `⚖️ 【實時讓球盤】${source} [${quote.homeSelection} @${quote.homeOdds.toFixed(2)} / ${quote.awaySelection} @${quote.awayOdds.toFixed(2)}]`;
+}
+
+export function formatLocalizedResearchCard(item: Pick<CachedUpcomingFixture, "leagueName" | "leagueTranslation" | "eventTime" | "homeTeam" | "homeTeamTranslation" | "awayTeam" | "awayTeamTranslation" | "homeWin" | "draw" | "awayWin" | "compactMarkets" | "topScorelines" | "handicapQuote">): string {
+  const percent = (value: number) => Number.isFinite(value) && value >= 0 && value <= 1 ? `${(value * 100).toFixed(1)}%` : "資料不足";
+  const total = item.compactMarkets.find(row => row.market === "入球大細 2.5");
+  const over = total && (/^大(?:\s|$)/.test(total.selection) || /^over\b/i.test(total.selection)) ? total.probability : total ? 1 - total.probability : null;
+  const under = total && over !== null ? 1 - over : null;
+  const home = formatTranslatedTeamDisplay(item.homeTeam, item.homeTeamTranslation ?? undefined);
+  const away = formatTranslatedTeamDisplay(item.awayTeam, item.awayTeamTranslation ?? undefined);
+  return [
+    `🏆 【聯賽】${formatLeagueDisplay(item.leagueName, undefined, item.leagueTranslation ?? undefined)}`,
+    `📅 【時間】${formatHktKickoff(item.eventTime)}`,
+    "---",
+    `⚽️ ${home}  vs  ${away}`,
+    "---",
+    "📊 【資料來源】Dixon-Coles 模型 + HDA 賠率融合",
+    `🛡️ 【雙重機率】1X: ${percent(item.homeWin + item.draw)} | X2: ${percent(item.draw + item.awayWin)}`,
+    displayHandicapQuote(item.handicapQuote),
+    `🎯 【模型勝率預測】主勝 ${percent(item.homeWin)} | 和局 ${percent(item.draw)} | 客勝 ${percent(item.awayWin)}`,
+    `🔥 【大小球】${over === null || under === null ? "資料不足" : `大 2.5 (${percent(over)}) | 小 2.5 (${percent(under)})`}`,
+    "---",
+    "💡 【最高波膽 Top 3】",
+    ...[0, 1, 2].map(index => `${index + 1}. ${item.topScorelines[index] ? `${item.topScorelines[index]!.score} —— ${percent(item.topScorelines[index]!.probability)}` : "資料不足"}`),
+  ].join("\n");
 }
 
 function formatCompactTable(rows: CompactMarketRow[], scorelines: ScorelineProbability[], outcomes: OutcomeSnapshot): string {
@@ -176,11 +224,20 @@ function formatCompactTable(rows: CompactMarketRow[], scorelines: ScorelineProba
 
 export function toTelegramHtml(text: string): string {
   const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return escaped
-    .replace("【主客和】", "<b>【主客和】</b>")
-    .replace("【大細球】", "<b>【大細球】</b>")
-    .replace("【讓球盤】", "<b>【讓球盤】</b>")
-    .replace("🎯 【最高波膽 Top 3】", "🎯 <b>【最高波膽 Top 3】</b>");
+  const headings = [
+    "🏆 【聯賽】",
+    "📅 【時間】",
+    "📊 【資料來源】",
+    "🛡️ 【雙重機率】",
+    "⚖️ 【實時讓球盤】",
+    "🎯 【模型勝率預測】",
+    "🔥 【大小球】",
+    "💡 【最高波膽 Top 3】",
+    "【主客和】",
+    "【大細球】",
+    "【讓球盤】",
+  ];
+  return headings.reduce((rendered, heading) => rendered.replace(heading, `<b>${heading}</b>`), escaped);
 }
 
 export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = new Date()): string {
@@ -191,12 +248,7 @@ export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = ne
     return Number.isFinite(kickoff) && kickoff >= start && kickoff <= end && hasCompleteCachedResearch(item);
   }).slice(0, 3);
   if (!upcoming.length) return "";
-  return upcoming.map((item, index) => [
-    `${index + 1}. ${formatFixtureDisplay(item.homeTeam, item.awayTeam)}`,
-    `🏆 【聯賽】${formatLeagueDisplay(item.leagueName)}`,
-    formatCachedResearchSource(item),
-    formatCompactTable(item.compactMarkets, item.topScorelines, { homeWin: item.homeWin, draw: item.draw, awayWin: item.awayWin }),
-  ].filter(Boolean).join("\n")).join("\n\n");
+  return upcoming.map((item, index) => `${index + 1}. ${formatLocalizedResearchCard(item)}`).join("\n\n");
 }
 
 async function telegramUpcoming(): Promise<string> {
@@ -238,6 +290,51 @@ function normalizeTeam(value: string): string {
 function parseLine(value: string): string | null {
   const match = value.match(/([+-]?\d+(?:\.\d+)?)/);
   return match?.[1] ?? null;
+}
+
+type AsianHandicapSnapshot = {
+  marketName: string;
+  selection: string;
+  decimalOdds: string;
+  bookmakerName: string;
+  capturedAt: Date;
+};
+
+function parseAsianHandicapSelection(value: string): { side: "Home" | "Away"; line: number } | null {
+  const match = /^(Home|Away)\s+([+-]?\d+(?:\.\d+)?)$/i.exec(value.trim());
+  if (!match) return null;
+  const line = Number(match[2]);
+  if (!Number.isFinite(line)) return null;
+  return { side: match[1]!.toLocaleLowerCase() === "home" ? "Home" : "Away", line };
+}
+
+function formatAsianHandicapSelection(side: "Home" | "Away", line: number): string {
+  const rounded = Math.round(line * 100) / 100;
+  return `${side} ${rounded > 0 ? "+" : ""}${rounded}`;
+}
+
+function pairedAsianHandicapQuote(rows: AsianHandicapSnapshot[]): CachedHandicapQuote | null {
+  const candidates = rows
+    .filter(row => row.marketName === "Asian Handicap")
+    .map(row => ({ row, parsed: parseAsianHandicapSelection(row.selection), odds: Number(row.decimalOdds) }))
+    .filter((item): item is { row: AsianHandicapSnapshot; parsed: { side: "Home" | "Away"; line: number }; odds: number } => Boolean(item.parsed) && Number.isFinite(item.odds) && item.odds > 1)
+    .sort((left, right) => right.row.capturedAt.getTime() - left.row.capturedAt.getTime());
+  for (const home of candidates.filter(item => item.parsed.side === "Home")) {
+    const away = candidates.find(item => item.parsed.side === "Away"
+      && item.row.bookmakerName === home.row.bookmakerName
+      && item.row.capturedAt.getTime() === home.row.capturedAt.getTime()
+      && Math.abs(item.parsed.line + home.parsed.line) < 0.000001);
+    if (!away) continue;
+    return {
+      source: "API-Football Asian Handicap",
+      homeSelection: formatAsianHandicapSelection("Home", home.parsed.line),
+      homeOdds: home.odds,
+      awaySelection: formatAsianHandicapSelection("Away", away.parsed.line),
+      awayOdds: away.odds,
+      capturedAt: home.row.capturedAt.toISOString(),
+    };
+  }
+  return null;
 }
 
 function hasRelevantMarket(name: string): boolean {
@@ -538,7 +635,7 @@ export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedT
     })
     .sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime())[0];
   if (!match) return noRecentFixtureMessage(requestedTeam);
-  return [formatFixtureDisplay(match.homeTeam, match.awayTeam), `🏆 【聯賽】${formatLeagueDisplay(match.leagueName)}`, formatCachedResearchSource(match), formatCompactTable(match.compactMarkets, match.topScorelines, { homeWin: match.homeWin, draw: match.draw, awayWin: match.awayWin })].filter(Boolean).join("\n");
+  return formatLocalizedResearchCard(match);
 }
 
 export function formatLiveTeamResearch(research: LiveTeamResearch): string {
@@ -891,6 +988,9 @@ async function resolveCandidate(request: Request, leagueCode: string, fixtureId:
     eq(oddsSnapshots.apiFixtureId, fixtureId),
     inArray(oddsSnapshots.marketName, ["Asian Handicap", "Goals Over/Under"]),
   )).orderBy(desc(oddsSnapshots.capturedAt));
+  const cached = await getSupabaseUpcomingCache();
+  const cachedFixture = cached.available ? cached.fixtures.find(item => item.fixtureId === fixtureId) : null;
+  const hkjcHandicapQuote = await getHkjcHandicapQuote(home, away).catch(() => null);
   const marketDefinitions = [
     { source: "Goals Over/Under", label: "Goals Over/Under", accepts: () => true },
     { source: "Asian Handicap", label: "Asian Handicap", accepts: (selection: string) => /^(Home|Away)\s+[+-]?\d+(?:\.5)?$/i.test(selection) },
@@ -925,7 +1025,20 @@ async function resolveCandidate(request: Request, leagueCode: string, fixtureId:
       ...(anomalySummary ? { anomalySummary } : {}),
     }];
   });
-  return { fixtureId, leagueCode, homeTeam: home, awayTeam: away, kickoffAt: details.kickoffAt, prediction, marketContext };
+  return {
+    fixtureId,
+    leagueCode,
+    leagueName: cachedFixture?.leagueName ?? leagueCode,
+    leagueTranslation: cachedFixture?.leagueTranslation ?? null,
+    homeTeam: home,
+    homeTeamTranslation: cachedFixture?.homeTeamTranslation ?? null,
+    awayTeam: away,
+    awayTeamTranslation: cachedFixture?.awayTeamTranslation ?? null,
+    kickoffAt: details.kickoffAt,
+    prediction,
+    marketContext,
+    handicapQuote: hkjcHandicapQuote ?? cachedFixture?.handicapQuote ?? pairedAsianHandicapQuote(snapshotRows),
+  };
 }
 
 export function describeMarketMovement(item: MarketContext): string {
@@ -991,14 +1104,21 @@ function formatCandidate(candidate: Candidate): string {
     handicap125 && handicap125Probability !== null && handicap125Distribution ? { market: "亞洲讓球 1.25" as const, selection: handicap125.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap125Probability, distribution: handicap125Distribution } : null,
     handicap175 && handicap175Probability !== null && handicap175Distribution ? { market: "亞洲讓球 1.75" as const, selection: handicap175.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap175Probability, distribution: handicap175Distribution } : null,
   ].filter((item): item is CompactMarketRow => item !== null);
-  return [
-    formatFixtureDisplay(candidate.homeTeam, candidate.awayTeam),
-    formatCompactTable(rows, topScorelines(homeMean, awayMean), {
-      homeWin: candidate.prediction.probabilities.home_win,
-      draw: candidate.prediction.probabilities.draw,
-      awayWin: candidate.prediction.probabilities.away_win,
-    }),
-  ].join("\n");
+  return formatLocalizedResearchCard({
+    leagueName: candidate.leagueName,
+    leagueTranslation: candidate.leagueTranslation ?? null,
+    eventTime: candidate.kickoffAt.toISOString(),
+    homeTeam: candidate.homeTeam,
+    homeTeamTranslation: candidate.homeTeamTranslation ?? null,
+    awayTeam: candidate.awayTeam,
+    awayTeamTranslation: candidate.awayTeamTranslation ?? null,
+    homeWin: candidate.prediction.probabilities.home_win,
+    draw: candidate.prediction.probabilities.draw,
+    awayWin: candidate.prediction.probabilities.away_win,
+    compactMarkets: rows,
+    topScorelines: topScorelines(homeMean, awayMean),
+    handicapQuote: candidate.handicapQuote ?? null,
+  });
 }
 
 export function rankDailyPicks<T extends Pick<Candidate, "prediction">>(candidates: T[]): T[] {

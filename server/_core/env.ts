@@ -12,4 +12,6 @@ export const ENV = {
   apiFootballKey: process.env.API_FOOTBALL_KEY ?? "",
   supabaseUrl: process.env.SUPABASE_URL ?? "",
   supabaseSecretKey: process.env.SUPABASE_SECRET_KEY ?? "",
+  supabaseTeamTranslationsTable: process.env.SUPABASE_TEAM_TRANSLATIONS_TABLE ?? "team_translations",
+  supabaseLeagueTranslationsTable: process.env.SUPABASE_LEAGUE_TRANSLATIONS_TABLE ?? "league_translations",
 };

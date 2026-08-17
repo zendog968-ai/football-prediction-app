@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatLiveTeamResearch, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatHktKickoff, formatLiveTeamResearch, formatLocalizedResearchCard, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -59,9 +59,12 @@ describe("Telegram系統指令", () => {
     const message = formatCachedUpcoming([{
       fixtureId: 101,
       leagueName: "MLS",
+      leagueTranslation: { nameZhHk: "美職聯", nameZhTw: "美國職業足球大聯盟" },
       eventTime: "2026-08-15T20:00:00Z",
       homeTeam: "Example Home",
+      homeTeamTranslation: { nameZhHk: "示例主隊", nameZhTw: "範例主隊" },
       awayTeam: "Example Away",
+      awayTeamTranslation: { nameZhHk: "示例客隊", nameZhTw: "範例客隊" },
       homeWin: 0.62,
       draw: 0.21,
       awayWin: 0.17,
@@ -84,30 +87,51 @@ describe("Telegram系統指令", () => {
       ],
       topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
       odds: { home: 1.82, draw: 3.55, away: 4.4, capturedAt: "2026-08-15T10:00:00Z" },
+      handicapQuote: { source: "HKJC", homeSelection: "Home -1", homeOdds: 1.91, awaySelection: "Away +1", awayOdds: 1.87, capturedAt: "2026-08-15T10:00:00Z" },
     }], new Date("2026-08-15T00:00:00Z"));
-    expect(message).toContain("Example Home vs Example Away");
-    expect(message).toContain("──────────────────");
-    expect(message).toContain("【主客和】主勝 62.0% | 和 21.0% | 客 17.0%");
-    expect(message).toContain("【大細球】大 2.5 (56.0%) | 小 2.5 (44.0%)");
-    expect(message).toContain("【讓球盤】主隊 -1 贏盤 (47.0%)");
-    expect(message).not.toContain("入球大細 1.5");
-    expect(message).not.toContain("亞洲讓球 0.25");
-    expect(message).not.toContain("全贏");
-    expect(message).toContain("🎯 【最高波膽 Top 3】");
-    expect(message).toContain("1. 2-1 ── 12.0%");
+    expect(message).toContain("🏆 【聯賽】美職聯 (MLS)");
+    expect(message).toContain("📅 【時間】2026-08-16 04:00 (HKT)");
+    expect(message).toContain("⚽️ 示例主隊 (Example Home)  vs  示例客隊 (Example Away)");
+    expect(message).toContain("【雙重機率】1X: 83.0% | X2: 38.0%");
+    expect(message).toContain("【實時讓球盤】HKJC [Home -1 @1.91 / Away +1 @1.87]");
+    expect(message).toContain("【模型勝率預測】主勝 62.0% | 和局 21.0% | 客勝 17.0%");
+    expect(message).toContain("【大小球】大 2.5 (56.0%) | 小 2.5 (44.0%)");
+    expect(message).toContain("💡 【最高波膽 Top 3】");
+    expect(message).toContain("1. 2-1 —— 12.0%");
+  });
+
+  it("嚴格使用香港時區並在翻譯表只有台灣繁中時安全回退", () => {
+    expect(formatHktKickoff("2026-08-15T20:00:00Z")).toBe("2026-08-16 04:00 (HKT)");
+    const card = formatLocalizedResearchCard({
+      leagueName: "Sample League",
+      leagueTranslation: { nameZhHk: null, nameZhTw: "示例聯賽" },
+      eventTime: "2026-08-15T20:00:00Z",
+      homeTeam: "Home FC",
+      homeTeamTranslation: { nameZhHk: null, nameZhTw: "主隊" },
+      awayTeam: "Away FC",
+      awayTeamTranslation: { nameZhHk: "客隊", nameZhTw: "客隊台譯" },
+      homeWin: 0.5, draw: 0.25, awayWin: 0.25,
+      compactMarkets: [{ market: "入球大細 2.5", selection: "Over 2.5", probability: 0.55 }],
+      topScorelines: [{ score: "1-0", probability: 0.2 }, { score: "1-1", probability: 0.18 }, { score: "2-0", probability: 0.14 }],
+      handicapQuote: { source: "API-Football Asian Handicap", homeSelection: "Home -0.5", homeOdds: 1.9, awaySelection: "Away +0.5", awayOdds: 1.94, capturedAt: null },
+    });
+    expect(card).toContain("示例聯賽 (Sample League)");
+    expect(card).toContain("主隊 (Home FC)  vs  客隊 (Away FC)");
+    expect(card).toContain("API-Football Asian Handicap [Home -0.5 @1.90 / Away +0.5 @1.94]");
   });
 
   it("/upcoming跳過缺少勝率、2.5大小球、讓球或Top 3波膽的已同步賽事", () => {
     const base = {
       fixtureId: 202, leagueName: "MLS", eventTime: "2026-08-15T20:00:00Z", homeTeam: "Example Home", awayTeam: "Example Away",
       homeWin: 0.6, draw: 0.22, awayWin: 0.18,
-      compactMarkets: [{ market: "入球大細 2.5", selection: "大 2.5", probability: 0.55 }, { market: "讓球盤 (Handicap)", selection: "主隊 -0.5", probability: 0.6 }],
+      compactMarkets: [{ market: "入球大細 2.5", selection: "大 2.5", probability: 0.55 }],
+      handicapQuote: { source: "API-Football Asian Handicap", homeSelection: "Home -0.5", homeOdds: 1.9, awaySelection: "Away +0.5", awayOdds: 1.92, capturedAt: null },
       topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
     } as never;
     const incomplete = { ...base, fixtureId: 201, homeWin: Number.NaN, topScorelines: [] };
     const text = formatCachedUpcoming([incomplete, base], new Date("2026-08-15T00:00:00Z"));
     expect(text).not.toContain("暫無可驗證");
-    expect(text).toContain("Example Home vs Example Away");
+    expect(text).toContain("⚽️ Example Home  vs  Example Away");
   });
 
   it("在Telegram標題以繁體中文加英文原名顯示已知球隊，未知隊名保留原文", () => {
@@ -128,7 +152,7 @@ describe("Telegram系統指令", () => {
       compactMarkets: [{ market: "主客和 (1X2)", selection: "主勝", probability: 0.61 }],
       topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
     }] as never;
-    expect(formatTeamResearch(fixtures, "曼聯", new Date("2026-08-15T00:00:00Z"))).toContain("曼聯 (Manchester United) vs Example Away");
+    expect(formatTeamResearch(fixtures, "曼聯", new Date("2026-08-15T00:00:00Z"))).toContain("⚽️ 曼聯 (Manchester United)  vs  Example Away");
     expect(formatTeamResearch(fixtures, "不存在的隊", new Date("2026-08-15T00:00:00Z"))).toBe("⚠️ 暫未找到 不存在的隊 的近期賽事資料，請確認隊名或嘗試其他熱門隊伍。");
   });
 

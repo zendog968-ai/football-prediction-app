@@ -16,14 +16,35 @@ const TRADITIONAL_TEAM_NAMES: Record<string, string> = {
 
 const normalizedNames = new Map(Object.entries(TRADITIONAL_TEAM_NAMES).map(([english, chinese]) => [english.trim().toLocaleLowerCase(), chinese]));
 
+export type TraditionalNameFields = {
+  nameZhHk?: string | null;
+  nameZhTw?: string | null;
+};
+
+function nonEmpty(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+export function selectTraditionalName(englishName: string, translation?: TraditionalNameFields): string | null {
+  return nonEmpty(translation?.nameZhHk)
+    ?? nonEmpty(translation?.nameZhTw)
+    ?? normalizedNames.get(englishName.trim().toLocaleLowerCase())
+    ?? null;
+}
+
 export function localizeTeamName(englishName: string): string {
-  return normalizedNames.get(englishName.trim().toLocaleLowerCase()) ?? englishName.trim();
+  return selectTraditionalName(englishName) ?? englishName.trim();
+}
+
+export function formatTranslatedTeamDisplay(englishName: string, translation?: TraditionalNameFields): string {
+  const original = englishName.trim();
+  const traditional = selectTraditionalName(original, translation);
+  return !traditional || traditional === original ? original : `${traditional} (${original})`;
 }
 
 export function formatTeamDisplay(englishName: string): string {
-  const original = englishName.trim();
-  const traditional = localizeTeamName(original);
-  return traditional === original ? original : `${traditional} (${original})`;
+  return formatTranslatedTeamDisplay(englishName);
 }
 
 export function formatFixtureDisplay(homeTeam: string, awayTeam: string): string {
