@@ -918,6 +918,13 @@ export async function deliverAllLeagueCoverageSummary(summary: { fixtures: numbe
   return { recipients: chatIds.length, delivered: results.filter(result => result.status === "fulfilled").length };
 }
 
+/** Sends the weekly research-health report through the same bounded-retry subscription channel. */
+export async function deliverWeeklyModelHealthReport(content: string): Promise<{ recipients: number; delivered: number }> {
+  const chatIds = await getSubscriptionChatIds();
+  const results = await Promise.allSettled(chatIds.map(chatId => sendTelegramMessage(chatId, content)));
+  return { recipients: chatIds.length, delivered: results.filter(result => result.status === "fulfilled").length };
+}
+
 async function fixtureDetails(fixtureId: number): Promise<{ homeTeam: string; awayTeam: string; kickoffAt: Date; status: string; homeGoals: number | null; awayGoals: number | null } | null> {
   const payload = await apiFootball<ApiFootballFixtureResponse>(`/fixtures?id=${fixtureId}`);
   const row = payload.response?.[0];

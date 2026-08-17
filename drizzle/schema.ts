@@ -68,6 +68,44 @@ export const allLeagueSyncJobs = mysqlTable("all_league_sync_jobs", {
   updatedAt: timestamp("updatedAt").defaultNow().notNull().onUpdateNow(),
 });
 
+/** Project-level weekly research report job. The callback finds this row by task UID only. */
+export const weeklyModelReportJobs = mysqlTable("weekly_model_report_jobs", {
+  id: int("id").autoincrement().primaryKey(),
+  scheduleCronTaskUid: varchar("scheduleCronTaskUid", { length: 65 }).unique(),
+  cronExpression: varchar("cronExpression", { length: 64 }).notNull(),
+  isEnabled: boolean("isEnabled").notNull().default(false),
+  lastStartedAt: timestamp("lastStartedAt"),
+  lastCompletedAt: timestamp("lastCompletedAt"),
+  lastReportId: int("lastReportId"),
+  lastError: text("lastError"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull().onUpdateNow(),
+});
+
+/** Immutable weekly model-health reports, including settlement outcomes and feature-coverage drift. */
+export const weeklyModelReports = mysqlTable("weekly_model_reports", {
+  id: int("id").autoincrement().primaryKey(),
+  periodStart: timestamp("periodStart").notNull(),
+  periodEnd: timestamp("periodEnd").notNull(),
+  settledMarkets: int("settledMarkets").notNull().default(0),
+  favorableMarkets: int("favorableMarkets").notNull().default(0),
+  winnerMarkets: int("winnerMarkets").notNull().default(0),
+  favorableWinnerMarkets: int("favorableWinnerMarkets").notNull().default(0),
+  featureSnapshots: int("featureSnapshots").notNull().default(0),
+  xgMissingSnapshots: int("xgMissingSnapshots").notNull().default(0),
+  oddsCoveredSnapshots: int("oddsCoveredSnapshots").notNull().default(0),
+  restMissingSnapshots: int("restMissingSnapshots").notNull().default(0),
+  driftStatus: mysqlEnum("driftStatus", ["insufficient", "stable", "watch"]).notNull().default("insufficient"),
+  content: text("content").notNull(),
+  deliveryStatus: mysqlEnum("deliveryStatus", ["pending", "sent", "partial", "failed"]).notNull().default("pending"),
+  deliveryError: text("deliveryError"),
+  sentAt: timestamp("sentAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, table => [
+  uniqueIndex("weekly_model_report_period_unique").on(table.periodStart, table.periodEnd),
+  index("weekly_model_report_created_idx").on(table.createdAt),
+]);
+
 /** Durable server-generated Traditional Chinese names for clubs absent from the curated dictionary. */
 export const teamNameTranslations = mysqlTable("team_name_translations", {
   id: int("id").autoincrement().primaryKey(),

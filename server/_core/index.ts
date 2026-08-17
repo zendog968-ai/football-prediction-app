@@ -10,6 +10,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { handleScheduledResearch, handleTelegramWebhook } from "../telegramResearch";
 import { handleScheduledAllLeagueSync } from "../allLeagueSync";
+import { handleScheduledWeeklyModelReport } from "../weeklyModelReport";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -49,6 +50,7 @@ async function startServer() {
   app.post("/api/scheduled/research-day", (req, res) => void handleScheduledResearch(req, res, "day_digest"));
   app.post("/api/scheduled/research-evening", (req, res) => void handleScheduledResearch(req, res, "evening_digest"));
   app.post("/api/scheduled/all-league-sync", (req, res) => void handleScheduledAllLeagueSync(req, res));
+  app.post("/api/scheduled/model-drift-weekly", (req, res) => void handleScheduledWeeklyModelReport(req, res));
   // tRPC API
   app.use(
     "/api/trpc",
