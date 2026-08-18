@@ -30,7 +30,7 @@ describe("即時可驗證Poisson回退", () => {
     expect(result?.marketEnsembleUsed).toBe(false);
   });
 
-  it("在存在完整HDA時以去水後機率進行50/50融合，並以研究門檻篩選候選", () => {
+  it("在存在完整HDA時以去水後機率進行50/50融合，模型與市場顯著分歧時降級為審慎研究", () => {
     const home = [finished(1, 9, 4, 0), finished(8, 1, 0, 3), finished(1, 6, 3, 0)];
     const away = [finished(2, 7, 0, 1), finished(6, 2, 0, 2), finished(2, 5, 1, 3)];
     const league = Array.from({ length: 20 }, (_, index) => finished(20 + index, 40 + index, 1 + (index % 2), index % 2));
@@ -38,7 +38,32 @@ describe("即時可驗證Poisson回退", () => {
     const result = deriveLivePoissonResearch(upcoming, home, away, league, odds);
     expect(result?.marketEnsembleUsed).toBe(true);
     expect(result?.dcRho).toBeGreaterThanOrEqual(-0.18);
-    expect(result && hasHighConfidenceLiveResearch(result)).toBe(true);
+    expect(result?.preMatchRisk?.reasons).toContain("模型與去水市場機率存在顯著分歧");
+    expect(result && hasHighConfidenceLiveResearch(result)).toBe(false);
+  });
+
+  it("無審慎風險標記且核心市場機率足夠時仍可通過高信心篩選", () => {
+    const research = {
+      outcomes: { homeWin: 0.66, draw: 0.20, awayWin: 0.14 },
+      compactMarkets: [
+        { market: "讓球盤 (Handicap)", selection: "主隊 -0.5", probability: 0.66 },
+        { market: "入球大細 1.5", selection: "大 1.5", probability: 0.62 },
+        { market: "入球大細 2.5", selection: "大 2.5", probability: 0.55 },
+      ],
+      preMatchRisk: { tier: "standard", reasons: [] },
+    } as never;
+    expect(hasHighConfidenceLiveResearch(research)).toBe(true);
+  });
+
+  it("在小樣本、對手防守高波動與市場分歧並存時降級為審慎研究，不列作高信心推播", () => {
+    const home = [finished(1, 9, 1, 0), finished(8, 1, 0, 1), finished(1, 6, 1, 0), finished(7, 1, 0, 1)];
+    const away = [finished(2, 7, 0, 3), finished(6, 2, 0, 0), finished(2, 5, 1, 3), finished(4, 2, 0, 1)];
+    const league = Array.from({ length: 20 }, (_, index) => finished(20 + index, 40 + index, 1 + (index % 2), index % 2));
+    const odds = [{ bookmakers: [{ id: 1, bets: [{ name: "Match Winner", values: [{ value: "Home", odd: "5.50" }, { value: "Draw", odd: "4.20" }, { value: "Away", odd: "1.50" }] }] }] }];
+    const result = deriveLivePoissonResearch(upcoming, home, away, league, odds);
+    expect(result?.preMatchRisk?.tier).toBe("caution");
+    expect(result?.preMatchRisk?.reasons).toContain("近期正式賽樣本少於5場");
+    expect(result && hasHighConfidenceLiveResearch(result)).toBe(false);
   });
 
   it("在隊伍歷史少於兩場但聯賽平均可驗證時安全使用聯賽平均", () => {

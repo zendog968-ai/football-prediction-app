@@ -32,6 +32,7 @@ export type LiveTeamResearch = {
   marketEnsembleUsed: boolean;
   doubleChance: { oneX: number; xTwo: number };
   highConfidence: { winner: boolean; over15: boolean; over25: boolean };
+  preMatchRisk?: { tier: "standard" | "caution"; reasons: string[] };
 };
 
 export function hasCompleteLiveResearch(research: LiveTeamResearch): boolean {
@@ -47,6 +48,7 @@ export function hasCompleteLiveResearch(research: LiveTeamResearch): boolean {
 }
 
 export function hasHighConfidenceLiveResearch(research: LiveTeamResearch): boolean {
+  if (research.preMatchRisk?.tier === "caution") return false;
   const winner = Math.max(research.outcomes.homeWin, research.outcomes.awayWin) > 0.60;
   const handicap = research.compactMarkets.find(item => item.market === "讓球盤 (Handicap)")?.probability ?? 0;
   const over15 = research.compactMarkets.find(item => item.market === "入球大細 1.5");
@@ -56,6 +58,24 @@ export function hasHighConfidenceLiveResearch(research: LiveTeamResearch): boole
 }
 
 type TeamGoals = { matches: number; goalsFor: number; goalsAgainst: number };
+
+function defensiveVolatility(history: ApiFixture[], teamId: number): { matches: number; highConcessions: number; standardDeviation: number } {
+  const conceded = history.flatMap(item => {
+    if (!FINISHED.has(item.fixture?.status?.short ?? "")) return [];
+    const homeId = item.teams?.home?.id;
+    const awayId = item.teams?.away?.id;
+    const homeGoals = item.goals?.home;
+    const awayGoals = item.goals?.away;
+    if (typeof homeGoals !== "number" || typeof awayGoals !== "number") return [];
+    if (homeId === teamId) return [awayGoals];
+    if (awayId === teamId) return [homeGoals];
+    return [];
+  });
+  if (!conceded.length) return { matches: 0, highConcessions: 0, standardDeviation: 0 };
+  const mean = conceded.reduce((total, item) => total + item, 0) / conceded.length;
+  const variance = conceded.reduce((total, item) => total + (item - mean) ** 2, 0) / conceded.length;
+  return { matches: conceded.length, highConcessions: conceded.filter(item => item >= 3).length, standardDeviation: Math.sqrt(variance) };
+}
 
 function apiErrorCount(payload: ApiPayload<unknown>): number {
   const errors = payload.errors ?? {};
@@ -214,6 +234,18 @@ export function deriveLivePoissonResearch(fixture: ApiFixture, homeHistory: ApiF
   const implied = deVigOneXTwo(homeOdds, drawOdds, awayOdds);
   const outcomes = modelOutcomes ? blendOneXTwo(modelOutcomes, implied) : null;
   if (!outcomes) return null;
+  const homeDefense = defensiveVolatility(homeHistory, resolvedHomeId);
+  const awayDefense = defensiveVolatility(awayHistory, resolvedAwayId);
+  const riskReasons = [
+    home.matches < 5 || away.matches < 5 ? "近期正式賽樣本少於5場" : null,
+    [homeDefense, awayDefense].some(item => item.matches >= 4 && (item.highConcessions >= 2 || item.standardDeviation >= 1.15))
+      ? "至少一隊近期防守失球波動偏高" : null,
+    implied && modelOutcomes && Math.max(
+      Math.abs(modelOutcomes.homeWin - implied.homeWin),
+      Math.abs(modelOutcomes.draw - implied.draw),
+      Math.abs(modelOutcomes.awayWin - implied.awayWin),
+    ) >= 0.12 ? "模型與去水市場機率存在顯著分歧" : null,
+  ].filter((item): item is string => Boolean(item));
   const outcome = highestOutcome(outcomes.homeWin, outcomes.draw, outcomes.awayWin);
   return {
     fixtureId: Number(fixtureId),
@@ -232,6 +264,10 @@ export function deriveLivePoissonResearch(fixture: ApiFixture, homeHistory: ApiF
     dcRho: rho,
     marketEnsembleUsed: implied !== null,
     doubleChance: doubleChanceProbabilities(outcomes),
+    preMatchRisk: {
+      tier: riskReasons.length >= 2 ? "caution" : "standard",
+      reasons: riskReasons,
+    },
     highConfidence: {
       winner: Math.max(outcomes.homeWin, outcomes.awayWin) > 0.60,
       over15: Boolean(mainstreamTotals(homeMean, awayMean).find(item => item.market === "入球大細 1.5" && item.selection.startsWith("大") && item.probability > 0.75)),

@@ -776,6 +776,7 @@ export function formatLiveTeamResearch(research: LiveTeamResearch): string {
     "---",
     `📊 【資料來源】${source}`,
     research.calibrationLabel ? `⚙️ 【校準】${research.calibrationLabel}` : null,
+    research.preMatchRisk?.tier === "caution" ? `⚠️ 【賽前風險】${research.preMatchRisk.reasons.join("；")}；全場低比分訊號不可單獨推定半場和局。` : null,
     `🛡️ 【雙重機率】1X: ${percent(doubleChance.oneX)} | X2: ${percent(doubleChance.xTwo)}`,
     "⚖️ 【實時讓球盤】暫無可驗證HKJC／亞洲盤口；不以模型讓球代替市場水位。",
     `🎯 【模型勝率預測】主勝 ${percent(research.outcomes.homeWin)} | 和局 ${percent(research.outcomes.draw)} | 客勝 ${percent(research.outcomes.awayWin)}`,

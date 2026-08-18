@@ -282,6 +282,7 @@ describe("Telegram研究排程", () => {
     expect(formatLiveTeamResearch({ ...base, sourceMode: "team-history" })).toContain("【資料來源】隊伍歷史攻防");
     expect(formatLiveTeamResearch({ ...base, sourceMode: "league-average" })).toContain("【資料來源】聯賽平均");
     expect(formatLiveTeamResearch({ ...base, sourceMode: "team-history", calibrationLabel: "英冠正式聯賽樣本＋聯賽平均及主場優勢校準" })).toContain("【校準】英冠正式聯賽樣本");
+    expect(formatLiveTeamResearch({ ...base, sourceMode: "team-history", preMatchRisk: { tier: "caution", reasons: ["近期正式賽樣本少於5場"] } })).toContain("全場低比分訊號不可單獨推定半場和局");
   });
 
   it("以Telegram一般HTML文字包裝對齊研究內容並轉義特殊字元", () => {
