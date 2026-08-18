@@ -75,6 +75,12 @@ async function queuePendingTeamTranslation(input: { englishName: string; suggest
   });
 }
 
+/** Explicit administrator test fixture; never used by automated prediction or fixture ingestion. */
+export async function seedPendingTeamTranslationsForTest(): Promise<void> {
+  await queuePendingTeamTranslation({ englishName: "TestFC", suggestedTraditionalName: "測試足球會", source: "test" });
+  await queuePendingTeamTranslation({ englishName: "Demo United", suggestedTraditionalName: "示範聯隊", source: "test" });
+}
+
 export async function approvePendingTeamTranslation(input: { id: number; traditionalName: string; adminChatId: string }): Promise<{ englishName: string; traditionalName: string } | null> {
   const traditionalName = input.traditionalName.trim();
   if (!Number.isInteger(input.id) || input.id <= 0) throw new Error("待審核流水號不正確。");

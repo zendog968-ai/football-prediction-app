@@ -24,7 +24,7 @@ import { getPrediction, getTeams, type PredictionResult } from "./prediction";
 import { getSupabaseUpcomingCache, type CachedUpcomingFixture } from "./supabaseCache";
 import { fetchLiveTeamResearch, fetchLiveUpcomingResearch, hasCompleteLiveResearch, type LiveTeamResearch } from "./livePoissonResearch";
 import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
-import { approvePendingTeamTranslation, ensureTelegramTeamTranslations, listPendingTeamTranslations, listRecentTeamTranslations, overrideTeamTranslation, resetTeamTranslation, undoLastTeamTranslationOverride } from "./teamTranslation";
+import { approvePendingTeamTranslation, ensureTelegramTeamTranslations, listPendingTeamTranslations, listRecentTeamTranslations, overrideTeamTranslation, resetTeamTranslation, seedPendingTeamTranslationsForTest, undoLastTeamTranslationOverride } from "./teamTranslation";
 
 export type ResearchWindow = "day" | "evening" | "settlement";
 export type ScheduleKind = "settlement" | "day_digest" | "evening_digest";
@@ -382,6 +382,7 @@ export function normalizeTelegramCommand(text: string | undefined): string | und
 export function parseDictionaryCommand(rawText: string | undefined):
   | { kind: "list" }
   | { kind: "pending" }
+  | { kind: "seed" }
   | { kind: "set"; englishName: string; traditionalName: string }
   | { kind: "reset"; englishName: string }
   | { kind: "undo"; englishName?: string }
@@ -389,6 +390,7 @@ export function parseDictionaryCommand(rawText: string | undefined):
   const body = rawText?.trim().replace(/^\/dict(?:@[a-z0-9_]+)?\s*/i, "") ?? "";
   if (!body) return { kind: "list" };
   if (/^pending$/i.test(body)) return { kind: "pending" };
+  if (/^seed$/i.test(body)) return { kind: "seed" };
   const undo = /^undo(?:\s+(.+))?$/i.exec(body);
   if (undo) return { kind: "undo", ...(undo[1]?.trim() ? { englishName: undo[1].trim() } : {}) };
   const set = /^set\s+(.+?)\s*=>\s*(.+)$/i.exec(body);
@@ -414,7 +416,11 @@ async function telegramDictionaryForAdmin(chatId: string, rawText: string | unde
   if (!isDictionaryAdmin(chatId)) return "🔒 無權限：此詞典指令僅限系統管理員使用。";
   const command = parseDictionaryCommand(rawText);
   if (command.kind === "invalid") {
-    return "用法：\n/dict\n/dict pending\n/approve 1 國際體育會\n/dict set Atlante FC => 繁中譯名\n/dict reset Atlante FC\n/dict undo\n/dict undo Atlante FC";
+    return "用法：\n/dict\n/dict pending\n/dict seed（建立明確測試待審項目）\n/approve 1 國際體育會\n/dict set Atlante FC => 繁中譯名\n/dict reset Atlante FC\n/dict undo\n/dict undo Atlante FC";
+  }
+  if (command.kind === "seed") {
+    await seedPendingTeamTranslationsForTest();
+    return "🧪 已建立測試待審項目：TestFC、Demo United。\n傳送 /dict pending 查看；以 /approve [ID] [繁中譯名] 批核。";
   }
   if (command.kind === "pending") {
     const pending = await listPendingTeamTranslations();

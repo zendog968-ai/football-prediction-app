@@ -31,6 +31,7 @@ describe("Telegram隊名翻譯回退", () => {
     expect(parseDictionaryCommand("/dict undo")).toEqual({ kind: "undo" });
     expect(parseDictionaryCommand("/dict undo Atlante FC")).toEqual({ kind: "undo", englishName: "Atlante FC" });
     expect(parseDictionaryCommand("/dict pending")).toEqual({ kind: "pending" });
+    expect(parseDictionaryCommand("/dict seed")).toEqual({ kind: "seed" });
     expect(parseDictionaryCommand("/dict modify Atlante FC")).toEqual({ kind: "invalid" });
   });
 
