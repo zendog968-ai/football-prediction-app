@@ -22,6 +22,10 @@ jobs:
   catalog-sync:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
     defaults:
       run:
         working-directory: supabase-sync
@@ -33,11 +37,12 @@ jobs:
           cache: pip
           cache-dependency-path: supabase-sync/requirements.txt
       - run: pip install -r requirements.txt
+      - name: Validate required sync secrets
+        run: |
+          test -n "$API_FOOTBALL_KEY" || { echo "Missing required GitHub Secret: API_FOOTBALL_KEY"; exit 1; }
+          test -n "$SUPABASE_URL" || { echo "Missing required GitHub Secret: SUPABASE_URL"; exit 1; }
+          test -n "$SUPABASE_SECRET_KEY" || { echo "Missing required GitHub Secret: SUPABASE_SECRET_KEY"; exit 1; }
       - name: Sync all licensed daily fixtures with retry
-        env:
-          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY || vars.API_FOOTBALL_KEY }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL || vars.SUPABASE_URL }}
-          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY || vars.SUPABASE_SECRET_KEY }}
         run: |
           set +e
           mode=""
