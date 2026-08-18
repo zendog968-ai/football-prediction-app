@@ -2,13 +2,25 @@ import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, 
 import { ENV } from "./_core/env";
 
 type CachedMarketSelection = { selection: string; odds: number | null };
+export type CachedHandicapQuote = {
+  source: string;
+  homeLine: string;
+  homeOdds: number;
+  awayLine: string;
+  awayOdds: number;
+  capturedAt: string | null;
+};
+type CachedTraditionalTranslation = { nameZhHk: string | null; nameZhTw: string | null };
 
 export type CachedUpcomingFixture = {
   fixtureId: number;
   leagueName: string;
+  leagueTranslation?: CachedTraditionalTranslation;
   eventTime: string;
   homeTeam: string;
+  homeTeamTranslation?: CachedTraditionalTranslation;
   awayTeam: string;
+  awayTeamTranslation?: CachedTraditionalTranslation;
   homeWin: number;
   draw: number;
   awayWin: number;
@@ -26,14 +38,7 @@ export type CachedUpcomingFixture = {
     away: number | null;
     capturedAt: string | null;
   } | null;
-  handicapQuote: {
-    source: string;
-    homeLine: string;
-    homeOdds: number;
-    awayLine: string;
-    awayOdds: number;
-    capturedAt: string | null;
-  } | null;
+  handicapQuote: CachedHandicapQuote | null;
 };
 
 export type SupabaseUpcomingCache = {
@@ -82,7 +87,7 @@ function parseHandicapSelection(snapshot: Record<string, unknown>): RawHandicapS
   if (!Number.isInteger(fixtureId) || !marketType.startsWith("HDC") || !match || odds === null) return null;
   return {
     fixtureId,
-    source: marketType.split("|").slice(1).join("|").trim() || "API-Football",
+    source: marketType.split("|").slice(1).join("|").trim() || "API-Football Asian Handicap",
     side: match[1]!.toLowerCase() === "home" ? "Home" : "Away",
     line: Number(match[2]),
     odds,
@@ -94,7 +99,28 @@ function formatHandicapLine(value: number): string {
   return `${value >= 0 ? "+" : ""}${Number.isInteger(value) ? value.toFixed(0) : value.toString()}`;
 }
 
+function mapTraditionalTranslation(row: Record<string, unknown>): CachedTraditionalTranslation {
+  return {
+    nameZhHk: typeof row.name_zh_hk === "string" ? row.name_zh_hk : null,
+    nameZhTw: typeof row.name_zh_tw === "string" ? row.name_zh_tw : null,
+  };
+}
+
 function pickHandicapQuote(rows: Array<Record<string, unknown>>, fixtureId: number): CachedUpcomingFixture["handicapQuote"] {
+  for (const row of rows) {
+    const parsed = parseHandicapSelection(row);
+    const homeOdds = normalizeOdds(row.home_odds);
+    const awayOdds = normalizeOdds(row.away_odds);
+    if (parsed?.fixtureId !== fixtureId || parsed.side !== "Home" || homeOdds === null || awayOdds === null) continue;
+    return {
+      source: parsed.source,
+      homeLine: formatHandicapLine(parsed.line),
+      homeOdds,
+      awayLine: formatHandicapLine(-parsed.line),
+      awayOdds,
+      capturedAt: parsed.capturedAt,
+    };
+  }
   const selections = rows.flatMap(row => {
     const parsed = parseHandicapSelection(row);
     return parsed?.fixtureId === fixtureId ? [parsed] : [];
@@ -192,6 +218,13 @@ async function queryFixtureRelatedRows(select: string, ids: number[]): Promise<A
   return rows.flat();
 }
 
+async function queryTranslationRows(table: "team_translations" | "league_translations", names: string[]): Promise<Array<Record<string, unknown>>> {
+  const unique = Array.from(new Set(names.map(name => name.trim()).filter(Boolean)));
+  if (!unique.length) return [];
+  const quoted = unique.map(name => `"${name.replace(/"/g, "\\\"")}"`).join(",");
+  return queryRows(`${table}?select=english_name,name_zh_hk,name_zh_tw&english_name=in.(${quoted})`);
+}
+
 export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseUpcomingCache> {
   if (!force && cache && cache.expiresAt > Date.now()) return cache.payload;
   const loadedAt = new Date().toISOString();
@@ -204,10 +237,16 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       cache = { expiresAt: Date.now() + CACHE_MS, payload };
       return payload;
     }
-    const [predictions, oddsSnapshots] = await Promise.all([
+    const teamNames = fixtures.flatMap(fixture => [String(fixture.home_team ?? ""), String(fixture.away_team ?? "")]);
+    const leagueNames = fixtures.map(fixture => String(fixture.league_name ?? ""));
+    const [predictions, oddsSnapshots, teamTranslations, leagueTranslations] = await Promise.all([
       queryFixtureRelatedRows("ai_predictions?select=fixture_id,home_win_prob,draw_prob,away_win_prob,predicted_score,recommendation,confidence,updated_at", ids),
       queryFixtureRelatedRows("odds_snapshots?select=fixture_id,market_type,handicap,home_odds,draw_odds,away_odds,snapshot_time&order=snapshot_time.desc", ids),
+      queryTranslationRows("team_translations", teamNames),
+      queryTranslationRows("league_translations", leagueNames),
     ]);
+    const teamTranslationByName = new Map(teamTranslations.map(row => [String(row.english_name), mapTraditionalTranslation(row)]));
+    const leagueTranslationByName = new Map(leagueTranslations.map(row => [String(row.english_name), mapTraditionalTranslation(row)]));
     const byFixture = new Map(predictions.map(row => [Number(row.fixture_id), row]));
     const oddsByFixture = new Map<number, CachedUpcomingFixture["odds"]>();
     const totalsByFixture = new Map<number, CachedMarketSelection>();
@@ -313,9 +352,12 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       return [{
         fixtureId,
         leagueName: typeof fixture.league_name === "string" ? fixture.league_name : "Unknown league",
+        leagueTranslation: leagueTranslationByName.get(String(fixture.league_name)),
         eventTime,
         homeTeam,
+        homeTeamTranslation: teamTranslationByName.get(homeTeam),
         awayTeam,
+        awayTeamTranslation: teamTranslationByName.get(awayTeam),
         homeWin: homeWin ?? Number.NaN,
         draw: draw ?? Number.NaN,
         awayWin: awayWin ?? Number.NaN,

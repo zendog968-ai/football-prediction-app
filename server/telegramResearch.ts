@@ -141,6 +141,7 @@ export const TELEGRAM_HELP_MESSAGE = [
   "/today — 重新查看今日已送達且資料完整的研究清單；若尚未建立，會生成一次僅供查閱的清單。",
   "/upcoming — 查詢未來24小時所有已同步賽事；完整模型以研究分析、部分資料以【基礎分析】呈現。",
   "/report — 顯示最新24小時賽事摘要（與/upcoming相同）。",
+  "/predict <主隊> vs <客隊>、/predict <隊伍名稱> 或 /predict <fixture ID> — 查詢賽前詳細研究：勝和負機率、近期勝率、Elo、預期入球及風險限制。",
   "/team <隊伍名稱> — 查詢該隊最近一場已同步賽事的極簡機率表格與Top 3波膽。",
   "/dict — 管理員查看詞典；/dict pending 查閱待審音譯，/approve <ID> <繁中譯名> 批核。亦可用 /dict set、reset、undo 管理已存詞典。",
   "/inbound — 管理員查閱近期Telegram入站指令接收與處理狀態（不保存訊息內容）。",
@@ -718,6 +719,24 @@ export function parseTeamRequest(text: string | undefined): string | null {
   return team.length >= 2 && team.length <= 120 ? team : null;
 }
 
+export type PredictRequest =
+  | { kind: "fixture"; fixtureId: number }
+  | { kind: "pair"; homeTeam: string; awayTeam: string }
+  | { kind: "team"; team: string }
+  | { kind: "invalid" };
+
+export function parsePredictRequest(text: string | undefined): PredictRequest {
+  const body = text?.trim().replace(/^\/predict(?:@[a-z0-9_]+)?\s*/i, "") || "";
+  if (!body) return { kind: "invalid" };
+  if (/^\d+$/.test(body)) {
+    const fixtureId = Number(body);
+    return Number.isSafeInteger(fixtureId) && fixtureId > 0 ? { kind: "fixture", fixtureId } : { kind: "invalid" };
+  }
+  const pair = body.split(/\s+(?:vs|v)\.?\s+/i).map(part => part.trim()).filter(Boolean);
+  if (pair.length === 2 && pair.every(team => team.length >= 2 && team.length <= 120)) return { kind: "pair", homeTeam: pair[0]!, awayTeam: pair[1]! };
+  return body.length >= 2 && body.length <= 120 ? { kind: "team", team: body } : { kind: "invalid" };
+}
+
 function resolvedAliasTarget(value: string): string | null {
   const normalized = normalizeTeam(value);
   const exact = Object.entries(TEAM_QUERY_ALIASES).find(([alias]) => normalizeTeam(alias) === normalized)?.[1];
@@ -849,6 +868,65 @@ async function telegramTeamResearch(request: Request, text: string | undefined):
   return suggestions.length > 0
     ? { text: "請選擇相近隊伍", buttons: suggestions.map(item => ({ text: formatFixtureDisplay(item.homeTeam, item.awayTeam), callback_data: `team:${item.fixtureId}` })) }
     : { text: noRecentFixtureMessage(requestedTeam) };
+}
+
+function findPredictFixture(fixtures: CachedUpcomingFixture[], query: PredictRequest, now = new Date()): CachedUpcomingFixture | null {
+  const upcoming = fixtures.filter(item => new Date(item.eventTime).getTime() >= now.getTime());
+  if (query.kind === "fixture") return upcoming.find(item => item.fixtureId === query.fixtureId) ?? null;
+  if (query.kind === "team") return findUpcomingTeamFixture(upcoming, query.team, now);
+  if (query.kind === "pair") {
+    const home = normalizedTeamQuery(query.homeTeam);
+    const away = normalizedTeamQuery(query.awayTeam);
+    return upcoming.find(item => normalizeTeam(item.homeTeam) === home && normalizeTeam(item.awayTeam) === away)
+      ?? upcoming.find(item => normalizeTeam(item.homeTeam).includes(home) && normalizeTeam(item.awayTeam).includes(away))
+      ?? null;
+  }
+  return null;
+}
+
+export function formatPredictResearch(candidate: Candidate): string {
+  const prediction = candidate.prediction;
+  const features = prediction.selected_features;
+  const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
+  const goals = (value: number | null) => value === null || !Number.isFinite(value) ? "資料待補" : value.toFixed(2);
+  const risk = prediction.lean.risk_level === "low" ? "較低" : prediction.lean.risk_level === "medium" ? "中等" : "較高";
+  return [
+    "🔮 【詳細賽前研究】",
+    formatCandidate(candidate),
+    "---",
+    "📈 【近期數據比較】",
+    `近5場勝率：${formatTeamDisplay(candidate.homeTeam)} ${percent(features.home_recent5_win_rate)} ｜ ${formatTeamDisplay(candidate.awayTeam)} ${percent(features.away_recent5_win_rate)}`,
+    `動態Elo：${formatTeamDisplay(candidate.homeTeam)} ${features.home_elo_pre.toFixed(0)} ｜ ${formatTeamDisplay(candidate.awayTeam)} ${features.away_elo_pre.toFixed(0)}（主客差 ${features.elo_diff_pre >= 0 ? "+" : ""}${features.elo_diff_pre.toFixed(0)}）`,
+    `Dixon–Coles預期入球：主 ${goals(features.dc_expected_home_goals)} ｜ 客 ${goals(features.dc_expected_away_goals)}`,
+    `歷史資料：${prediction.diagnostics.historical_matches_used} 場；Dixon–Coles樣本 ${prediction.diagnostics.dc_history_match_count} 場；截止 ${prediction.prediction_as_of.slice(0, 10)}`,
+    "---",
+    `🧭 【研究傾向】${prediction.lean.label}（${percent(prediction.lean.probability)}｜風險${risk}）`,
+    ...prediction.lean.reasons.slice(0, 3).map(reason => `• ${reason}`),
+    ...(prediction.lean.limitations.length ? ["⚠️ 【資料限制】", ...prediction.lean.limitations.slice(0, 3).map(limitation => `• ${limitation}`)] : []),
+    "所有內容只供模型與戰術研究，並非投注或資金建議。",
+  ].join("\n");
+}
+
+async function telegramPredict(request: Request, text: string | undefined): Promise<TeamResearchResponse> {
+  const query = parsePredictRequest(text);
+  if (query.kind === "invalid") return { text: "用法：/predict 主隊 vs 客隊\n或：/predict 隊伍名稱\n或：/predict fixture ID" };
+  const cached = await getSupabaseUpcomingCache();
+  const fixture = cached.available ? findPredictFixture(cached.fixtures, query) : null;
+  if (fixture) {
+    await ensureTelegramTeamTranslations([fixture.homeTeam, fixture.awayTeam]);
+    const db = await getDb();
+    const latestSnapshot = db ? (await db.select({ leagueCode: oddsSnapshots.leagueCode }).from(oddsSnapshots)
+      .where(eq(oddsSnapshots.apiFixtureId, fixture.fixtureId)).orderBy(desc(oddsSnapshots.capturedAt)).limit(1))[0] : null;
+    const candidate = latestSnapshot?.leagueCode && LEAGUES[latestSnapshot.leagueCode]
+      ? await resolveCandidate(request, latestSnapshot.leagueCode, fixture.fixtureId).catch(() => null)
+      : null;
+    return { text: candidate ? formatPredictResearch(candidate) : `🔮 【詳細賽前研究】\n${formatCachedResearchCard(fixture, 1)}\n\n⚠️ 詳細近期特徵暫未載入；以下為已同步研究卡。\n所有內容只供模型與戰術研究，並非投注或資金建議。` };
+  }
+  if (query.kind === "team") {
+    const live = await fetchLiveTeamResearch(normalizedTeamQuery(query.team)).catch(() => null);
+    if (live) return { text: `🔮 【詳細賽前研究】\n${formatLiveTeamResearch(live)}\n\n⚠️ 即時回退研究未必包含完整Elo及近5場特徵；請以資料來源標示為準。` };
+  }
+  return { text: "⚠️ 未找到符合條件的未來已同步賽事。請使用完整隊名、`主隊 vs 客隊`或fixture ID。" };
 }
 
 async function telegramNaturalLanguageTeamResearch(request: Request, text: string | undefined): Promise<TeamResearchResponse | null> {
@@ -1860,6 +1938,9 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     await sendTelegramMessage(String(chatId), await telegramToday(req, message?.text));
   } else if (text === "/upcoming" || text === "/report") {
     await sendTelegramMessage(String(chatId), await telegramUpcoming());
+  } else if (text === "/predict") {
+    const result = await telegramPredict(req, message?.text);
+    await sendTelegramMessage(String(chatId), result.text, result.buttons);
   } else if (text === "/team") {
     const result = await telegramTeamResearch(req, message?.text);
     await sendTelegramMessage(String(chatId), result.text, result.buttons);

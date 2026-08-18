@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatJobsStatus, formatLiveTeamResearch, formatModelHealthSummary, formatPreviousDayDeliveryReceipt, formatTeamResearch, formatTelegramStatus, hasCompleteDigestCandidate, isAnyLeagueMatch, isKnownTeamAlias, isLeagueMatch, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, todayLeagueFilter, todayLeagueFilters, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatJobsStatus, formatLiveTeamResearch, formatModelHealthSummary, formatPredictResearch, formatPreviousDayDeliveryReceipt, formatTeamResearch, formatTelegramStatus, hasCompleteDigestCandidate, isAnyLeagueMatch, isKnownTeamAlias, isLeagueMatch, normalizeTelegramCommand, parsePredictRequest, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, todayLeagueFilter, todayLeagueFilters, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -55,6 +55,7 @@ describe("Telegram研究排程", () => {
     expect(TELEGRAM_HELP_MESSAGE).toContain("/today");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/upcoming");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/report");
+    expect(TELEGRAM_HELP_MESSAGE).toContain("/predict");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/team");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/stop");
 	    expect(TELEGRAM_HELP_MESSAGE).toContain("/help");
@@ -213,6 +214,36 @@ describe("Telegram研究排程", () => {
     }] as never;
     expect(formatTeamResearch(fixtures, "曼聯", new Date("2026-08-15T00:00:00Z"))).toContain("【曼聯 (Manchester United)】  vs  【Example Away】");
     expect(formatTeamResearch(fixtures, "不存在的隊", new Date("2026-08-15T00:00:00Z"))).toBe("⚠️ 暫未找到 不存在的隊 的近期賽事資料，請確認隊名或嘗試其他熱門隊伍。");
+  });
+
+  it("解析/predict的fixture ID、對陣與單隊輸入，並拒絕空白指令", () => {
+    expect(parsePredictRequest("/predict 1492335")).toEqual({ kind: "fixture", fixtureId: 1492335 });
+    expect(parsePredictRequest("/predict 曼聯 vs 阿仙奴")).toEqual({ kind: "pair", homeTeam: "曼聯", awayTeam: "阿仙奴" });
+    expect(parsePredictRequest("/predict 國際米蘭")).toEqual({ kind: "team", team: "國際米蘭" });
+    expect(parsePredictRequest("/predict")).toEqual({ kind: "invalid" });
+  });
+
+  it("詳細/predict研究呈現近期勝率、Elo、預期入球、研究風險與限制", () => {
+    const output = formatPredictResearch({
+      fixtureId: 123,
+      leagueCode: "EPL",
+      homeTeam: "Manchester United",
+      awayTeam: "Arsenal",
+      kickoffAt: new Date("2026-08-20T12:00:00Z"),
+      marketContext: [],
+      prediction: {
+        prediction_as_of: "2026-08-18T00:00:00Z",
+        probabilities: { home_win: 0.46, draw: 0.28, away_win: 0.26 },
+        diagnostics: { historical_matches_used: 100, latest_historical_match: "2026-08-17", dc_history_match_count: 42, dc_available: true },
+        selected_features: { home_elo_pre: 1710, away_elo_pre: 1680, elo_diff_pre: 30, home_recent5_win_rate: 0.6, away_recent5_win_rate: 0.4, dc_expected_home_goals: 1.45, dc_expected_away_goals: 1.1 },
+        lean: { outcome: "home_win", label: "主隊傾向", team: "Manchester United", probability: 0.46, risk_level: "medium", reasons: ["主場Elo優勢"], limitations: ["市場資料有限"] },
+      },
+    } as never);
+    expect(output).toContain("【近期數據比較】");
+    expect(output).toContain("動態Elo");
+    expect(output).toContain("Dixon–Coles預期入球");
+    expect(output).toContain("【研究傾向】主隊傾向");
+    expect(output).toContain("【資料限制】");
   });
 
   it("支援主要聯賽的常用繁體中文隊名別名，不將無關簡稱模糊命中", () => {

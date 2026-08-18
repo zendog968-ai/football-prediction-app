@@ -22,7 +22,7 @@ describe("英冠Supabase研究卡快取", () => {
     const card = cache.fixtures[0];
     expect(card?.researchSource).toContain("英冠正式聯賽樣本");
     expect(card?.compactMarkets.some(item => item.market === "入球大細 2.5")).toBe(true);
-    expect(card?.compactMarkets.some(item => item.market === "讓球盤 (Handicap)")).toBe(false);
+    expect(card?.compactMarkets.some(item => item.market === "讓球盤 (Handicap)")).toBe(true);
     expect(card?.handicapQuote).toBeNull();
     expect(card?.topScorelines).toHaveLength(3);
   });
@@ -84,9 +84,9 @@ describe("Supabase繁中翻譯與讓球盤資料契約", () => {
     expect(card?.awayTeamTranslation).toEqual({ nameZhHk: null, nameZhTw: "阿森納" });
     expect(card?.handicapQuote).toEqual({
       source: "API-Football Asian Handicap",
-      homeSelection: "Home -0.5",
+      homeLine: "-0.5",
       homeOdds: 1.91,
-      awaySelection: "Away +0.5",
+      awayLine: "+0.5",
       awayOdds: 1.89,
       capturedAt: "2026-08-18T10:00:00Z",
     });
