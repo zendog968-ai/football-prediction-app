@@ -23,7 +23,7 @@ import { sdk } from "./_core/sdk";
 import { getPrediction, getTeams, type PredictionResult } from "./prediction";
 import { getSupabaseUpcomingCache, type CachedUpcomingFixture } from "./supabaseCache";
 import { fetchLiveTeamResearch, fetchLiveUpcomingResearch, hasCompleteLiveResearch, type LiveTeamResearch } from "./livePoissonResearch";
-import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
+import { deVigOneXTwo, expectedValue, handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, totalSelectionProbability, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
 import { approvePendingTeamTranslation, ensureTelegramTeamTranslations, listPendingTeamTranslations, listRecentTeamTranslations, overrideTeamTranslation, resetTeamTranslation, seedPendingTeamTranslationsForTest, undoLastTeamTranslationOverride } from "./teamTranslation";
 
 export type ResearchWindow = "day" | "evening" | "settlement";
@@ -96,6 +96,18 @@ type Candidate = {
   prediction: PredictionResult;
   marketContext: MarketContext[];
 };
+
+type DynamicEvLine = {
+  selection: string;
+  decimalOdds: number;
+  modelProbability: number;
+  marketProbability: number | null;
+  expectedValue: number;
+  capturedAt: Date;
+  bookmakerName: string | null;
+};
+
+const EV_SNAPSHOT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 const LEAGUES: Record<string, { apiLeagueId: number; season: number }> = {
   BRA1: { apiLeagueId: 71, season: 2026 },
@@ -905,11 +917,91 @@ export function formatPredictResearch(candidate: Candidate): string {
     `動態Elo：${formatTeamDisplay(candidate.homeTeam)} ${features.home_elo_pre.toFixed(0)} ｜ ${formatTeamDisplay(candidate.awayTeam)} ${features.away_elo_pre.toFixed(0)}（主客差 ${features.elo_diff_pre >= 0 ? "+" : ""}${features.elo_diff_pre.toFixed(0)}）`,
     `Dixon–Coles預期入球：主 ${goals(features.dc_expected_home_goals)} ｜ 客 ${goals(features.dc_expected_away_goals)}`,
     `歷史資料：${prediction.diagnostics.historical_matches_used} 場；Dixon–Coles樣本 ${prediction.diagnostics.dc_history_match_count} 場；截止 ${prediction.prediction_as_of.slice(0, 10)}`,
+    formatDynamicEvSection(candidate),
     "---",
     `🧭 【研究傾向】${prediction.lean.label}（${percent(prediction.lean.probability)}｜風險${risk}）`,
     ...prediction.lean.reasons.slice(0, 3).map(reason => `• ${reason}`),
     ...(prediction.lean.limitations.length ? ["⚠️ 【資料限制】", ...prediction.lean.limitations.slice(0, 3).map(limitation => `• ${limitation}`)] : []),
     "所有內容只供模型與戰術研究，並非投注或資金建議。",
+  ].join("\n");
+}
+
+function displayMarketSelection(selection: string): string {
+  return selection
+    .replace(/^Home$/i, "主勝")
+    .replace(/^Draw$/i, "和局")
+    .replace(/^Away$/i, "客勝")
+    .replace(/^Home\s+/i, "主隊 ")
+    .replace(/^Away\s+/i, "客隊 ")
+    .replace(/^Over\s+/i, "大 ")
+    .replace(/^Under\s+/i, "小 ");
+}
+
+function modelProbabilityForMarket(candidate: Candidate, item: MarketContext): number | null {
+  const probabilities = candidate.prediction.probabilities;
+  if (item.marketName === "1X2") {
+    if (/^Home$/i.test(item.selection)) return probabilities.home_win;
+    if (/^Draw$/i.test(item.selection)) return probabilities.draw;
+    if (/^Away$/i.test(item.selection)) return probabilities.away_win;
+  }
+  const homeMean = candidate.prediction.selected_features.dc_expected_home_goals;
+  const awayMean = candidate.prediction.selected_features.dc_expected_away_goals;
+  if (item.marketName === "Goals Over/Under") return totalSelectionProbability(item.selection, homeMean, awayMean);
+  if (item.marketName.startsWith("Asian Handicap")) return handicapSelectionProbability(item.selection, homeMean, awayMean);
+  return null;
+}
+
+function marketProbabilityForContext(item: MarketContext, hda: ReturnType<typeof deVigOneXTwo>): number | null {
+  if (item.marketName === "1X2" && hda) {
+    if (/^Home$/i.test(item.selection)) return hda.homeWin;
+    if (/^Draw$/i.test(item.selection)) return hda.draw;
+    if (/^Away$/i.test(item.selection)) return hda.awayWin;
+  }
+  if (item.opposingOdds && item.opposingOdds > 1) {
+    const own = 1 / item.decimalOdds;
+    const opposing = 1 / item.opposingOdds;
+    return own / (own + opposing);
+  }
+  return null;
+}
+
+export function formatDynamicEvSection(candidate: Candidate, now = new Date()): string {
+  const validSnapshots = candidate.marketContext.filter(item => Number.isFinite(item.decimalOdds) && item.decimalOdds > 1 && item.capturedAt instanceof Date && !Number.isNaN(item.capturedAt.getTime()));
+  if (!validSnapshots.length) return "⚠️ 【動態EV研究】暫無完整可驗證盤口快照；不計算EV。";
+  const fresh = validSnapshots.filter(item => now.getTime() - item.capturedAt.getTime() <= EV_SNAPSHOT_MAX_AGE_MS && item.capturedAt.getTime() <= now.getTime() + 5 * 60_000);
+  if (!fresh.length) return "⚠️ 【動態EV研究】最新可驗證盤口快照已過期（超過6小時）；不計算EV。";
+
+  const home = fresh.find(item => item.marketName === "1X2" && /^Home$/i.test(item.selection));
+  const draw = fresh.find(item => item.marketName === "1X2" && /^Draw$/i.test(item.selection));
+  const away = fresh.find(item => item.marketName === "1X2" && /^Away$/i.test(item.selection));
+  const hda = deVigOneXTwo(home?.decimalOdds, draw?.decimalOdds, away?.decimalOdds);
+  const lines = fresh.flatMap<DynamicEvLine>(item => {
+    const modelProbability = modelProbabilityForMarket(candidate, item);
+    const researchEv = expectedValue(modelProbability, item.decimalOdds);
+    if (modelProbability === null || researchEv === null) return [];
+    return [{
+      selection: displayMarketSelection(item.selection),
+      decimalOdds: item.decimalOdds,
+      modelProbability,
+      marketProbability: marketProbabilityForContext(item, hda),
+      expectedValue: researchEv,
+      capturedAt: item.capturedAt,
+      bookmakerName: item.bookmakerName ?? null,
+    }];
+  }).sort((left, right) => right.expectedValue - left.expectedValue).slice(0, 3);
+  if (!lines.length) return "⚠️ 【動態EV研究】盤口快照與模型市場未能配對；不輸出EV。";
+
+  const freshest = lines.reduce((latest, line) => line.capturedAt > latest ? line.capturedAt : latest, lines[0]!.capturedAt);
+  const sources = Array.from(new Set(lines.map(line => line.bookmakerName || "API-Football"))).join("／");
+  const rows = lines.map(line => {
+    const market = line.marketProbability === null ? "市場去水機率待補" : `市場去水 ${(line.marketProbability * 100).toFixed(1)}%`;
+    return `• ${line.selection} @${line.decimalOdds.toFixed(2)}｜模型 ${(line.modelProbability * 100).toFixed(1)}%｜${market}｜EV ${line.expectedValue >= 0 ? "+" : ""}${(line.expectedValue * 100).toFixed(1)}%`;
+  });
+  const materialDivergence = lines.some(line => line.marketProbability !== null && Math.abs(line.modelProbability - line.marketProbability) >= 0.12);
+  return [
+    `📐 【動態EV研究】來源 ${sources}｜快照 ${formatHktKickoff(freshest)}`,
+    ...rows,
+    materialDivergence ? "⚠️ 模型與去水市場機率差距較大；僅作研究比較，已降級風險解讀。" : "⚠️ EV為校準模型的研究估計，仍受快照時效、盤口變動與模型限制影響。",
   ].join("\n");
 }
 
@@ -1272,7 +1364,7 @@ async function resolveCandidate(request: Request, leagueCode: string, fixtureId:
   if (!db) throw new Error("資料庫暫時無法使用。");
   const snapshotRows = await db.select().from(oddsSnapshots).where(and(
     eq(oddsSnapshots.apiFixtureId, fixtureId),
-    inArray(oddsSnapshots.marketName, ["Asian Handicap", "Goals Over/Under"]),
+    inArray(oddsSnapshots.marketName, ["Match Winner", "Asian Handicap", "Goals Over/Under"]),
   )).orderBy(desc(oddsSnapshots.capturedAt));
   const marketDefinitions = [
     { source: "Goals Over/Under", label: "Goals Over/Under", accepts: () => true },
@@ -1314,7 +1406,17 @@ async function resolveCandidate(request: Request, leagueCode: string, fixtureId:
       ...(anomalySummary ? { anomalySummary } : {}),
     }];
   });
-  return { fixtureId, leagueCode, homeTeam: home, awayTeam: away, kickoffAt: details.kickoffAt, prediction, marketContext };
+  const oneXTwoRows = ["Home", "Draw", "Away"].flatMap<MarketContext>(selection => {
+    const latest = snapshotRows.find(snapshot => snapshot.marketName === "Match Winner" && new RegExp(`^${selection}$`, "i").test(snapshot.selection));
+    return latest ? [{
+      marketName: "1X2",
+      selection,
+      decimalOdds: Number(latest.decimalOdds),
+      capturedAt: latest.capturedAt,
+      bookmakerName: latest.bookmakerName,
+    }] : [];
+  });
+  return { fixtureId, leagueCode, homeTeam: home, awayTeam: away, kickoffAt: details.kickoffAt, prediction, marketContext: [...marketContext, ...oneXTwoRows] };
 }
 
 export function describeMarketMovement(item: MarketContext): string {

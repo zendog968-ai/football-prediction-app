@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatJobsStatus, formatLiveTeamResearch, formatModelHealthSummary, formatPredictResearch, formatPreviousDayDeliveryReceipt, formatTeamResearch, formatTelegramStatus, hasCompleteDigestCandidate, isAnyLeagueMatch, isKnownTeamAlias, isLeagueMatch, normalizeTelegramCommand, parsePredictRequest, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, todayLeagueFilter, todayLeagueFilters, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatDynamicEvSection, formatJobsStatus, formatLiveTeamResearch, formatModelHealthSummary, formatPredictResearch, formatPreviousDayDeliveryReceipt, formatTeamResearch, formatTelegramStatus, hasCompleteDigestCandidate, isAnyLeagueMatch, isKnownTeamAlias, isLeagueMatch, normalizeTelegramCommand, parsePredictRequest, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, todayLeagueFilter, todayLeagueFilters, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -244,6 +244,38 @@ describe("Telegram研究排程", () => {
     expect(output).toContain("Dixon–Coles預期入球");
     expect(output).toContain("【研究傾向】主隊傾向");
     expect(output).toContain("【資料限制】");
+  });
+
+  it("以新鮮完整HDA盤口顯示研究型EV與去水市場機率", () => {
+    const candidate = {
+      fixtureId: 123,
+      leagueCode: "EPL",
+      homeTeam: "Manchester United",
+      awayTeam: "Arsenal",
+      kickoffAt: new Date("2026-08-20T12:00:00Z"),
+      prediction: {
+        probabilities: { home_win: 0.52, draw: 0.25, away_win: 0.23 },
+        selected_features: { dc_expected_home_goals: 1.55, dc_expected_away_goals: 1.05 },
+      },
+      marketContext: [
+        { marketName: "1X2", selection: "Home", decimalOdds: 2.1, capturedAt: new Date("2026-08-18T00:00:00Z"), bookmakerName: "Bet365" },
+        { marketName: "1X2", selection: "Draw", decimalOdds: 3.5, capturedAt: new Date("2026-08-18T00:00:00Z"), bookmakerName: "Bet365" },
+        { marketName: "1X2", selection: "Away", decimalOdds: 3.8, capturedAt: new Date("2026-08-18T00:00:00Z"), bookmakerName: "Bet365" },
+      ],
+    } as never;
+    const output = formatDynamicEvSection(candidate, new Date("2026-08-18T03:00:00Z"));
+    expect(output).toContain("【動態EV研究】來源 Bet365");
+    expect(output).toContain("主勝 @2.10｜模型 52.0%");
+    expect(output).toContain("市場去水");
+    expect(output).toContain("EV +9.2%");
+  });
+
+  it("拒絕以過期盤口快照計算動態EV", () => {
+    const candidate = {
+      prediction: { probabilities: { home_win: 0.5, draw: 0.25, away_win: 0.25 }, selected_features: { dc_expected_home_goals: 1.2, dc_expected_away_goals: 1 } },
+      marketContext: [{ marketName: "1X2", selection: "Home", decimalOdds: 2.1, capturedAt: new Date("2026-08-17T00:00:00Z") }],
+    } as never;
+    expect(formatDynamicEvSection(candidate, new Date("2026-08-18T07:00:00Z"))).toContain("已過期");
   });
 
   it("支援主要聯賽的常用繁體中文隊名別名，不將無關簡稱模糊命中", () => {

@@ -33,6 +33,17 @@ export type OneXTwoProbabilities = { homeWin: number; draw: number; awayWin: num
 
 export type MarketImpliedProbabilities = { homeWin: number; draw: number; awayWin: number };
 
+/**
+ * Returns the gross expected return less stake for a unit-stake market price.
+ * This is a research metric only; callers must separately validate source,
+ * snapshot freshness, calibration and model limitations before displaying it.
+ */
+export function expectedValue(probability: number | null | undefined, decimalOdds: number | null | undefined): number | null {
+  if (typeof probability !== "number" || !Number.isFinite(probability) || probability < 0 || probability > 1) return null;
+  if (typeof decimalOdds !== "number" || !Number.isFinite(decimalOdds) || decimalOdds <= 1) return null;
+  return probability * decimalOdds - 1;
+}
+
 export function dixonColesScoreGrid(homeMean: number, awayMean: number, rho: number) {
   if (!validMean(homeMean) || !validMean(awayMean) || !Number.isFinite(rho) || rho < -0.25 || rho > 0.25) return [];
   const tau = (homeGoals: number, awayGoals: number) => {
