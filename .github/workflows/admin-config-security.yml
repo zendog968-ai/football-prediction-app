@@ -1,0 +1,53 @@
+name: Admin Configuration Security Regression
+
+on:
+  pull_request:
+    paths:
+      - 'server/adminConfig.ts'
+      - 'server/_core/index.ts'
+      - 'scripts/test-admin-config-extremes.mjs'
+      - 'scripts/run-admin-config-ci.ts'
+      - '.github/workflows/admin-config-security.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'server/adminConfig.ts'
+      - 'server/_core/index.ts'
+      - 'scripts/test-admin-config-extremes.mjs'
+      - 'scripts/run-admin-config-ci.ts'
+      - '.github/workflows/admin-config-security.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  admin-config-security:
+    name: Isolated admin-form security regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NODE_ENV: test
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm check
+
+      - name: Run isolated extreme-input regression
+        run: pnpm exec tsx scripts/run-admin-config-ci.ts
