@@ -61,4 +61,6 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN || vars.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || vars.TELEGRAM_CHAT_ID }}
-        run: python scripts/telegram_alert.py --kind failure --detail "GitHub Actions sync failed after three attempts. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: >-
+          python scripts/telegram_alert.py --kind failure --detail
+          "GitHub Actions sync failed after three attempts. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
