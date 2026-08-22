@@ -1,0 +1,58 @@
+import { Link } from "wouter";
+import { AlertTriangle, ArrowUpRight, CheckCircle2, ChevronLeft, CircleDotDashed, Clock3, ExternalLink, Github, RefreshCw, ShieldCheck, TimerReset, XCircle } from "lucide-react";
+import { trpc } from "@/lib/trpc";
+
+type RunTone = "success" | "failure" | "pending" | "neutral";
+
+function hktTime(value: string | null) {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("zh-HK", { timeZone: "Asia/Hong_Kong", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
+}
+
+function relativeTime(value: string) {
+  const minutes = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 60_000));
+  if (minutes < 1) return "剛剛更新";
+  if (minutes < 60) return `${minutes} 分鐘前`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `${hours} 小時前` : `${Math.round(hours / 24)} 天前`;
+}
+
+function runTone(status: string, conclusion: string | null): RunTone {
+  if (status !== "completed") return "pending";
+  if (conclusion === "success") return "success";
+  if (["failure", "timed_out", "cancelled", "action_required"].includes(conclusion || "")) return "failure";
+  return "neutral";
+}
+
+function ToneBadge({ status, conclusion }: { status: string; conclusion: string | null }) {
+  const tone = runTone(status, conclusion);
+  const meta = tone === "success"
+    ? { label: "成功", className: "border-emerald-400/20 bg-emerald-400/10 text-emerald-300", icon: <CheckCircle2 size={13} /> }
+    : tone === "failure"
+      ? { label: conclusion === "timed_out" ? "逾時" : conclusion === "cancelled" ? "已取消" : "失敗", className: "border-rose-400/20 bg-rose-400/10 text-rose-300", icon: <XCircle size={13} /> }
+      : tone === "pending"
+        ? { label: "執行中", className: "border-sky-400/20 bg-sky-400/10 text-sky-300", icon: <CircleDotDashed className="animate-spin" size={13} /> }
+        : { label: "已略過", className: "border-zinc-500/30 bg-zinc-500/10 text-zinc-300", icon: <Clock3 size={13} /> };
+  return <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold ${meta.className}`}>{meta.icon}{meta.label}</span>;
+}
+
+function WorkflowCard({ workflow }: { workflow: { id: "security" | "sync" | "other"; label: string; description: string; requiredForMain: boolean; latest: { status: string; conclusion: string | null; updatedAt: string; url: string; branch: string; runNumber: number } | null; recentCompleted: number; recentSuccesses: number; successRate: number | null; failureCount: number } }) {
+  const isSecurity = workflow.id === "security";
+  const Icon = isSecurity ? ShieldCheck : TimerReset;
+  return <article className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[.045] p-5 shadow-[0_20px_55px_rgba(0,0,0,.15)]"><div className={`absolute inset-x-0 top-0 h-1 ${isSecurity ? "bg-emerald-400" : "bg-amber-300"}`} /><div className="flex items-start justify-between gap-4"><div className={`rounded-2xl p-3 ${isSecurity ? "bg-emerald-400/10 text-emerald-300" : "bg-amber-300/10 text-amber-200"}`}><Icon size={20} /></div>{workflow.latest ? <ToneBadge status={workflow.latest.status} conclusion={workflow.latest.conclusion} /> : <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] text-zinc-500">尚無紀錄</span>}</div><div className="mt-5"><div className="flex flex-wrap items-center gap-2"><h2 className="text-lg font-bold text-white">{workflow.label}</h2>{workflow.requiredForMain && <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[.12em] text-emerald-300">main 必要檢查</span>}</div><p className="mt-2 min-h-10 text-xs leading-5 text-zinc-400">{workflow.description}</p></div><div className="mt-5 grid grid-cols-3 gap-2 border-t border-white/10 pt-4"><div><div className="text-[9px] font-bold uppercase tracking-[.16em] text-zinc-500">近期成功率</div><div className="mt-1 text-xl font-black text-white">{workflow.successRate === null ? "—" : `${workflow.successRate}%`}</div></div><div><div className="text-[9px] font-bold uppercase tracking-[.16em] text-zinc-500">完成次數</div><div className="mt-1 text-xl font-black text-white">{workflow.recentCompleted}</div></div><div><div className="text-[9px] font-bold uppercase tracking-[.16em] text-zinc-500">失敗</div><div className={`mt-1 text-xl font-black ${workflow.failureCount ? "text-rose-300" : "text-emerald-300"}`}>{workflow.failureCount}</div></div></div>{workflow.latest && <a href={workflow.latest.url} target="_blank" rel="noreferrer" className="mt-4 flex items-center justify-between rounded-2xl border border-white/10 bg-black/20 px-3 py-2.5 text-xs text-zinc-300 transition hover:border-white/20 hover:bg-white/5"><span>#{workflow.latest.runNumber} · {workflow.latest.branch} · {relativeTime(workflow.latest.updatedAt)}</span><ArrowUpRight size={15} /></a>}</article>;
+}
+
+export default function GithubActionsMonitor() {
+  const query = trpc.githubActions.overview.useQuery(undefined, { refetchInterval: 60_000, refetchOnWindowFocus: true, staleTime: 30_000 });
+  const data = query.data;
+  const failedRuns = data?.recentRuns.filter(run => runTone(run.status, run.conclusion) === "failure") ?? [];
+
+  return <main className="min-h-screen overflow-x-hidden bg-[#071018] pb-12 text-zinc-100"><header className="relative overflow-hidden border-b border-white/10 bg-[#0a1520]"><div className="absolute inset-0 opacity-30 [background-image:linear-gradient(rgba(255,255,255,.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.05)_1px,transparent_1px)] [background-size:42px_42px]" /><div className="relative mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-5 lg:px-8"><Link href="/" className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-300"><Github size={21} /></div><div><p className="text-[9px] font-bold uppercase tracking-[.22em] text-emerald-400">Aurelia Football · Operations</p><h1 className="mt-1 text-lg font-black tracking-tight text-white">自動化狀態監控</h1></div></Link><div className="flex items-center gap-2"><button onClick={() => query.refetch()} disabled={query.isFetching} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[.05] px-3 py-2 text-[10px] font-bold uppercase tracking-[.14em] text-zinc-300 transition hover:bg-white/10 disabled:opacity-50"><RefreshCw className={query.isFetching ? "animate-spin" : ""} size={13} />重新讀取</button><Link href="/" className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/[.05] px-3 py-2 text-[10px] font-bold uppercase tracking-[.14em] text-zinc-300 transition hover:bg-white/10 sm:inline-flex"><ChevronLeft size={13} />賽程</Link></div></div></header>
+    <section className="mx-auto max-w-6xl px-5 py-8 lg:px-8"><div className="relative overflow-hidden rounded-[2rem] border border-emerald-400/15 bg-gradient-to-br from-emerald-400/15 via-[#102432] to-[#0b1119] p-6 shadow-[0_28px_70px_rgba(0,0,0,.28)] lg:p-8"><div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-emerald-400/15 blur-3xl" /><div className="relative flex flex-col justify-between gap-6 lg:flex-row lg:items-end"><div><div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.2em] text-emerald-300"><ShieldCheck size={14} />GitHub Actions telemetry</div><h2 className="mt-3 max-w-2xl font-serif text-3xl leading-tight text-white sm:text-4xl">每一次自動化，都有<span className="text-emerald-300">可追蹤的回條。</span></h2><p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">此頁只讀取公開儲存庫的 GitHub Actions 執行狀態；不會存取GitHub token、雲端主機或任何服務憑證。</p></div>{data && <a href={data.repositoryUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 self-start rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-xs font-bold text-zinc-200 transition hover:bg-white/10 lg:self-auto"><Github size={15} />{data.repository}<ExternalLink size={13} /></a>}</div></div>
+      {query.isLoading && <div className="mt-6 rounded-3xl border border-white/10 bg-white/[.04] px-5 py-14 text-center text-sm text-zinc-400"><CircleDotDashed className="mx-auto mb-3 animate-spin text-emerald-300" />正在讀取近期工作流程…</div>}
+      {query.error && <div className="mt-6 rounded-3xl border border-rose-400/20 bg-rose-400/10 p-6"><AlertTriangle className="text-rose-300" /><h2 className="mt-3 text-lg font-bold text-white">狀態資料暫時無法讀取</h2><p className="mt-2 text-sm text-rose-100/80">{query.error.message}</p><button onClick={() => query.refetch()} className="mt-4 rounded-xl bg-rose-300 px-4 py-2 text-xs font-black text-rose-950">再次嘗試</button></div>}
+      {data && <><div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-zinc-500"><span className="inline-flex items-center gap-1.5"><Clock3 size={13} />最後讀取：{hktTime(data.fetchedAt)}（香港時間）</span><span>每 {data.refreshAfterSeconds} 秒快取一次；頁面每分鐘重新檢查。</span></div><section className="mt-6 grid gap-4 lg:grid-cols-2">{data.workflows.map(workflow => <WorkflowCard key={workflow.id} workflow={workflow} />)}</section>
+        {failedRuns.length > 0 && <section className="mt-6 rounded-3xl border border-rose-400/20 bg-rose-400/[.07] p-5"><div className="flex items-center gap-2 text-rose-200"><AlertTriangle size={18} /><h2 className="font-bold">需要注意的失敗執行</h2></div><div className="mt-4 space-y-2">{failedRuns.slice(0, 3).map(run => <a key={run.id} href={run.url} target="_blank" rel="noreferrer" className="flex flex-col gap-2 rounded-2xl border border-white/10 bg-black/20 p-3 text-xs transition hover:bg-white/[.05] sm:flex-row sm:items-center sm:justify-between"><div><div className="font-bold text-white">{run.workflowName} · #{run.runNumber}</div><p className="mt-1 text-rose-100/75">{run.failureSummary}</p></div><span className="text-zinc-500">{hktTime(run.updatedAt)} <ExternalLink className="ml-1 inline" size={12} /></span></a>)}</div></section>}
+        <section className="mt-6 overflow-hidden rounded-3xl border border-white/10 bg-white/[.035]"><div className="flex items-center justify-between border-b border-white/10 px-5 py-4"><div><div className="text-[10px] font-bold uppercase tracking-[.18em] text-zinc-500">Recent executions</div><h2 className="mt-1 font-bold text-white">近期執行紀錄</h2></div><span className="text-xs text-zinc-500">最近 {data.recentRuns.length} 次</span></div><div className="divide-y divide-white/10">{data.recentRuns.map(run => <a key={run.id} href={run.url} target="_blank" rel="noreferrer" className="grid gap-3 px-5 py-4 transition hover:bg-white/[.035] sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center"><div className="min-w-0"><div className="truncate font-semibold text-sm text-white">{run.workflowName} <span className="ml-1 text-zinc-500">#{run.runNumber}</span></div><div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-zinc-500"><span>{run.event}</span><span>{run.branch}</span><span>{run.commit}</span></div></div><div className="text-[11px] text-zinc-500">{hktTime(run.updatedAt)}</div><div className="flex items-center justify-between gap-3 sm:justify-end"><ToneBadge status={run.status} conclusion={run.conclusion} /><ExternalLink className="text-zinc-500" size={14} /></div></a>)}</div></section></>}
+    </section></main>;
+}

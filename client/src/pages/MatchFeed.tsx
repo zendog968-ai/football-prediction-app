@@ -3,6 +3,7 @@ import { CalendarDays, ChevronDown, Clock3, ShieldAlert, Sparkles } from "lucide
 import { trpc } from "@/lib/trpc";
 import { localizeTeamName } from "@shared/teamDisplay";
 import { localizeLeagueName } from "@shared/leagueDisplay";
+import { Link } from "wouter";
 
 const pct = (value: number) => `${Math.round(value * 100)}%`;
 const labelTime = (value: string) => new Intl.DateTimeFormat("zh-HK", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
@@ -38,7 +39,7 @@ export default function MatchFeed() {
 
   return <main className="min-h-screen bg-[#121212] pb-24 text-zinc-100">
     <header className="sticky top-0 z-20 border-b border-white/10 bg-[#121212]/95 px-4 py-4 backdrop-blur xl:px-8">
-      <div className="mx-auto flex max-w-5xl items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[.24em] text-emerald-400">Aurelia Football</p><h1 className="mt-1 text-xl font-black tracking-tight">今日賽程</h1></div><div className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-300"><span className="mr-2 inline-block h-2 w-2 rounded-full bg-emerald-400"/>同步快取</div></div>
+      <div className="mx-auto flex max-w-5xl items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[.24em] text-emerald-400">Aurelia Football</p><h1 className="mt-1 text-xl font-black tracking-tight">今日賽程</h1></div><div className="flex items-center gap-2"><Link href="/operations" className="hidden rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-300 transition hover:bg-emerald-400/20 sm:block">運作監控</Link><div className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-300"><span className="mr-2 inline-block h-2 w-2 rounded-full bg-emerald-400"/>同步快取</div></div></div>
       <div className="mx-auto mt-4 flex max-w-5xl gap-2 overflow-x-auto pb-1">{days.map(day => <button key={day.offset} onClick={() => setDayOffset(day.offset)} className={`shrink-0 rounded-xl px-4 py-2 text-xs font-bold ${dayOffset === day.offset ? "bg-emerald-400 text-zinc-950" : "bg-[#1e1e1e] text-zinc-400"}`}>{day.offset === 0 ? "今天" : labelDate(day.date)}</button>)}</div>
       <div className="mx-auto mt-3 flex max-w-5xl gap-2 overflow-x-auto pb-1">{leagueTabs.map(tab => <button key={tab} onClick={() => setLeague(tab)} className={`shrink-0 rounded-full border px-3 py-1.5 text-xs ${league === tab ? "border-emerald-400 text-emerald-300" : "border-white/10 text-zinc-500"}`}>{tab}</button>)}</div>
     </header>
