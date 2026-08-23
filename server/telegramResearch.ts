@@ -391,6 +391,20 @@ export function normalizeTelegramCommand(text: string | undefined): string | und
   return text?.trim().toLowerCase().split(/\s+/)[0]?.replace(/@[a-z0-9_]+$/i, "");
 }
 
+const MULTI_LINE_ADMIN_COMMANDS = new Set(["/dict", "/approve", "/inbound"]);
+
+/**
+ * Telegram users often paste several administrator commands in one message.
+ * Only the explicitly allow-listed, command-per-line administrative actions are
+ * accepted here; research, subscription and natural-language messages stay
+ * single-command to avoid surprising repeated external calls.
+ */
+export function parseMultiLineAdminCommands(text: string | undefined): string[] {
+  const lines = (text ?? "").split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (lines.length < 2 || lines.length > 3) return [];
+  return lines.every(line => MULTI_LINE_ADMIN_COMMANDS.has(normalizeTelegramCommand(line) ?? "")) ? lines : [];
+}
+
 export function parseDictionaryCommand(rawText: string | undefined):
   | { kind: "list" }
   | { kind: "pending" }
@@ -2014,7 +2028,9 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
   }
   const message = update.message;
   const chatId = message?.chat?.id;
-  const text = normalizeTelegramCommand(message?.text);
+  const rawText = message?.text;
+  const text = normalizeTelegramCommand(rawText);
+  const multiLineAdminCommands = parseMultiLineAdminCommands(rawText);
   const auditUpdateId = String(update.update_id ?? `message-${Date.now()}`);
   await recordTelegramInboundEvent({ updateId: auditUpdateId, chatId: chatId ? String(chatId) : null, command: text || "non_command" });
   if (!chatId || !text) {
@@ -2026,7 +2042,22 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     const db = await getDb();
     if (!db) throw new Error("資料庫暫時無法使用。");
     const displayName = message.from?.username || message.from?.first_name || null;
-    if (text === "/start") {
+    if (multiLineAdminCommands.length > 0) {
+      if (!isDictionaryAdmin(String(chatId))) {
+        await sendTelegramMessage(String(chatId), "🔒 無權限：此多行管理指令僅限系統管理員使用。");
+      } else {
+        for (let index = 0; index < multiLineAdminCommands.length; index += 1) {
+          const line = multiLineAdminCommands[index]!;
+          const command = normalizeTelegramCommand(line);
+          const response = command === "/dict"
+            ? await telegramDictionaryForAdmin(String(chatId), line)
+            : command === "/approve"
+              ? await telegramApproveForAdmin(String(chatId), line)
+              : await telegramInboundForAdmin(String(chatId));
+          await sendTelegramMessage(String(chatId), `【多行指令 ${index + 1}/${multiLineAdminCommands.length}】\n${response}`);
+        }
+      }
+    } else if (text === "/start") {
     const isAdmin = isDictionaryAdmin(String(chatId));
     await db.insert(telegramSubscriptions).values({ chatId: String(chatId), displayName, isActive: true, isAdmin, stoppedAt: null })
       .onDuplicateKeyUpdate({ set: { displayName, isActive: true, isAdmin, stoppedAt: null } });
@@ -2035,25 +2066,25 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     await sendTelegramMessage(String(chatId), TELEGRAM_HELP_MESSAGE);
   // Dictionary commands are admin-gated inside telegramDictionaryForAdmin, including /dict undo.
   } else if (text === "/dict") {
-    await sendTelegramMessage(String(chatId), await telegramDictionaryForAdmin(String(chatId), message?.text));
+    await sendTelegramMessage(String(chatId), await telegramDictionaryForAdmin(String(chatId), rawText));
   } else if (text === "/approve") {
-    await sendTelegramMessage(String(chatId), await telegramApproveForAdmin(String(chatId), message?.text));
+    await sendTelegramMessage(String(chatId), await telegramApproveForAdmin(String(chatId), rawText));
   } else if (text === "/inbound") {
     await sendTelegramMessage(String(chatId), await telegramInboundForAdmin(String(chatId)));
   } else if (text === "/trend") {
-    await sendTelegramMessage(String(chatId), await telegramTrendForRequest(message?.text));
+    await sendTelegramMessage(String(chatId), await telegramTrendForRequest(rawText));
   } else if (text === "/today") {
-    await sendTelegramMessage(String(chatId), await telegramToday(req, message?.text));
+    await sendTelegramMessage(String(chatId), await telegramToday(req, rawText));
   } else if (text === "/upcoming" || text === "/report") {
     await sendTelegramMessage(String(chatId), await telegramUpcoming());
   } else if (text === "/predict") {
-    const result = await telegramPredict(req, message?.text);
+    const result = await telegramPredict(req, rawText);
     await sendTelegramMessage(String(chatId), result.text, result.buttons);
   } else if (text === "/team") {
-    const result = await telegramTeamResearch(req, message?.text);
+    const result = await telegramTeamResearch(req, rawText);
     await sendTelegramMessage(String(chatId), result.text, result.buttons);
   } else if (!text.startsWith("/")) {
-    const result = await telegramNaturalLanguageTeamResearch(req, message?.text);
+    const result = await telegramNaturalLanguageTeamResearch(req, rawText);
     if (result) await sendTelegramMessage(String(chatId), result.text, result.buttons);
   } else if (text === "/status") {
     await sendTelegramMessage(String(chatId), await telegramStatusForChat(String(chatId)));

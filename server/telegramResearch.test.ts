@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
 import { ENV } from "./_core/env";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatDynamicEvSection, formatJobsStatus, formatLiveTeamResearch, formatModelHealthSummary, formatPredictResearch, formatPreviousDayDeliveryReceipt, formatTeamResearch, formatTelegramStatus, hasCompleteDigestCandidate, isAnyLeagueMatch, isDictionaryAdmin, isKnownTeamAlias, isLeagueMatch, normalizeTelegramCommand, parsePredictRequest, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, todayLeagueFilter, todayLeagueFilters, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatDynamicEvSection, formatJobsStatus, formatLiveTeamResearch, formatModelHealthSummary, formatPredictResearch, formatPreviousDayDeliveryReceipt, formatTeamResearch, formatTelegramStatus, hasCompleteDigestCandidate, isAnyLeagueMatch, isDictionaryAdmin, isKnownTeamAlias, isLeagueMatch, normalizeTelegramCommand, parseMultiLineAdminCommands, parsePredictRequest, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, todayLeagueFilter, todayLeagueFilters, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -51,6 +51,13 @@ describe("Telegram管理員授權", () => {
     expect(ENV.telegramAdminChatId).toMatch(/^\d+$/);
     expect(isDictionaryAdmin(ENV.telegramAdminChatId)).toBe(true);
     expect(isDictionaryAdmin("0")).toBe(false);
+  });
+
+  it("只接受每行一條、最多三條的受限多行管理命令", () => {
+    expect(parseMultiLineAdminCommands("/dict seed\n/dict pending\n/approve 1 測試足球會"))
+      .toEqual(["/dict seed", "/dict pending", "/approve 1 測試足球會"]);
+    expect(parseMultiLineAdminCommands("/dict pending\n/predict 布里斯托城")).toEqual([]);
+    expect(parseMultiLineAdminCommands("/dict pending\n/inbound\n/approve 1 測試足球會\n/dict pending")).toEqual([]);
   });
 });
 
