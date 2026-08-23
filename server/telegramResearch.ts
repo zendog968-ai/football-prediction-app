@@ -420,7 +420,7 @@ export function parseDictionaryApproveCommand(rawText: string | undefined): { id
   return Number.isInteger(id) && id > 0 && traditionalName ? { id, traditionalName } : null;
 }
 
-function isDictionaryAdmin(chatId: string): boolean {
+export function isDictionaryAdmin(chatId: string): boolean {
   return Boolean(ENV.telegramAdminChatId) && chatId === ENV.telegramAdminChatId;
 }
 

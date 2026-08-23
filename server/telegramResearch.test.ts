@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatDynamicEvSection, formatJobsStatus, formatLiveTeamResearch, formatModelHealthSummary, formatPredictResearch, formatPreviousDayDeliveryReceipt, formatTeamResearch, formatTelegramStatus, hasCompleteDigestCandidate, isAnyLeagueMatch, isKnownTeamAlias, isLeagueMatch, normalizeTelegramCommand, parsePredictRequest, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, todayLeagueFilter, todayLeagueFilters, verifyApiFootballReadiness } from "./telegramResearch";
+import { ENV } from "./_core/env";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatDynamicEvSection, formatJobsStatus, formatLiveTeamResearch, formatModelHealthSummary, formatPredictResearch, formatPreviousDayDeliveryReceipt, formatTeamResearch, formatTelegramStatus, hasCompleteDigestCandidate, isAnyLeagueMatch, isDictionaryAdmin, isKnownTeamAlias, isLeagueMatch, normalizeTelegramCommand, parsePredictRequest, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, todayLeagueFilter, todayLeagueFilters, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -45,7 +46,15 @@ describe("Telegram研究排程", () => {
   });
 });
 
-	describe("Telegram系統指令", () => {
+describe("Telegram管理員授權", () => {
+  it("使用已配置的管理員Chat ID授權字典與入站稽核指令", () => {
+    expect(ENV.telegramAdminChatId).toMatch(/^\d+$/);
+    expect(isDictionaryAdmin(ENV.telegramAdminChatId)).toBe(true);
+    expect(isDictionaryAdmin("0")).toBe(false);
+  });
+});
+
+		describe("Telegram系統指令", () => {
 	  it("/help列出全部可用的訂閱及研究指令", () => {
 	    expect(TELEGRAM_HELP_MESSAGE).toContain("/start");
 	    expect(TELEGRAM_HELP_MESSAGE).toContain("/status");
