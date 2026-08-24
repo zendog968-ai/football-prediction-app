@@ -420,7 +420,7 @@
 - [x] 建立持久化翻譯待審核隊列；未知隊名被安全音譯時自動寫入英文名、建議譯名、來源與狀態：已建立`pending_team_name_translations`，未知英文名經結構化安全音譯後只會入列並保留運行期顯示快取，不會直接成為正式主字典。
 - [x] 鎖定所有`/dict`與新增`/approve`指令為管理員Chat ID專用，提供pending列表、流水號批核與無權限回覆：所有指令共用`TELEGRAM_ADMIN_CHAT_ID`環境閘門，並支援`/dict pending`、`/dict seed`及`/approve [ID] [繁中譯名]`；正式路由恢復後將以已提供Chat ID進行驗證。
 - [x] 批核後寫入主字典、移除待審項目並立即刷新運行中翻譯快取：批核會寫入主字典及不可變稽核紀錄、把待審項目標示approved、清除舊快取並註冊新繁中名稱。
-- [ ] 以明確測試隊列資料驗證`/dict pending`與`/approve`，完成測試、發布、GitHub提交與推送。
+- [x] 以明確測試隊列資料驗證`/dict pending`與`/approve`，完成測試、發布、GitHub提交與推送。
 - [x] 診斷並修復管理員發送`/dict`無回覆的Webhook、環境授權或伺服器例外，完成正式端到端驗證。
 - [x] 建立不保存原始訊息內容的Telegram入站事件稽核，記錄Chat ID、命令類型、接收時間、處理狀態及安全錯誤摘要：已建立telegram_inbound_events持久化表及索引；開發Webhook測試以Chat ID 5871490170接收/status後記錄為processed，未保存原始訊息內容。
 - [x] 新增管理員可查閱的入站事件狀態輸出，區分Webhook未到達、授權拒絕、處理失敗與成功回覆：已新增`/inbound`格式化查閱，僅呈現時間、Chat ID、指令類型、狀態及安全錯誤摘要。
