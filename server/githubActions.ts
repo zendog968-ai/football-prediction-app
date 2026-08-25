@@ -48,6 +48,15 @@ export type GithubWorkflowSummary = {
   failureCount: number;
 };
 
+export type GithubRunTrendPoint = {
+  date: string;
+  label: string;
+  completedRuns: number;
+  successfulRuns: number;
+  failedRuns: number;
+  successRate: number | null;
+};
+
 export type GithubActionsOverview = {
   repository: string;
   repositoryUrl: string;
@@ -55,6 +64,11 @@ export type GithubActionsOverview = {
   refreshAfterSeconds: number;
   workflows: GithubWorkflowSummary[];
   recentRuns: GithubActionsRun[];
+  trend: GithubRunTrendPoint[];
+  overallCompleted: number;
+  overallSuccesses: number;
+  overallFailures: number;
+  overallSuccessRate: number | null;
 };
 
 let cachedOverview: GithubActionsOverview | null = null;
@@ -97,6 +111,51 @@ export function normalizeGithubRun(run: GitHubRunSource): GithubActionsRun {
   };
 }
 
+function hktDateKey(value: string): string {
+  const date = new Date(value);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Hong_Kong",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const lookup = new Map(parts.map(part => [part.type, part.value]));
+  return `${lookup.get("year")}-${lookup.get("month")}-${lookup.get("day")}`;
+}
+
+function shiftDateKey(dateKey: string, offset: number): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + offset)).toISOString().slice(0, 10);
+}
+
+function displayTrendLabel(dateKey: string): string {
+  const [, month, day] = dateKey.split("-");
+  return `${Number(month)}/${Number(day)}`;
+}
+
+export function buildGithubRunTrend(runs: GithubActionsRun[], fetchedAt = new Date().toISOString(), days = 14): GithubRunTrendPoint[] {
+  const byDate = new Map<string, GithubRunTrendPoint>();
+  const anchorDate = hktDateKey(fetchedAt);
+  for (let offset = days - 1; offset >= 0; offset -= 1) {
+    const date = shiftDateKey(anchorDate, -offset);
+    byDate.set(date, { date, label: displayTrendLabel(date), completedRuns: 0, successfulRuns: 0, failedRuns: 0, successRate: null });
+  }
+
+  for (const run of runs) {
+    if (run.status !== "completed") continue;
+    const point = byDate.get(hktDateKey(run.updatedAt));
+    if (!point) continue;
+    point.completedRuns += 1;
+    if (run.conclusion === "success") point.successfulRuns += 1;
+    else if (["failure", "timed_out", "cancelled", "action_required"].includes(run.conclusion || "")) point.failedRuns += 1;
+  }
+
+  return Array.from(byDate.values()).map(point => ({
+    ...point,
+    successRate: point.completedRuns ? Math.round((point.successfulRuns / point.completedRuns) * 100) : null,
+  }));
+}
+
 export function summarizeGithubRuns(runs: GithubActionsRun[], fetchedAt = new Date().toISOString()): GithubActionsOverview {
   const tracked: Array<Pick<GithubWorkflowSummary, "id" | "label" | "description" | "requiredForMain">> = [
     {
@@ -127,6 +186,10 @@ export function summarizeGithubRuns(runs: GithubActionsRun[], fetchedAt = new Da
     };
   });
 
+  const completedRuns = runs.filter(run => run.status === "completed");
+  const overallSuccesses = completedRuns.filter(run => run.conclusion === "success").length;
+  const overallFailures = completedRuns.filter(run => ["failure", "timed_out", "cancelled", "action_required"].includes(run.conclusion || "")).length;
+
   return {
     repository: REPOSITORY,
     repositoryUrl: `https://github.com/${REPOSITORY}`,
@@ -134,6 +197,11 @@ export function summarizeGithubRuns(runs: GithubActionsRun[], fetchedAt = new Da
     refreshAfterSeconds: Math.round(CACHE_TTL_MS / 1000),
     workflows,
     recentRuns: runs.slice(0, 12),
+    trend: buildGithubRunTrend(runs, fetchedAt),
+    overallCompleted: completedRuns.length,
+    overallSuccesses,
+    overallFailures,
+    overallSuccessRate: completedRuns.length ? Math.round((overallSuccesses / completedRuns.length) * 100) : null,
   };
 }
 
@@ -141,7 +209,7 @@ export async function getGithubActionsOverview(): Promise<GithubActionsOverview>
   const now = Date.now();
   if (cachedOverview && now - cachedAt < CACHE_TTL_MS) return cachedOverview;
 
-  const response = await fetch(`https://api.github.com/repos/${REPOSITORY}/actions/runs?per_page=30`, {
+  const response = await fetch(`https://api.github.com/repos/${REPOSITORY}/actions/runs?per_page=100`, {
     headers: {
       Accept: "application/vnd.github+json",
       "User-Agent": "Aurelia-Football-Operations-Monitor",

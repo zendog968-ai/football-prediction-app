@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getGithubActionsOverview, normalizeGithubRun, summarizeGithubRuns } from "./githubActions";
+import { buildGithubRunTrend, getGithubActionsOverview, normalizeGithubRun, summarizeGithubRuns } from "./githubActions";
 
 const source = (overrides: Partial<Parameters<typeof normalizeGithubRun>[0]> = {}) => ({
   id: 42,
@@ -36,6 +36,18 @@ describe("GitHub Actions monitoring mapping", () => {
 
     expect(sync).toMatchObject({ requiredForMain: false, recentCompleted: 0, successRate: null });
     expect(syncRunning.category).toBe("sync");
+  });
+
+  it("builds a chronological HKT trend with real completed success and failure counts", () => {
+    const success = normalizeGithubRun(source({ updated_at: "2026-08-21T16:10:00Z" }));
+    const failure = normalizeGithubRun(source({ id: 44, conclusion: "failure", updated_at: "2026-08-22T16:20:00Z" }));
+    const trend = buildGithubRunTrend([success, failure], "2026-08-23T16:00:00Z", 3);
+
+    expect(trend).toHaveLength(3);
+    expect(trend.map(point => point.date)).toEqual(["2026-08-22", "2026-08-23", "2026-08-24"]);
+    expect(trend[0]).toMatchObject({ successfulRuns: 1, failedRuns: 0, successRate: 100 });
+    expect(trend[1]).toMatchObject({ successfulRuns: 0, failedRuns: 1, successRate: 0 });
+    expect(trend[2]).toMatchObject({ completedRuns: 0, successRate: null });
   });
 
   const testWithToken = process.env.GITHUB_STATUS_TOKEN ? it : it.skip;
