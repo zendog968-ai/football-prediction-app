@@ -73,6 +73,23 @@ describe("英冠Supabase研究卡快取", () => {
     expect(cache.fixtures[0]?.expectedAwayGoals).toBeNull();
     expect(cache.fixtures[0]?.topScorelines).toEqual([]);
   });
+
+  it("可選翻譯表404時安全降級，不阻塞賽程與研究機率", async () => {
+    const fetchMock = vi.fn(async (input: URL | string) => {
+      const url = String(input);
+      if (url.includes("team_translations?") || url.includes("league_translations?")) return { ok: false, status: 404, json: async () => ({ message: "relation not found" }) };
+      if (url.includes("fixtures?")) return { ok: true, json: async () => [{ fixture_id: 3003, league_name: "J1 League", event_time: "2026-08-22T12:30:00Z", home_team: "Vissel Kobe", away_team: "FC Tokyo", status: "NS", updated_at: "2026-08-20T10:00:00Z" }] };
+      if (url.includes("ai_predictions?")) return { ok: true, json: async () => [{ fixture_id: 3003, home_win_prob: 0.5, draw_prob: 0.25, away_win_prob: 0.25, predicted_score: "1-0", recommendation: "\n[AURELIA_META]{\"h\":1.4,\"a\":0.9,\"s\":\"D\"}", confidence: 3, updated_at: "2026-08-20T10:00:00Z" }] };
+      return { ok: true, json: async () => [] };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const cache = await getSupabaseUpcomingCache(true);
+    expect(cache.available).toBe(true);
+    expect(cache.fixtures[0]?.hasPrediction).toBe(true);
+    expect(cache.fixtures[0]?.homeTeamTranslation).toBeUndefined();
+    expect(cache.fixtures[0]?.expectedHomeGoals).toBeCloseTo(1.4);
+  });
 });
 
 

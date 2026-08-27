@@ -206,7 +206,10 @@ async function queryRows(path: string): Promise<Array<Record<string, unknown>>> 
   } finally {
     clearTimeout(timeout);
   }
-  if (!response.ok) throw new Error(`Supabase cache query failed (${response.status})`);
+  if (!response.ok) {
+    const detail = typeof response.text === "function" ? (await response.text()).slice(0, 240).replace(/\s+/g, " ").trim() : "";
+    throw new Error(`Supabase cache query failed (${response.status})${detail ? `: ${detail}` : ""}`);
+  }
   const payload = await response.json();
   if (!Array.isArray(payload)) throw new Error("Supabase cache returned an invalid payload");
   return payload as Array<Record<string, unknown>>;
@@ -234,8 +237,17 @@ async function queryFixtureRelatedRows(select: string, ids: number[]): Promise<A
 async function queryTranslationRows(table: "team_translations" | "league_translations", names: string[]): Promise<Array<Record<string, unknown>>> {
   const unique = Array.from(new Set(names.map(name => name.trim()).filter(Boolean)));
   if (!unique.length) return [];
-  const quoted = unique.map(name => `"${name.replace(/"/g, "\\\"")}"`).join(",");
-  return queryRows(`${table}?select=english_name,name_zh_hk,name_zh_tw&english_name=in.(${quoted})`);
+  try {
+    const groups = chunks(unique, 100);
+    const rows = await Promise.all(groups.map(group => {
+      const quoted = group.map(name => `"${name.replace(/"/g, "\\\"")}"`).join(",");
+      return queryRows(`${table}?select=english_name,name_zh_hk,name_zh_tw&english_name=in.(${quoted})`);
+    }));
+    return rows.flat();
+  } catch (error) {
+    if (error instanceof Error && (error.message.includes("(404)") || error.message.includes("PGRST205"))) return [];
+    throw error;
+  }
 }
 
 export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseUpcomingCache> {
@@ -243,7 +255,8 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
   const loadedAt = new Date().toISOString();
   try {
     const now = encodeURIComponent(new Date().toISOString());
-    const fixtures = await queryPagedRows(`fixtures?select=fixture_id,league_name,event_time,home_team,away_team,status,updated_at&event_time=gte.${now}&order=event_time.asc`);
+    const horizon = encodeURIComponent(new Date(Date.now() + 3 * 24 * 60 * 60_000).toISOString());
+    const fixtures = await queryPagedRows(`fixtures?select=fixture_id,league_name,event_time,home_team,away_team,status,updated_at&event_time=gte.${now}&event_time=lt.${horizon}&order=event_time.asc`, 500, 2);
     const ids = fixtures.map(row => Number(row.fixture_id)).filter(Number.isInteger);
     if (ids.length === 0) {
       const payload: SupabaseUpcomingCache = { source: "Supabase cache", loadedAt, available: true, fixtures: [], lastSyncAt: null };
