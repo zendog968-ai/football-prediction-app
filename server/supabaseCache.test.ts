@@ -25,6 +25,8 @@ describe("英冠Supabase研究卡快取", () => {
     expect(card?.compactMarkets.some(item => item.market === "讓球盤 (Handicap)")).toBe(true);
     expect(card?.handicapQuote).toBeNull();
     expect(card?.topScorelines).toHaveLength(3);
+    expect(card?.expectedHomeGoals).toBeCloseTo(0.7183);
+    expect(card?.expectedAwayGoals).toBeCloseTo(1.1175);
   });
 
   it("只配對同一書商、相反讓球線的真實上下盤水位", async () => {
@@ -52,6 +54,24 @@ describe("英冠Supabase研究卡快取", () => {
       awayOdds: 1.89,
       capturedAt: "2026-08-17T05:59:00Z",
     });
+  });
+
+  it("元資料沒有可驗證預期入球時維持空值，不以賽果機率反推或填補", async () => {
+    const fetchMock = vi.fn(async (input: URL | string) => ({
+      ok: true,
+      json: async () => {
+        const url = String(input);
+        if (url.includes("fixtures?")) return [{ fixture_id: 3002, league_name: "Premier League", event_time: "2026-08-22T12:30:00Z", home_team: "Arsenal", away_team: "Chelsea", status: "NS", updated_at: "2026-08-20T10:00:00Z" }];
+        if (url.includes("ai_predictions?")) return [{ fixture_id: 3002, home_win_prob: 0.42, draw_prob: 0.29, away_win_prob: 0.29, predicted_score: "1-1", recommendation: "研究來源尚未提供預期入球", confidence: 2, updated_at: "2026-08-20T10:00:00Z" }];
+        return [];
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const cache = await getSupabaseUpcomingCache(true);
+    expect(cache.fixtures[0]?.expectedHomeGoals).toBeNull();
+    expect(cache.fixtures[0]?.expectedAwayGoals).toBeNull();
+    expect(cache.fixtures[0]?.topScorelines).toEqual([]);
   });
 });
 

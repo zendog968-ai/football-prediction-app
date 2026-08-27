@@ -32,6 +32,8 @@ export type CachedUpcomingFixture = {
   hasPrediction: boolean;
   compactMarkets: CompactMarketRow[];
   topScorelines: ScorelineProbability[];
+  expectedHomeGoals: number | null;
+  expectedAwayGoals: number | null;
   odds: {
     home: number | null;
     draw: number | null;
@@ -186,13 +188,24 @@ function postgrestUrl(path: string): URL {
 }
 
 async function queryRows(path: string): Promise<Array<Record<string, unknown>>> {
-  const response = await fetch(postgrestUrl(path), {
-    headers: {
-      apikey: ENV.supabaseSecretKey,
-      Authorization: `Bearer ${ENV.supabaseSecretKey}`,
-      Accept: "application/json",
-    },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12_000);
+  let response: Response;
+  try {
+    response = await fetch(postgrestUrl(path), {
+      headers: {
+        apikey: ENV.supabaseSecretKey,
+        Authorization: `Bearer ${ENV.supabaseSecretKey}`,
+        Accept: "application/json",
+      },
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error("Supabase cache request timed out after 12 seconds");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!response.ok) throw new Error(`Supabase cache query failed (${response.status})`);
   const payload = await response.json();
   if (!Array.isArray(payload)) throw new Error("Supabase cache returned an invalid payload");
@@ -369,6 +382,8 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
         hasPrediction: !!prediction && homeWin !== null && draw !== null && awayWin !== null,
         compactMarkets,
         topScorelines: storedScorelines.length === 3 ? storedScorelines : topScorelines(expectedHomeGoals, expectedAwayGoals),
+        expectedHomeGoals,
+        expectedAwayGoals,
         odds: oddsByFixture.get(fixtureId) ?? null,
         handicapQuote: pickHandicapQuote(oddsSnapshots, fixtureId),
       }];

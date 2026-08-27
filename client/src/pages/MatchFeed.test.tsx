@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -38,6 +38,9 @@ vi.mock("@/lib/trpc", () => ({
                 { market: "亞洲讓球 1.75", selection: "客隊 +1.75", probability: 0.68, distribution: { fullWin: 0.56, halfWin: 0.24, push: 0, halfLoss: 0.08, fullLoss: 0.12 } },
               ],
               topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
+              expectedHomeGoals: 1.4,
+              expectedAwayGoals: 0.9,
+              researchSource: "Dixon–Coles模型＋HDA去水融合",
               odds: null,
             }],
           },
@@ -54,7 +57,7 @@ import MatchFeed from "./MatchFeed";
 describe("MatchFeed compact research format", () => {
   afterEach(() => cleanup());
 
-  it("renders the minimal market table and three scorelines only after a card is opened", async () => {
+  it("renders market research plus visual, risk and lineup tools only after a card is opened", async () => {
     const user = userEvent.setup();
     render(<MatchFeed />);
 
@@ -72,6 +75,12 @@ describe("MatchFeed compact research format", () => {
     expect(screen.getByText("全贏 47%｜半贏 0%｜走盤 21%｜半輸 0%｜全輸 32%")).toBeTruthy();
     expect(screen.getByText("【最高機率波膽 Top 3】")).toBeTruthy();
     expect(screen.getByText("1. 2-1：12%")).toBeTruthy();
+    expect(screen.getAllByTestId("probability-visual")).toHaveLength(2);
+    expect(screen.getByTestId("fixture-research-risk").textContent).toContain("資料風險受控");
+    expect(screen.getByTestId("lineup-adjustment-lab")).toBeTruthy();
+    expect(screen.getByText("1.40")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Example Home 先發強度調整"), { target: { value: "20" } });
+    expect(screen.getByText("+20%")).toBeTruthy();
     expect(screen.queryByText("研究標籤")).toBeNull();
   });
 });

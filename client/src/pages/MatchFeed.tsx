@@ -4,6 +4,7 @@ import { trpc } from "@/lib/trpc";
 import { localizeTeamName } from "@shared/teamDisplay";
 import { localizeLeagueName } from "@shared/leagueDisplay";
 import { Link } from "wouter";
+import { FixtureResearchRisk, LineupAdjustmentLab, ProbabilityVisual } from "@/components/MatchAnalysisEnhancements";
 
 const pct = (value: number) => `${Math.round(value * 100)}%`;
 const labelTime = (value: string) => new Intl.DateTimeFormat("zh-HK", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
@@ -51,7 +52,7 @@ export default function MatchFeed() {
           <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3"><div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-xs font-black text-emerald-300">{initials(item.homeTeam)}</span><span className="font-bold leading-tight">{localize(item.homeTeam)}</span></div><div className="rounded-lg bg-black/30 px-3 py-1 text-center font-serif text-lg text-emerald-300">{item.hasPrediction ? item.predictedScore || "—" : "待同步"}</div><div className="flex items-center justify-end gap-3 text-right"><span className="font-bold leading-tight">{localize(item.awayTeam)}</span><span className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-xs font-black text-amber-200">{initials(item.awayTeam)}</span></div></div>
           <div className="mt-3 flex justify-end text-xs text-zinc-500"><ChevronDown className={`transition ${openId === item.fixtureId ? "rotate-180" : ""}`} size={14}/></div>
         </button>
-        {openId === item.fixtureId && <div className="border-t border-white/10 bg-black/20 p-4"><CompactTable item={item}/></div>}
+        {openId === item.fixtureId && <div className="border-t border-white/10 bg-black/20 p-4"><CompactTable item={item}/>{item.hasPrediction ? <ProbabilityVisual probabilities={{ homeWin: item.homeWin, draw: item.draw, awayWin: item.awayWin }} homeTeam={localize(item.homeTeam)} awayTeam={localize(item.awayTeam)} /> : <p className="mt-5 rounded-2xl border border-rose-200/30 bg-rose-200/10 px-4 py-3 text-xs leading-5 text-rose-100">尚未同步完整的1X2研究機率，系統不會顯示或推算機率圖表。</p>}<FixtureResearchRisk hasPrediction={item.hasPrediction} expectedGoalsAvailable={item.expectedHomeGoals !== null && item.expectedAwayGoals !== null} researchSource={item.researchSource} /><LineupAdjustmentLab key={item.fixtureId} forecast={{ home_team: localize(item.homeTeam), away_team: localize(item.awayTeam), selected_features: { dc_expected_home_goals: item.expectedHomeGoals, dc_expected_away_goals: item.expectedAwayGoals } }} /></div>}
       </article>)}</div> : <div className="rounded-2xl border border-dashed border-white/10 bg-[#1e1e1e] p-8 text-center text-sm text-zinc-500"><ShieldAlert className="mx-auto mb-3" size={22}/>目前沒有已同步賽事。<p className="mt-2 text-xs">最後同步：{query.data?.lastSyncAt ? new Date(query.data.lastSyncAt).toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong" }) : "未提供"}</p><button onClick={() => query.refetch()} className="mt-4 rounded-lg bg-emerald-400 px-4 py-2 text-xs font-bold text-zinc-950">手動重新讀取同步資料</button></div>}
     </section>
   </main>;
