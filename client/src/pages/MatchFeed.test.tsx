@@ -55,7 +55,10 @@ vi.mock("@/lib/trpc", () => ({
 import MatchFeed from "./MatchFeed";
 
 describe("MatchFeed compact research format", () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    window.history.replaceState({}, "", "/");
+  });
 
   it("renders market research plus visual, risk and lineup tools only after a card is opened", async () => {
     const user = userEvent.setup();
@@ -82,5 +85,20 @@ describe("MatchFeed compact research format", () => {
     fireEvent.change(screen.getByLabelText("Example Home 先發強度調整"), { target: { value: "20" } });
     expect(screen.getByText("+20%")).toBeTruthy();
     expect(screen.queryByText("研究標籤")).toBeNull();
+  });
+
+  it("can open a fixture from its dedicated share URL and copy that URL", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
+    window.history.replaceState({}, "", "/?fixture=77");
+
+    render(<MatchFeed />);
+
+    expect(screen.getByText("已分享賽事詳情")).toBeTruthy();
+    expect(screen.getByText("盤口種類")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "分享此場賽事詳情" }));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("?fixture=77"));
   });
 });
