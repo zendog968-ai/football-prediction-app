@@ -19,6 +19,7 @@ export async function setupVite(app: Express, server: Server) {
     server: serverOptions,
     appType: "custom",
   });
+  app.locals.vite = vite;
 
   app.use(vite.middlewares);
   app.use("*", async (req, res, next) => {

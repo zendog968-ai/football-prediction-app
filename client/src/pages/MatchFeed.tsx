@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { CalendarDays, ChevronDown, Clock3, Share2, ShieldAlert, Sparkles } from "lucide-react";
+import { CalendarDays, CheckCircle2, ChevronDown, Clock3, Download, Share2, ShieldAlert, Sparkles } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { localizeTeamName } from "@shared/teamDisplay";
 import { localizeLeagueName } from "@shared/leagueDisplay";
@@ -30,6 +30,10 @@ export function fixtureShareUrl(fixtureId: number, href: string): string {
   url.pathname = "/";
   url.searchParams.set("fixture", String(fixtureId));
   return url.toString();
+}
+
+export function fixtureShareCardUrl(fixtureId: number): string {
+  return `/api/share/fixture/${fixtureId}/card.png?download=1`;
 }
 
 async function copyShareUrl(value: string): Promise<boolean> {
@@ -102,13 +106,13 @@ export default function MatchFeed() {
         return;
       }
       const copied = await copyShareUrl(url);
-      if (copied) toast.success("賽事詳情連結已複製");
+      if (copied) toast.success("賽事詳情連結已複製", { description: "可直接貼到 WhatsApp、Telegram 或社交平台。", duration: 5_000, icon: <CheckCircle2 size={18}/>, action: { label: "開啟", onClick: () => window.open(url, "_blank", "noopener,noreferrer") } });
       else toast.error("未能複製連結，請稍後再試");
     } catch (error) {
       if ((error as { name?: string } | undefined)?.name === "AbortError") return;
       try {
         const copied = await copyShareUrl(url);
-        if (copied) toast.success("賽事詳情連結已複製");
+        if (copied) toast.success("賽事詳情連結已複製", { description: "可直接貼到 WhatsApp、Telegram 或社交平台。", duration: 5_000, icon: <CheckCircle2 size={18}/>, action: { label: "開啟", onClick: () => window.open(url, "_blank", "noopener,noreferrer") } });
         else toast.error("未能複製連結，請稍後再試");
       } catch {
         toast.error("未能複製連結，請稍後再試");
@@ -131,7 +135,7 @@ export default function MatchFeed() {
           <div className="mt-4 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3"><div className="min-w-0 flex items-center gap-3"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/10 text-xs font-black text-emerald-300">{initials(item.homeTeam)}</span><span className="font-bold leading-tight">{localize(item.homeTeam)}</span></div><div className="min-w-16 shrink-0 whitespace-nowrap rounded-lg bg-black/30 px-3 py-1 text-center font-serif text-lg text-emerald-300">{item.hasPrediction ? item.predictedScore || "—" : "待同步"}</div><div className="min-w-0 flex items-center justify-end gap-3 text-right"><span className="font-bold leading-tight">{localize(item.awayTeam)}</span><span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/10 text-xs font-black text-amber-200">{initials(item.awayTeam)}</span></div></div>
           <div className="mt-3 flex justify-end text-xs text-zinc-500"><ChevronDown className={`transition ${openId === item.fixtureId ? "rotate-180" : ""}`} size={14}/></div>
         </button>
-        {openId === item.fixtureId && <div className="border-t border-white/10 bg-black/20 p-4"><div className="mb-4 flex items-center justify-between gap-3"><p className="text-xs text-zinc-500">可分享此場目前已同步的研究詳情</p><button type="button" aria-label="分享此場賽事詳情" onClick={() => void shareFixture(item)} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-200 transition hover:bg-emerald-400/20 active:scale-[.97]"><Share2 size={14}/>分享</button></div><CompactTable item={item}/>{item.hasPrediction ? <ProbabilityVisual probabilities={{ homeWin: item.homeWin, draw: item.draw, awayWin: item.awayWin }} homeTeam={localize(item.homeTeam)} awayTeam={localize(item.awayTeam)} /> : <p className="mt-5 rounded-2xl border border-rose-200/30 bg-rose-200/10 px-4 py-3 text-xs leading-5 text-rose-100">尚未同步完整的1X2研究機率，系統不會顯示或推算機率圖表。</p>}<FixtureResearchRisk hasPrediction={item.hasPrediction} expectedGoalsAvailable={item.expectedHomeGoals !== null && item.expectedAwayGoals !== null} researchSource={item.researchSource} /><LineupAdjustmentLab key={item.fixtureId} forecast={{ home_team: localize(item.homeTeam), away_team: localize(item.awayTeam), selected_features: { dc_expected_home_goals: item.expectedHomeGoals, dc_expected_away_goals: item.expectedAwayGoals } }} /></div>}
+        {openId === item.fixtureId && <div className="border-t border-white/10 bg-black/20 p-4"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-zinc-500">可分享此場目前已同步的研究詳情</p><div className="flex items-center gap-2"><a aria-label="下載賽事研究圖卡" href={fixtureShareCardUrl(item.fixtureId)} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-xs font-bold text-amber-100 transition hover:bg-amber-300/20 active:scale-[.97]"><Download size={14}/>下載圖卡</a><button type="button" aria-label="分享此場賽事詳情" onClick={() => void shareFixture(item)} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-200 transition hover:bg-emerald-400/20 active:scale-[.97]"><Share2 size={14}/>分享</button></div></div><CompactTable item={item}/>{item.hasPrediction ? <ProbabilityVisual probabilities={{ homeWin: item.homeWin, draw: item.draw, awayWin: item.awayWin }} homeTeam={localize(item.homeTeam)} awayTeam={localize(item.awayTeam)} /> : <p className="mt-5 rounded-2xl border border-rose-200/30 bg-rose-200/10 px-4 py-3 text-xs leading-5 text-rose-100">尚未同步完整的1X2研究機率，系統不會顯示或推算機率圖表。</p>}<FixtureResearchRisk hasPrediction={item.hasPrediction} expectedGoalsAvailable={item.expectedHomeGoals !== null && item.expectedAwayGoals !== null} researchSource={item.researchSource} /><LineupAdjustmentLab key={item.fixtureId} forecast={{ home_team: localize(item.homeTeam), away_team: localize(item.awayTeam), selected_features: { dc_expected_home_goals: item.expectedHomeGoals, dc_expected_away_goals: item.expectedAwayGoals } }} /></div>}
       </article>)}</div> : <div className="rounded-2xl border border-dashed border-white/10 bg-[#1e1e1e] p-8 text-center text-sm text-zinc-500"><ShieldAlert className="mx-auto mb-3" size={22}/>目前沒有已同步賽事。<p className="mt-2 text-xs">最後同步：{query.data?.lastSyncAt ? new Date(query.data.lastSyncAt).toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong" }) : "未提供"}</p><button onClick={() => query.refetch()} className="mt-4 rounded-lg bg-emerald-400 px-4 py-2 text-xs font-bold text-zinc-950">手動重新讀取同步資料</button></div>}
     </section>
   </main>;
