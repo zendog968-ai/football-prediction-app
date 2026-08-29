@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PIPELINE_DIR = PROJECT_ROOT / "data-pipeline"
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 OPEN_RESULTS_URL = "https://raw.githubusercontent.com/schochastics/football-data/master/data/results/games.parquet"
-LEAGUES = ("BRA1", "EPL", "LL", "BL", "SA", "L1", "MLS", "J1", "FIN1", "KOR1", "POR1", "MEX1", "AUS1", "UEL", "SUD", "LCUP")
+LEAGUES = ("BRA1", "EPL", "LL", "BL", "SA", "L1", "MLS", "J1", "FIN1", "KOR1", "POR1", "MEX1", "AUS1", "ARG1", "UEL", "SUD", "LCUP")
 
 
 def run(command: list[str]) -> None:

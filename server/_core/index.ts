@@ -12,7 +12,6 @@ import { handleScheduledResearch, handleTelegramWebhook } from "../telegramResea
 import { handleScheduledAllLeagueSync } from "../allLeagueSync";
 import { handleScheduledWeeklyModelReport } from "../weeklyModelReport";
 import { registerAdminConfigRoutes } from "../adminConfig";
-import { registerSharePreviewRoutes } from "../sharePreview";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -57,7 +56,6 @@ async function startServer() {
   app.post("/api/scheduled/all-league-sync", (req, res) => void handleScheduledAllLeagueSync(req, res));
   app.post("/api/scheduled/model-drift-weekly", (req, res) => void handleScheduledWeeklyModelReport(req, res));
   registerAdminConfigRoutes(app);
-  registerSharePreviewRoutes(app);
   // tRPC API
   app.use(
     "/api/trpc",

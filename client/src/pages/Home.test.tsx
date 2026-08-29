@@ -52,6 +52,7 @@ const expandedLeagueTeams = vi.hoisted(() => ({
   UEL: ["Benfica", "Ferencváros"],
   SUD: ["Santos FC", "Vasco Da Gama"],
   LCUP: ["Seattle Sounders FC", "Guadalajara"],
+  ARG1: ["Boca Juniors", "River Plate"],
 }));
 
 vi.mock("@/lib/trpc", () => ({
@@ -62,10 +63,10 @@ vi.mock("@/lib/trpc", () => ({
           data: {
             leagues: [
               ...[
-                ["BRA1", "Campeonato Brasileiro Série A"], ["EPL", "Premier League"], ["LL", "La Liga"], ["BL", "Bundesliga"], ["SA", "Serie A"], ["L1", "Ligue 1"], ["MLS", "Major League Soccer"], ["J1", "J1 League"], ["FIN1", "Veikkausliiga"], ["KOR1", "K League 1"], ["POR1", "Primeira Liga"], ["MEX1", "Liga MX"], ["AUS1", "A-League Men"], ["UEL", "UEFA Europa League"], ["SUD", "CONMEBOL Sudamericana"], ["LCUP", "Leagues Cup"],
-              ].map(([code, name], index) => ({ code, name, first_completed_date: "2020-08-08", cutoff_date: index > 12 ? "2026-08-13" : "2025-05-25", last_updated_at: "2026-08-13T00:00:00+00:00", match_count: 1900, completed_match_count: 1900 })),
+                ["BRA1", "Campeonato Brasileiro Série A"], ["EPL", "Premier League"], ["LL", "La Liga"], ["BL", "Bundesliga"], ["SA", "Serie A"], ["L1", "Ligue 1"], ["MLS", "Major League Soccer"], ["J1", "J1 League"], ["FIN1", "Veikkausliiga"], ["KOR1", "K League 1"], ["POR1", "Primeira Liga"], ["MEX1", "Liga MX"], ["AUS1", "A-League Men"], ["ARG1", "Liga Profesional Argentina"], ["UEL", "UEFA Europa League"], ["SUD", "CONMEBOL Sudamericana"], ["LCUP", "Leagues Cup"],
+              ].map(([code, name], index) => ({ code, name, first_completed_date: "2020-08-08", cutoff_date: index > 13 ? "2026-08-13" : "2025-05-25", last_updated_at: "2026-08-13T00:00:00+00:00", match_count: 1900, completed_match_count: 1900 })),
             ],
-            coverage: { scopeCount: 16, totalMatches: 24235, totalCompletedMatches: 24235, firstDate: "2020-08-08", lastDate: "2026-08-13", lastUpdatedAt: "2026-08-13T00:00:00+00:00", releaseVersion: "data-20260813T224404Z-86a3231", model: "校準後 XGBoost 三分類模型", disclaimer: "僅使用歷史賽前資料。" },
+            coverage: { scopeCount: 17, totalMatches: 24235, totalCompletedMatches: 24235, firstDate: "2020-08-08", lastDate: "2026-08-13", lastUpdatedAt: "2026-08-13T00:00:00+00:00", releaseVersion: "data-20260813T224404Z-86a3231", model: "校準後 XGBoost 三分類模型", disclaimer: "僅使用歷史賽前資料。" },
           },
         }),
       },
@@ -223,7 +224,7 @@ describe("Home prediction workflow", () => {
     const user = userEvent.setup();
     render(<Home />);
 
-    for (const name of ["美職 · Major League Soccer", "日職 · J1 League", "芬蘭聯賽 · Veikkausliiga", "韓職 · K League 1", "葡職 · Primeira Liga", "墨西哥聯賽 · Liga MX", "澳職 · A-League Men"]) {
+    for (const name of ["美職 · Major League Soccer", "日職 · J1 League", "芬蘭聯賽 · Veikkausliiga", "韓職 · K League 1", "葡職 · Primeira Liga", "墨西哥聯賽 · Liga MX", "澳職 · A-League Men", "阿甲 · Liga Profesional Argentina"]) {
       expect(screen.getByRole("option", { name })).toBeTruthy();
     }
     expect(screen.getByRole("option", { name: "歐霸盃 · UEFA Europa League" })).toBeTruthy();
@@ -244,7 +245,7 @@ describe("Home prediction workflow", () => {
     const checks = [
       ["MLS", "Atlan", "Atlanta United"], ["J1", "Kawa", "Kawasaki Frontale"],
       ["FIN1", "Hak", "Haka"], ["KOR1", "Daeg", "Daegu"], ["POR1", "AV", "AVS"],
-      ["MEX1", "Tigr", "Tigres UANL"], ["AUS1", "Melbourne V", "Melbourne Victory"], ["UEL", "Feren", "Ferencváros"], ["SUD", "Sant", "Santos FC"], ["LCUP", "Seatt", "Seattle Sounders FC"],
+      ["MEX1", "Tigr", "Tigres UANL"], ["AUS1", "Melbourne V", "Melbourne Victory"], ["ARG1", "Boca", "Boca Juniors"], ["UEL", "Feren", "Ferencváros"], ["SUD", "Sant", "Santos FC"], ["LCUP", "Seatt", "Seattle Sounders FC"],
     ] as const;
 
     for (const [leagueCode, search, expected] of checks) {

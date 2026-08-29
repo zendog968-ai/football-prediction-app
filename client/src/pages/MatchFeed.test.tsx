@@ -4,10 +4,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
-
-vi.mock("sonner", () => ({ toast }));
-
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     prediction: {
@@ -61,8 +57,6 @@ import MatchFeed from "./MatchFeed";
 describe("MatchFeed compact research format", () => {
   afterEach(() => {
     cleanup();
-    toast.success.mockClear();
-    toast.error.mockClear();
     window.history.replaceState({}, "", "/");
   });
 
@@ -87,7 +81,6 @@ describe("MatchFeed compact research format", () => {
     expect(screen.getAllByTestId("probability-visual")).toHaveLength(2);
     expect(screen.getByTestId("fixture-research-risk").textContent).toContain("資料風險受控");
     expect(screen.getByTestId("lineup-adjustment-lab")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "下載賽事研究圖卡" }).getAttribute("href")).toBe("/api/share/fixture/77/card.png?download=1");
     expect(screen.getByText("1.40")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Example Home 先發強度調整"), { target: { value: "20" } });
     expect(screen.getByText("+20%")).toBeTruthy();
@@ -107,9 +100,5 @@ describe("MatchFeed compact research format", () => {
     expect(screen.getByText("盤口種類")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "分享此場賽事詳情" }));
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining("?fixture=77"));
-    expect(toast.success).toHaveBeenCalledWith("賽事詳情連結已複製", expect.objectContaining({
-      description: "可直接貼到 WhatsApp、Telegram 或社交平台。",
-      duration: 5_000,
-    }));
   });
 });

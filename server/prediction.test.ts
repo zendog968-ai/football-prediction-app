@@ -93,7 +93,7 @@ describe("prediction scope guard", () => {
     )).toThrow("超出模型範疇");
   });
 
-  it("rejects a league outside the calibrated 14-scope data contract", () => {
+  it("rejects a league outside the calibrated 17-scope data contract", () => {
     expect(() => validateInferenceScope(
       { leagueCode: "LIBERTADORES", homeTeam: "Palmeiras", awayTeam: "Penarol" },
       [],
