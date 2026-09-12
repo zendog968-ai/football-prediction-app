@@ -230,7 +230,7 @@ function chunks<T>(items: T[], size: number): T[][] {
 }
 
 async function queryFixtureRelatedRows(select: string, ids: number[]): Promise<Array<Record<string, unknown>>> {
-  const rows = await Promise.all(chunks(ids, 150).map(group => queryRows(`${select}&fixture_id=in.(${group.join(",")})`)));
+  const rows = await Promise.all(chunks(ids, 60).map(group => queryRows(`${select}&fixture_id=in.(${group.join(",")})`)));
   return rows.flat();
 }
 
@@ -238,7 +238,7 @@ async function queryTranslationRows(table: "team_translations" | "league_transla
   const unique = Array.from(new Set(names.map(name => name.trim()).filter(Boolean)));
   if (!unique.length) return [];
   try {
-    const groups = chunks(unique, 100);
+    const groups = chunks(unique, 40);
     const rows = await Promise.all(groups.map(group => {
       const quoted = group.map(name => `"${name.replace(/"/g, "\\\"")}"`).join(",");
       return queryRows(`${table}?select=english_name,name_zh_hk,name_zh_tw&english_name=in.(${quoted})`);

@@ -353,15 +353,17 @@ async function apiFootball<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function verifyApiFootballReadiness(): Promise<void> {
+export async function verifyApiFootballReadiness(options: { checkOdds?: boolean } = {}): Promise<void> {
   const status = await apiFootball<ApiFootballStatus>("/status");
   if (apiErrorCount(status) > 0 || status.response?.subscription?.active !== true || (status.response?.requests?.limit_day ?? 0) < 1000) {
     throw new Error("API-Football帳戶未通過授權或額度健康檢查；研究摘要已安全停止。");
   }
-  const mls = LEAGUES.MLS;
-  const mlsOdds = await apiFootball<ApiFootballOddsResponse>(`/odds?league=${mls.apiLeagueId}&season=${mls.season}`);
-  if (apiErrorCount(mlsOdds) > 0 || !Array.isArray(mlsOdds.response) || mlsOdds.response.length === 0) {
-    throw new Error("API-Football未提供2026 MLS盤口覆蓋；研究摘要已安全停止。");
+  if (options.checkOdds) {
+    const mls = LEAGUES.MLS;
+    const mlsOdds = await apiFootball<ApiFootballOddsResponse>(`/odds?league=${mls.apiLeagueId}&season=${mls.season}`);
+    if (apiErrorCount(mlsOdds) > 0 || !Array.isArray(mlsOdds.response) || mlsOdds.response.length === 0) {
+      throw new Error("API-Football未提供2026 MLS盤口覆蓋；研究摘要已安全停止。");
+    }
   }
 }
 
@@ -1592,7 +1594,7 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
   if (!db) throw new Error("資料庫暫時無法使用。");
   let apiReady = true;
   try {
-    await verifyApiFootballReadiness();
+    await verifyApiFootballReadiness({ checkOdds: true });
   } catch {
     apiReady = false;
   }
