@@ -129,3 +129,60 @@ describe("Supabase繁中翻譯與讓球盤資料契約", () => {
     });
   });
 });
+
+
+describe("一小時讓球水位趨勢", () => {
+  it("以同一書商及同一盤線的至少兩個快照計算上下盤方向", async () => {
+    const now = Date.now();
+    const earlier = new Date(now - 45 * 60 * 1000).toISOString();
+    const latest = new Date(now - 10 * 60 * 1000).toISOString();
+    const fetchMock = vi.fn(async (input: URL | string) => ({
+      ok: true,
+      json: async () => {
+        const url = String(input);
+        if (url.includes("fixtures?")) return [{ fixture_id: 4001, league_name: "La Liga", event_time: new Date(now + 2 * 60 * 60 * 1000).toISOString(), home_team: "Athletic Bilbao", away_team: "Elche", status: "NS", updated_at: latest }];
+        if (url.includes("ai_predictions?")) return [{ fixture_id: 4001, home_win_prob: 0.55, draw_prob: 0.25, away_win_prob: 0.20, predicted_score: "1-0", recommendation: "\\n[AURELIA_META]{\"h\":1.3,\"a\":0.8,\"s\":\"E\"}", confidence: 4, updated_at: latest }];
+        if (url.includes("odds_snapshots?")) return [
+          { fixture_id: 4001, market_type: "HDC | Bet365", handicap: "Home -0.5", home_odds: 1.95, away_odds: null, snapshot_time: earlier },
+          { fixture_id: 4001, market_type: "HDC | Bet365", handicap: "Away +0.5", home_odds: null, away_odds: 1.85, snapshot_time: earlier },
+          { fixture_id: 4001, market_type: "HDC | Bet365", handicap: "Home -0.5", home_odds: 1.88, away_odds: null, snapshot_time: latest },
+          { fixture_id: 4001, market_type: "HDC | Bet365", handicap: "Away +0.5", home_odds: null, away_odds: 1.92, snapshot_time: latest },
+        ];
+        return [];
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const cache = await getSupabaseUpcomingCache(true);
+    expect(cache.fixtures[0]?.handicapQuote?.trend).toMatchObject({
+      homeDirection: "down",
+      awayDirection: "up",
+      homeDelta: -0.07,
+      awayDelta: 0.07,
+      sampleCount: 2,
+      windowMinutes: 35,
+    });
+  });
+
+  it("只有一個快照時不顯示趨勢方向", async () => {
+    const now = Date.now();
+    const capturedAt = new Date(now - 10 * 60 * 1000).toISOString();
+    const fetchMock = vi.fn(async (input: URL | string) => ({
+      ok: true,
+      json: async () => {
+        const url = String(input);
+        if (url.includes("fixtures?")) return [{ fixture_id: 4002, league_name: "La Liga", event_time: new Date(now + 2 * 60 * 60 * 1000).toISOString(), home_team: "Athletic Bilbao", away_team: "Elche", status: "NS", updated_at: capturedAt }];
+        if (url.includes("ai_predictions?")) return [{ fixture_id: 4002, home_win_prob: 0.55, draw_prob: 0.25, away_win_prob: 0.20, predicted_score: "1-0", recommendation: "\\n[AURELIA_META]{\"h\":1.3,\"a\":0.8,\"s\":\"E\"}", confidence: 4, updated_at: capturedAt }];
+        if (url.includes("odds_snapshots?")) return [
+          { fixture_id: 4002, market_type: "HDC | Bet365", handicap: "Home -0.5", home_odds: 1.90, away_odds: null, snapshot_time: capturedAt },
+          { fixture_id: 4002, market_type: "HDC | Bet365", handicap: "Away +0.5", home_odds: null, away_odds: 1.90, snapshot_time: capturedAt },
+        ];
+        return [];
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const cache = await getSupabaseUpcomingCache(true);
+    expect(cache.fixtures[0]?.handicapQuote?.trend).toBeUndefined();
+  });
+});

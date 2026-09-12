@@ -210,6 +210,12 @@ function formatCachedResearchSource(item: CachedUpcomingFixture): string {
   return `📊 【資料來源】${item.researchSource || "Dixon–Coles 模型 + HDA 賠率融合"}`;
 }
 
+function formatHandicapTrend(trend: NonNullable<NonNullable<CachedUpcomingFixture["handicapQuote"]>["trend"]>): string {
+  const icon = (direction: "up" | "down" | "flat") => direction === "up" ? "↑" : direction === "down" ? "↓" : "→";
+  const delta = (direction: "up" | "down" | "flat", value: number) => `${icon(direction)}${Math.abs(value).toFixed(2)}`;
+  return `📈 【一小時水位】主 ${delta(trend.homeDirection, trend.homeDelta)} | 客 ${delta(trend.awayDirection, trend.awayDelta)} · ${trend.sampleCount}個快照/${trend.windowMinutes}分鐘`;
+}
+
 function formatCachedResearchExtras(item: CachedUpcomingFixture): string[] {
   const oneX = item.homeWin + item.draw;
   const xTwo = item.draw + item.awayWin;
@@ -258,7 +264,7 @@ function formatCachedResearchCard(item: CachedUpcomingFixture, index: number): s
   const oneX = item.homeWin + item.draw;
   const xTwo = item.draw + item.awayWin;
   const handicap = item.handicapQuote
-    ? `⚖️ 【實時讓球盤】${item.handicapQuote.source} 主隊 ${item.handicapQuote.homeLine} (@${item.handicapQuote.homeOdds.toFixed(2)}) / 客隊 ${item.handicapQuote.awayLine} (@${item.handicapQuote.awayOdds.toFixed(2)})`
+    ? `⚖️ 【實時讓球盤】${item.handicapQuote.source} 主隊 ${item.handicapQuote.homeLine} (@${item.handicapQuote.homeOdds.toFixed(2)}) / 客隊 ${item.handicapQuote.awayLine} (@${item.handicapQuote.awayOdds.toFixed(2)})${item.handicapQuote.trend ? `  ${formatHandicapTrend(item.handicapQuote.trend)}` : ""}`
     : "⚖️ 【實時讓球盤】暫無可驗證HKJC／亞洲盤口；不以模型讓球代替市場水位。";
   return [
     `${index}. 🏆 【聯賽】${localizeLeagueName(item.leagueName)}`,

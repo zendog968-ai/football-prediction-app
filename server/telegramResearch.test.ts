@@ -526,3 +526,51 @@ describe("盤路與資料品質閘門", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toContain("/status");
   });
 });
+
+
+describe("實時讓球盤一小時微型趨勢圖示", () => {
+  it("在真實讓球盤旁顯示主客水位升跌方向與快照窗口", () => {
+    const message = formatCachedUpcoming([{
+      fixtureId: 7001,
+      leagueName: "MLS",
+      eventTime: "2026-08-15T20:00:00Z",
+      homeTeam: "Example Home",
+      awayTeam: "Example Away",
+      homeWin: 0.62,
+      draw: 0.21,
+      awayWin: 0.17,
+      predictedScore: "2-1",
+      recommendation: "研究傾向：主勝",
+      confidence: 4,
+      predictionUpdatedAt: "2026-08-15T10:00:00Z",
+      hasPrediction: true,
+      compactMarkets: [
+        { market: "主客和 (1X2)", selection: "主勝", probability: 0.62 },
+        { market: "入球大細 2.5", selection: "大 2.5", probability: 0.56 },
+        { market: "讓球盤 (Handicap)", selection: "主隊 -0.5", probability: 0.6 },
+      ],
+      topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
+      odds: null,
+      handicapQuote: {
+        source: "Bet365",
+        homeLine: "-0.5",
+        homeOdds: 1.88,
+        awayLine: "+0.5",
+        awayOdds: 1.92,
+        capturedAt: "2026-08-15T10:00:00Z",
+        trend: {
+          homeDirection: "down",
+          awayDirection: "up",
+          homeDelta: -0.07,
+          awayDelta: 0.07,
+          sampleCount: 2,
+          windowMinutes: 35,
+          firstCapturedAt: "2026-08-15T09:25:00Z",
+          latestCapturedAt: "2026-08-15T10:00:00Z",
+        },
+      },
+    }], new Date("2026-08-15T00:00:00Z"));
+    expect(message).toContain("📈 【一小時水位】主 ↓0.07 | 客 ↑0.07 · 2個快照/35分鐘");
+    expect(message).toContain("⚖️ 【實時讓球盤】Bet365 主隊 -0.5 (@1.88) / 客隊 +0.5 (@1.92)");
+  });
+});

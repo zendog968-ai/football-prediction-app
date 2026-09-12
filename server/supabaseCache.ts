@@ -2,6 +2,17 @@ import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, 
 import { ENV } from "./_core/env";
 
 type CachedMarketSelection = { selection: string; odds: number | null };
+export type CachedHandicapTrend = {
+  homeDirection: "up" | "down" | "flat";
+  awayDirection: "up" | "down" | "flat";
+  homeDelta: number;
+  awayDelta: number;
+  sampleCount: number;
+  windowMinutes: number;
+  firstCapturedAt: string;
+  latestCapturedAt: string;
+};
+
 export type CachedHandicapQuote = {
   source: string;
   homeLine: string;
@@ -9,6 +20,7 @@ export type CachedHandicapQuote = {
   awayLine: string;
   awayOdds: number;
   capturedAt: string | null;
+  trend?: CachedHandicapTrend;
 };
 type CachedTraditionalTranslation = { nameZhHk: string | null; nameZhTw: string | null };
 
@@ -108,30 +120,91 @@ function mapTraditionalTranslation(row: Record<string, unknown>): CachedTraditio
   };
 }
 
-function pickHandicapQuote(rows: Array<Record<string, unknown>>, fixtureId: number): CachedUpcomingFixture["handicapQuote"] {
+type HandicapPair = {
+  source: string;
+  home: RawHandicapSelection;
+  away: RawHandicapSelection;
+};
+
+function getHandicapPairs(rows: Array<Record<string, unknown>>, fixtureId: number): HandicapPair[] {
   const selections = rows.flatMap(row => {
     const parsed = parseHandicapSelection(row);
     return parsed?.fixtureId === fixtureId ? [parsed] : [];
   });
-  
-  const sources = Array.from(new Set(selections.map(s => s.source)));
-  for (const source of sources) {
-    const sourceSelections = selections.filter(s => s.source === source);
-    const home = sourceSelections.find(s => s.side === "Home");
-    const away = sourceSelections.find(s => s.side === "Away" && Math.abs(s.line + (home?.line ?? 0)) < 0.001);
-    
-    if (home && away) {
-      return {
-        source,
-        homeLine: formatHandicapLine(home.line),
-        homeOdds: home.odds,
-        awayLine: formatHandicapLine(away.line),
-        awayOdds: away.odds,
-        capturedAt: home.capturedAt,
-      };
-    }
+  const pairs: HandicapPair[] = [];
+  for (const row of rows) {
+    const parsed = parseHandicapSelection(row);
+    const homeOdds = normalizeOdds(row.home_odds);
+    const awayOdds = normalizeOdds(row.away_odds);
+    if (parsed?.fixtureId !== fixtureId || parsed.side !== "Home" || homeOdds === null || awayOdds === null) continue;
+    pairs.push({
+      source: parsed.source,
+      home: { ...parsed, odds: homeOdds },
+      away: { ...parsed, side: "Away", line: -parsed.line, odds: awayOdds },
+    });
   }
-  return null;
+  for (const home of selections.filter(item => item.side === "Home")) {
+    const sameTimestamp = selections.find(item => item.side === "Away"
+      && item.source === home.source
+      && Math.abs(item.line + home.line) < 0.001
+      && item.capturedAt === home.capturedAt);
+    const away = sameTimestamp ?? selections.find(item => item.side === "Away"
+      && item.source === home.source
+      && Math.abs(item.line + home.line) < 0.001);
+    if (away) pairs.push({ source: home.source, home, away });
+  }
+  return pairs;
+}
+
+function buildHandicapTrend(pairs: HandicapPair[], selected: HandicapPair): CachedHandicapTrend | undefined {
+  const now = Date.now();
+  const cutoff = now - 60 * 60 * 1000;
+  const samples = pairs
+    .filter(pair => pair.source === selected.source && Math.abs(pair.home.line - selected.home.line) < 0.001)
+    .flatMap(pair => {
+      const capturedAt = pair.home.capturedAt ?? pair.away.capturedAt;
+      const timestamp = capturedAt ? Date.parse(capturedAt) : Number.NaN;
+      if (!Number.isFinite(timestamp) || timestamp < cutoff || timestamp > now + 5 * 60 * 1000) return [];
+      return [{ timestamp, capturedAt: capturedAt!, homeOdds: pair.home.odds, awayOdds: pair.away.odds }];
+    })
+    .sort((left, right) => left.timestamp - right.timestamp)
+    .filter((sample, index, all) => index === 0 || sample.timestamp !== all[index - 1]!.timestamp);
+  if (samples.length < 2) return undefined;
+  const first = samples[0]!;
+  const latest = samples.at(-1)!;
+  const homeDelta = Number((latest.homeOdds - first.homeOdds).toFixed(3));
+  const awayDelta = Number((latest.awayOdds - first.awayOdds).toFixed(3));
+  const direction = (delta: number): "up" | "down" | "flat" => Math.abs(delta) < 0.005 ? "flat" : delta > 0 ? "up" : "down";
+  return {
+    homeDirection: direction(homeDelta),
+    awayDirection: direction(awayDelta),
+    homeDelta,
+    awayDelta,
+    sampleCount: samples.length,
+    windowMinutes: Math.round((latest.timestamp - first.timestamp) / 60000),
+    firstCapturedAt: first.capturedAt,
+    latestCapturedAt: latest.capturedAt,
+  };
+}
+
+function pickHandicapQuote(rows: Array<Record<string, unknown>>, fixtureId: number): CachedUpcomingFixture["handicapQuote"] {
+  const pairs = getHandicapPairs(rows, fixtureId);
+  if (!pairs.length) return null;
+  const selected = [...pairs].sort((left, right) => {
+    const leftTime = Date.parse(left.home.capturedAt ?? "");
+    const rightTime = Date.parse(right.home.capturedAt ?? "");
+    return rightTime - leftTime || Math.abs(left.home.line) - Math.abs(right.home.line);
+  })[0]!;
+  const trend = buildHandicapTrend(pairs, selected);
+  return {
+    source: selected.source,
+    homeLine: formatHandicapLine(selected.home.line),
+    homeOdds: selected.home.odds,
+    awayLine: formatHandicapLine(selected.away.line),
+    awayOdds: selected.away.odds,
+    capturedAt: selected.home.capturedAt ?? selected.away.capturedAt,
+    ...(trend ? { trend } : {}),
+  };
 }
 
 function parseResearchMetadata(value: unknown) {
