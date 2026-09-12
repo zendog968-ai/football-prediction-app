@@ -84,7 +84,7 @@ function parseHandicapSelection(snapshot: Record<string, unknown>): RawHandicapS
   const fixtureId = Number(snapshot.fixture_id);
   const marketType = typeof snapshot.market_type === "string" ? snapshot.market_type : "";
   const selection = typeof snapshot.handicap === "string" ? snapshot.handicap.trim() : "";
-  const match = /^(Home|Away)\s+([+-]?\d+(?:\.25|\.5|\.75)?)$/i.exec(selection);
+  const match = /^(Home|Away)\s+([+-]?\d+(?:\.\d+)?)$/i.exec(selection);
   const odds = normalizeOdds(snapshot.home_odds) ?? normalizeOdds(snapshot.away_odds);
   if (!Number.isInteger(fixtureId) || !marketType.startsWith("HDC") || !match || odds === null) return null;
   return {
@@ -109,29 +109,20 @@ function mapTraditionalTranslation(row: Record<string, unknown>): CachedTraditio
 }
 
 function pickHandicapQuote(rows: Array<Record<string, unknown>>, fixtureId: number): CachedUpcomingFixture["handicapQuote"] {
-  for (const row of rows) {
-    const parsed = parseHandicapSelection(row);
-    const homeOdds = normalizeOdds(row.home_odds);
-    const awayOdds = normalizeOdds(row.away_odds);
-    if (parsed?.fixtureId !== fixtureId || parsed.side !== "Home" || homeOdds === null || awayOdds === null) continue;
-    return {
-      source: parsed.source,
-      homeLine: formatHandicapLine(parsed.line),
-      homeOdds,
-      awayLine: formatHandicapLine(-parsed.line),
-      awayOdds,
-      capturedAt: parsed.capturedAt,
-    };
-  }
   const selections = rows.flatMap(row => {
     const parsed = parseHandicapSelection(row);
     return parsed?.fixtureId === fixtureId ? [parsed] : [];
   });
-  for (const home of selections.filter(item => item.side === "Home")) {
-    const away = selections.find(item => item.side === "Away" && item.source === home.source && Math.abs(item.line + home.line) < 0.001);
-    if (away) {
+  
+  const sources = Array.from(new Set(selections.map(s => s.source)));
+  for (const source of sources) {
+    const sourceSelections = selections.filter(s => s.source === source);
+    const home = sourceSelections.find(s => s.side === "Home");
+    const away = sourceSelections.find(s => s.side === "Away" && Math.abs(s.line + (home?.line ?? 0)) < 0.001);
+    
+    if (home && away) {
       return {
-        source: home.source,
+        source,
         homeLine: formatHandicapLine(home.line),
         homeOdds: home.odds,
         awayLine: formatHandicapLine(away.line),
