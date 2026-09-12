@@ -515,3 +515,8 @@
 - [x] 在實時讓球盤 Banner 旁加入過去一小時真實水位微型趨勢圖示。
 - [x] 建立盤口趨勢方向與資料不足的測試，驗證升跌、持平及單點快照情況。
 - [x] 完成桌面與手機版視覺驗證並部署趨勢圖示功能。
+
+- [x] 在 `LiveTeamResearch` 型別中加入 `handicapQuote` 欄位，以支援即時研究的讓球盤顯示。
+- [x] 在 `livePoissonResearch.ts` 實作亞洲讓球盤（Asian Handicap）的提取邏輯，並整合至 `deriveLivePoissonResearch`。
+- [x] 修復 `telegramResearch.ts` 中的 `formatLiveTeamResearch`，優先顯示真實即時讓球盤而非硬編碼的錯誤訊息。
+- [x] 驗證 Paris FC 對里昂等依賴即時研究的賽事能否正確顯示實時讓球盤。
