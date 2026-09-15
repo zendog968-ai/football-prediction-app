@@ -520,3 +520,10 @@
 - [x] 在 `livePoissonResearch.ts` 實作亞洲讓球盤（Asian Handicap）的提取邏輯，並整合至 `deriveLivePoissonResearch`。
 - [x] 修復 `telegramResearch.ts` 中的 `formatLiveTeamResearch`，優先顯示真實即時讓球盤而非硬編碼的錯誤訊息。
 - [x] 驗證 Paris FC 對里昂等依賴即時研究的賽事能否正確顯示實時讓球盤。
+
+- [x] 建立主隊讓球 -0.75 歷史盤口回測與 GitHub Actions PYTHONPATH 修復檢查範圍。
+- [x] 直接查詢 Supabase odds_snapshots 獲取主讓 -0.75 歷史盤口與 fixtures 完場賽果。
+- [x] 精確計算 -0.75 盤口結算分佈：贏全盤 13.2%、贏半盤 18.9%、輸全盤 67.9%（基於 53 場樣本）。
+- [x] 在 Telegram 預測輸出中加入 -0.75 盤路預警標籤，提示贏全盤機率極低。
+- [x] 驗證雲端主機同步腳本的 PYTHONPATH=. 修復，並完成 Python 依賴補齊與乾跑測試。
+- [x] 執行回歸測試與服務重啟，確認預警邏輯與同步流程端到端正常。
