@@ -9,11 +9,29 @@ for asset in "${required[@]}"; do
   test -s "${asset}" || { echo "Missing validated asset: ${asset}" >&2; exit 1; }
 done
 
+function gh_retry() {
+  local n=1
+  local max=3
+  local delay=15
+  while true; do
+    "$@" && break || {
+      if [[ $n -lt $max ]]; then
+        ((n++))
+        echo "Command failed. Attempt $n/$max in $delay seconds..."
+        sleep $delay
+      else
+        echo "The command has failed after $n attempts."
+        return 1
+      fi
+    }
+  done
+}
+
 if ! gh release view "${VERSION_TAG}" >/dev/null 2>&1; then
-  gh release create "${VERSION_TAG}" --title "Aurelia Football ${VERSION_TAG}" --notes "Automated, validated public-data release."
+  gh_retry gh release create "${VERSION_TAG}" --title "Aurelia Football ${VERSION_TAG}" --notes "Automated, validated public-data release."
 fi
 
-gh release upload "${VERSION_TAG}" --clobber \
+gh_retry gh release upload "${VERSION_TAG}" --clobber \
   "${BUILD_DIR}/football_data_expanded.db#football_data_expanded.db" \
   "${BUILD_DIR}/model/soccer_predict_model.pkl#soccer_predict_model.pkl" \
   "${BUILD_DIR}/model_performance_filters.json#model_performance_filters.json"
@@ -21,6 +39,6 @@ gh release upload "${VERSION_TAG}" --clobber \
 python3 data-pipeline/finalize_release_manifest.py --manifest "${BUILD_DIR}/pipeline_status.json" --release-tag "${VERSION_TAG}"
 
 if ! gh release view "${LATEST_TAG}" >/dev/null 2>&1; then
-  gh release create "${LATEST_TAG}" --title "Aurelia Football current data pointer" --notes "Points to the latest fully validated immutable release."
+  gh_retry gh release create "${LATEST_TAG}" --title "Aurelia Football current data pointer" --notes "Points to the latest fully validated immutable release."
 fi
-gh release upload "${LATEST_TAG}" --clobber "${BUILD_DIR}/pipeline_status.json#pipeline_status.json"
+gh_retry gh release upload "${LATEST_TAG}" --clobber "${BUILD_DIR}/pipeline_status.json#pipeline_status.json"
