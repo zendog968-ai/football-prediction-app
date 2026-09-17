@@ -134,6 +134,30 @@ def validate(connection: sqlite3.Connection) -> None:
     print(f"UEL | {row[0]:,} 場 | {row[1]} 季 | {row[2]} 至 {row[3]} | xG=0")
 
 
+def filter_existing_records(connection: sqlite3.Connection, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Skip exact Europa League rows already included in a release snapshot."""
+    existing = {
+        tuple(row)
+        for row in connection.execute(
+            """SELECT league_code, season, match_date, home_team, away_team,
+                      home_goals, away_goals
+               FROM matches WHERE league_code = ?""",
+            (LEAGUE_CODE,),
+        )
+    }
+    filtered = [
+        item for item in records
+        if (
+            item["league_code"], item["season"], item["match_date"],
+            item["home_team"], item["away_team"], item["home_goals"], item["away_goals"]
+        ) not in existing
+    ]
+    skipped = len(records) - len(filtered)
+    if skipped:
+        print(f"已從 Release 快照跳過完全重複歐霸賽事：{skipped:,} 場")
+    return filtered
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Extend database with UEFA Europa League results")
     parser.add_argument("--base-database", required=True)
@@ -151,7 +175,7 @@ def main() -> None:
     shutil.copy2(base, output)
     with sqlite3.connect(output) as connection:
         connection.execute("DELETE FROM team_stats")
-        insert_matches(connection, list(unique.values()))
+        insert_matches(connection, filter_existing_records(connection, list(unique.values())))
         compute_team_stats(connection)
         validate(connection)
         connection.commit()
