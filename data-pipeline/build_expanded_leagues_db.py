@@ -112,6 +112,35 @@ def validate(connection: sqlite3.Connection) -> None:
         print(f"{row[0]} | {row[1]:,} 場 | {row[2]} 個賽季 | xG賽事 {row[3]}")
 
 
+def filter_existing_records(connection: sqlite3.Connection, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Skip exact duplicates already present in a release snapshot.
+
+    A fallback release may already contain the seven expanded leagues. Exact
+    identity matches are safe to ignore; rows with any differing field remain
+    visible to SQLite's integrity checks instead of being silently overwritten.
+    """
+    existing = {
+        tuple(row)
+        for row in connection.execute(
+            """SELECT league_code, season, match_date, home_team, away_team,
+                      home_goals, away_goals
+               FROM matches
+               WHERE league_code IN ('MLS','J1','FIN1','KOR1','POR1','MEX1','AUS1')"""
+        )
+    }
+    filtered = [
+        record for record in records
+        if (
+            record["league_code"], record["season"], record["match_date"],
+            record["home_team"], record["away_team"], record["home_goals"], record["away_goals"]
+        ) not in existing
+    ]
+    skipped = len(records) - len(filtered)
+    if skipped:
+        print(f"已從 Release 快照跳過完全重複賽事：{skipped:,} 場")
+    return filtered
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="建立含七個新增聯賽的擴充足球資料庫")
     parser.add_argument("--base-database", default="football_data.db")
@@ -128,7 +157,7 @@ def main() -> None:
     records = make_records(source, reference_date)
     with sqlite3.connect(output) as connection:
         connection.execute("DELETE FROM team_stats")
-        insert_matches(connection, records)
+        insert_matches(connection, filter_existing_records(connection, records))
         compute_team_stats(connection)
         validate(connection)
         connection.commit()
