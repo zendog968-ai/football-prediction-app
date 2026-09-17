@@ -28,6 +28,8 @@ from typing import Any
 
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 BASE_URL = "https://www.football-data.co.uk"
 REQUEST_TIMEOUT_SECONDS = 30
@@ -57,6 +59,23 @@ def configure_logging(verbose: bool) -> None:
 
 def create_session() -> requests.Session:
     session = requests.Session()
+    # Public Football-Data CSVs must not depend on a runner-local proxy. Some
+    # hosted runners expose stale HTTP(S)_PROXY values (for example
+    # 127.0.0.1:80), which makes an otherwise healthy public download fail
+    # immediately. Use a direct connection and retry transient network errors.
+    session.trust_env = False
+    retry = Retry(
+        total=4,
+        connect=4,
+        read=4,
+        status=4,
+        backoff_factor=1.0,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset({"GET"}),
+        raise_on_status=False,
+    )
+    session.mount("https://", HTTPAdapter(max_retries=retry))
+    session.mount("http://", HTTPAdapter(max_retries=retry))
     session.headers.update(
         {
             "User-Agent": USER_AGENT,
