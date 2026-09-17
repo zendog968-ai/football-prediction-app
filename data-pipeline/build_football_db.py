@@ -20,6 +20,7 @@ import argparse
 import hashlib
 import io
 import logging
+import shutil
 import sqlite3
 import sys
 from datetime import date, datetime, timezone
@@ -43,6 +44,8 @@ EUROPEAN_LEAGUES = {
     "L1": {"name": "Ligue 1", "file_code": "F1"},
 }
 BRAZIL_SOURCE_URL = f"{BASE_URL}/new/BRA.csv"
+RELEASES_API_URL = "https://api.github.com/repos/zendog968-ai/football-prediction-app/releases?per_page=30"
+FALLBACK_ASSET_NAME = "football_data_expanded.db"
 
 
 class SourceFetchError(RuntimeError):
@@ -89,8 +92,15 @@ def create_session() -> requests.Session:
 def download_csv(session: requests.Session, url: str) -> pd.DataFrame:
     """下載CSV並處理UTF-8 BOM、少量不規則欄位與空白列。"""
     try:
-        response = session.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
+        response = session.get(url, timeout=REQUEST_TIMEOUT_SECONDS, allow_redirects=False)
+        if response.is_redirect or response.is_permanent_redirect:
+            location = response.headers.get("Location", "")
+            if "127.0.0.1" in location or "localhost" in location.casefold():
+                raise SourceFetchError(f"來源出現不安全 localhost redirect：{url} -> {location}")
+            raise SourceFetchError(f"來源出現未預期 redirect：{url} -> {location}")
         response.raise_for_status()
+    except SourceFetchError:
+        raise
     except requests.RequestException as exc:
         raise SourceFetchError(f"下載失敗：{url} ({exc})") from exc
 
@@ -106,6 +116,62 @@ def download_csv(session: requests.Session, url: str) -> pd.DataFrame:
 
     dataframe.columns = [str(column).strip().lstrip("\ufeff") for column in dataframe.columns]
     return dataframe.dropna(how="all")
+
+
+def download_release_snapshot(session: requests.Session, database_path: Path) -> tuple[int, int]:
+    """下載最近一個已驗證 Release SQLite 快照，並驗證基本 schema。"""
+    try:
+        response = session.get(
+            RELEASES_API_URL,
+            headers={"Accept": "application/vnd.github+json"},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        releases = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise SourceFetchError(f"Release 快照索引下載失敗：{exc}") from exc
+
+    asset_url: str | None = None
+    asset_tag: str | None = None
+    for release in releases:
+        if release.get("draft") or release.get("prerelease"):
+            continue
+        for asset in release.get("assets", []):
+            if asset.get("name") == FALLBACK_ASSET_NAME:
+                asset_url = asset.get("browser_download_url")
+                asset_tag = release.get("tag_name")
+                break
+        if asset_url:
+            break
+    if not asset_url:
+        raise SourceFetchError(f"找不到包含 {FALLBACK_ASSET_NAME} 的已驗證 Release")
+
+    temporary_path = database_path.with_suffix(database_path.suffix + ".fallback.tmp")
+    try:
+        asset_response = session.get(asset_url, timeout=REQUEST_TIMEOUT_SECONDS)
+        asset_response.raise_for_status()
+        temporary_path.write_bytes(asset_response.content)
+        with sqlite3.connect(temporary_path) as connection:
+            tables = {
+                row[0]
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            required = {"matches", "team_stats"}
+            if not required.issubset(tables):
+                raise SourceFetchError(f"Release 快照 schema 不完整：缺少 {sorted(required - tables)}")
+            counts = tuple(
+                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in ("matches", "team_stats")
+            )
+        if min(counts) <= 0:
+            raise SourceFetchError("Release 快照為空，拒絕作為 fallback")
+        shutil.move(temporary_path, database_path)
+        logging.warning("已切換至已驗證 Release 快照：%s（matches=%s, team_stats=%s）", asset_tag, *counts)
+        return counts
+    except (requests.RequestException, OSError, sqlite3.Error) as exc:
+        raise SourceFetchError(f"Release 快照下載或驗證失敗：{exc}") from exc
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def pick_column(dataframe: pd.DataFrame, *candidates: str, required: bool = False) -> str | None:
@@ -589,7 +655,16 @@ def main() -> int:
     logging.info("開始建立資料庫：%s", database_path)
     session = create_session()
     reference_date = date.fromisoformat(args.as_of) if args.as_of else datetime.now(timezone.utc).date()
-    records = scrape_all_matches(session, reference_date)
+    try:
+        records = scrape_all_matches(session, reference_date)
+    except SourceFetchError as source_error:
+        logging.warning("CSV來源不可用，啟用已驗證 Release fallback：%s", source_error)
+        matches_count, team_stats_count = download_release_snapshot(session, database_path)
+        print("\n=== 使用已驗證 Release 快照 ===")
+        print(f"資料庫：{database_path}")
+        print(f"matches：{matches_count:,} 筆")
+        print(f"team_stats：{team_stats_count:,} 筆")
+        return 0
 
     with sqlite3.connect(database_path) as connection:
         create_schema(connection)
