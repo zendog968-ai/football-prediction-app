@@ -1,10 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatHktKickoff, formatLiveTeamResearch, formatLocalizedResearchCard, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatHktKickoff, formatLiveTeamResearch, formatLocalizedResearchCard, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, shouldSendSettlementDigest, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("研究型盤口結算", () => {
+  it("沒有新結算時不應建立或發送重複的賽後統計摘要", () => {
+    expect(shouldSendSettlementDigest(0)).toBe(false);
+    expect(shouldSendSettlementDigest(-1)).toBe(false);
+    expect(shouldSendSettlementDigest(1)).toBe(true);
+  });
+
   it("正確結算全盤亞洲讓球與大小球，不把走盤算作勝或負", () => {
     expect(settlementForScores("Asian Handicap", "Home -0.5", 2, 1)).toBe("win");
     expect(settlementForScores("Asian Handicap", "Away +0", 1, 1)).toBe("push");

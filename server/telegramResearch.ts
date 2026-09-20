@@ -1245,6 +1245,11 @@ function accuracy(rows: Array<{ outcome: string }>): string {
   return `${(units / resolved.length * 100 + 50).toFixed(1)}%`;
 }
 
+/** A settlement digest is an event report, not a heartbeat. Do not resend it when nothing new settled. */
+export function shouldSendSettlementDigest(settled: number): boolean {
+  return Number.isInteger(settled) && settled > 0;
+}
+
 export async function runSettlementDigest(): Promise<{ digestId: number; settled: number }> {
   await verifyApiFootballReadiness();
   const db = await getDb();
@@ -1255,9 +1260,20 @@ export async function runSettlementDigest(): Promise<{ digestId: number; settled
     const details = await fixtureDetails(row.apiFixtureId);
     if (!details || !["FT", "AET", "PEN"].includes(details.status) || details.homeGoals === null || details.awayGoals === null) continue;
     const outcome = settlementForScores(row.marketName, row.selection, details.homeGoals, details.awayGoals);
-    await db.update(researchSettlements).set({ homeGoals: details.homeGoals, awayGoals: details.awayGoals, outcome, settledAt: new Date(), sourcePayload: { status: details.status } }).where(eq(researchSettlements.id, row.id));
-    settled += 1;
+    // The callback can be retried or run concurrently. Only the first worker that
+    // still sees `pending` owns this settlement and may trigger a digest.
+    const updateResult = await db.update(researchSettlements)
+      .set({ homeGoals: details.homeGoals, awayGoals: details.awayGoals, outcome, settledAt: new Date(), sourcePayload: { status: details.status } })
+      .where(and(eq(researchSettlements.id, row.id), eq(researchSettlements.outcome, "pending")));
+    const affectedRows = Number((updateResult as unknown as Array<{ affectedRows?: number }>)[0]?.affectedRows ?? 0);
+    if (affectedRows === 1) settled += 1;
   }
+
+  // A successful Telegram send followed by a transient DB/HTTP error may cause
+  // Heartbeat to retry the callback. Since the rows are already settled, this
+  // guard makes the retry a safe no-op instead of sending the same report again.
+  if (!shouldSendSettlementDigest(settled)) return { digestId: 0, settled: 0 };
+
   const [lastSevenDays, lastThirtyDays] = [new Date(Date.now() - 7 * 24 * 60 * 60_000), new Date(Date.now() - 30 * 24 * 60 * 60_000)];
   const [sevenRows, thirtyRows, allRows] = await Promise.all([
     db.select({ outcome: researchSettlements.outcome }).from(researchSettlements).where(gte(researchSettlements.settledAt, lastSevenDays)),
