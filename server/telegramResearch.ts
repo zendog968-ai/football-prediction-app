@@ -180,7 +180,7 @@ function displayHandicapQuote(quote: CachedHandicapQuote | null | undefined): st
   return `⚖️ 【實時讓球盤】${source} [${quote.homeSelection} @${quote.homeOdds.toFixed(2)} / ${quote.awaySelection} @${quote.awayOdds.toFixed(2)}]`;
 }
 
-export function formatLocalizedResearchCard(item: Pick<CachedUpcomingFixture, "leagueName" | "leagueTranslation" | "eventTime" | "homeTeam" | "homeTeamTranslation" | "awayTeam" | "awayTeamTranslation" | "homeWin" | "draw" | "awayWin" | "compactMarkets" | "topScorelines" | "handicapQuote">): string {
+export function formatLocalizedResearchCard(item: Pick<CachedUpcomingFixture, "leagueName" | "leagueTranslation" | "eventTime" | "homeTeam" | "homeTeamTranslation" | "awayTeam" | "awayTeamTranslation" | "homeWin" | "draw" | "awayWin" | "compactMarkets" | "topScorelines" | "handicapQuote"> & { researchSource?: string | null }): string {
   const percent = (value: number) => Number.isFinite(value) && value >= 0 && value <= 1 ? `${(value * 100).toFixed(1)}%` : "資料不足";
   const total = item.compactMarkets.find(row => row.market === "入球大細 2.5");
   const over = total && (/^大(?:\s|$)/.test(total.selection) || /^over\b/i.test(total.selection)) ? total.probability : total ? 1 - total.probability : null;
@@ -194,6 +194,9 @@ export function formatLocalizedResearchCard(item: Pick<CachedUpcomingFixture, "l
     `⚽️ ${home}  vs  ${away}`,
     "---",
     "📊 【資料來源】Dixon-Coles 模型 + HDA 賠率融合",
+    item.researchSource?.includes("聯賽平均") || item.researchSource === "league-average"
+      ? "🚨 【數據警告】目前僅使用聯賽平均，缺少兩隊獨立歷史攻防；不建議參考讓球盤。"
+      : null,
     `🛡️ 【雙重機率】1X: ${percent(item.homeWin + item.draw)} | X2: ${percent(item.draw + item.awayWin)}`,
     displayHandicapQuote(item.handicapQuote),
     `🎯 【模型勝率預測】主勝 ${percent(item.homeWin)} | 和局 ${percent(item.draw)} | 客勝 ${percent(item.awayWin)}`,
@@ -640,7 +643,13 @@ export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedT
 
 export function formatLiveTeamResearch(research: LiveTeamResearch): string {
   const source = research.sourceMode === "team-history" ? "隊伍歷史攻防" : "聯賽平均";
-  return [formatFixtureDisplay(research.homeTeam, research.awayTeam), `📊 【資料來源】${source}`, research.calibrationLabel ? `⚙️ 【校準】${research.calibrationLabel}` : null, formatCompactTable(research.compactMarkets, research.topScorelines, research.outcomes)].filter(Boolean).join("\n");
+  return [
+    formatFixtureDisplay(research.homeTeam, research.awayTeam),
+    `📊 【資料來源】${source}`,
+    research.sourceMode === "league-average" ? "🚨 【數據警告】僅使用聯賽平均，缺少兩隊獨立歷史攻防；不建議參考讓球盤。" : null,
+    research.calibrationLabel ? `⚙️ 【校準】${research.calibrationLabel}` : null,
+    formatCompactTable(research.compactMarkets, research.topScorelines, research.outcomes),
+  ].filter(Boolean).join("\n");
 }
 
 function findUpcomingTeamFixture(fixtures: CachedUpcomingFixture[], requestedTeam: string, now = new Date()): CachedUpcomingFixture | null {

@@ -226,7 +226,26 @@ describe("Telegram系統指令", () => {
     } as const;
     expect(formatLiveTeamResearch({ ...base, sourceMode: "team-history" })).toContain("【資料來源】隊伍歷史攻防");
     expect(formatLiveTeamResearch({ ...base, sourceMode: "league-average" })).toContain("【資料來源】聯賽平均");
+    expect(formatLiveTeamResearch({ ...base, sourceMode: "league-average" })).toContain("不建議參考讓球盤");
     expect(formatLiveTeamResearch({ ...base, sourceMode: "team-history", calibrationLabel: "英冠正式聯賽樣本＋聯賽平均及主場優勢校準" })).toContain("【校準】英冠正式聯賽樣本");
+  });
+
+  it("快取研究卡標示聯賽平均時強制顯示數據警告", () => {
+    const card = formatLocalizedResearchCard({
+      leagueName: "Championship",
+      eventTime: "2026-08-15T20:00:00Z",
+      homeTeam: "Wolverhampton Wanderers",
+      awayTeam: "West Bromwich Albion",
+      homeWin: 0.2,
+      draw: 0.25,
+      awayWin: 0.55,
+      compactMarkets: [{ market: "入球大細 2.5", selection: "Over 2.5", probability: 0.5 }],
+      topScorelines: [{ score: "0-1", probability: 0.2 }, { score: "1-1", probability: 0.15 }, { score: "1-0", probability: 0.1 }],
+      handicapQuote: null,
+      researchSource: "聯賽平均",
+    });
+    expect(card).toContain("🚨 【數據警告】");
+    expect(card).toContain("不建議參考讓球盤");
   });
 
   it("以Telegram一般HTML文字包裝對齊研究內容並轉義特殊字元", () => {
