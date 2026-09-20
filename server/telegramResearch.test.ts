@@ -265,16 +265,22 @@ describe("Telegram系統指令", () => {
   });
 
   it("每日精選只保留最多三場完整模型、非高風險候選並按機率排序", () => {
-    const candidate = (probability: number, risk: "low" | "medium" | "high", samples = 30) => ({ prediction: { lean: { probability, risk_level: risk }, diagnostics: { dc_available: true, dc_history_match_count: samples } } }) as never;
+    const candidate = (probability: number, risk: "low" | "medium" | "high", samples = 30, teamSamples = 5) => ({ prediction: { lean: { probability, risk_level: risk }, diagnostics: { dc_available: true, dc_history_match_count: samples, home_history_matches_used: teamSamples, away_history_matches_used: teamSamples } } }) as never;
     const selected = rankDailyPicks([candidate(0.72, "medium"), candidate(0.81, "low"), candidate(0.64, "low"), candidate(0.6, "high"), candidate(0.85, "low", 19)]);
     expect(selected).toHaveLength(3);
     expect(selected.map(item => item.prediction.lean.probability)).toEqual([0.81, 0.72, 0.64]);
   });
 
-  it("每日摘要在嚴格候選不足三場時，以可用候選依機率補足至最多三場", () => {
-    const candidate = (probability: number, risk: "low" | "medium" | "high", samples: number, available: boolean) => ({ prediction: { lean: { probability, risk_level: risk }, diagnostics: { dc_available: available, dc_history_match_count: samples } } }) as never;
+  it("每日摘要在嚴格候選不足三場時，不以低樣本候選補滿清單", () => {
+    const candidate = (probability: number, risk: "low" | "medium" | "high", samples: number, available: boolean) => ({ prediction: { lean: { probability, risk_level: risk }, diagnostics: { dc_available: available, dc_history_match_count: samples, home_history_matches_used: 5, away_history_matches_used: 5 } } }) as never;
     const candidates = [candidate(0.62, "low", 25, true), candidate(0.59, "high", 6, true), candidate(0.55, "medium", 4, false), candidate(0.49, "high", 2, false)];
-    expect(selectDailyDigestPicks(candidates).map(item => item.prediction.lean.probability)).toEqual([0.62, 0.59, 0.55]);
+    expect(selectDailyDigestPicks(candidates).map(item => item.prediction.lean.probability)).toEqual([0.62]);
+  });
+
+  it("每日摘要折疊缺少主客隊獨立樣本的候選", () => {
+    const candidate = (probability: number, teamSamples: number) => ({ prediction: { lean: { probability, risk_level: "medium" }, diagnostics: { dc_available: true, dc_history_match_count: 40, home_history_matches_used: teamSamples, away_history_matches_used: teamSamples } } }) as never;
+    expect(rankDailyPicks([candidate(0.91, 1), candidate(0.72, 2)])).toHaveLength(1);
+    expect(rankDailyPicks([candidate(0.91, 1), candidate(0.72, 2)])[0]?.prediction.lean.probability).toBe(0.72);
   });
 
   it("只要有未來24小時fixture就列出，部分模型與盤口會以基礎分析而非暫無賽事呈現", () => {

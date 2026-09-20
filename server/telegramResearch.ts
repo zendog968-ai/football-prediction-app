@@ -1133,7 +1133,11 @@ function formatCandidate(candidate: Candidate): string {
 export function rankDailyPicks<T extends Pick<Candidate, "prediction">>(candidates: T[]): T[] {
   const riskScore = (level: PredictionResult["lean"]["risk_level"]) => level === "low" ? 2 : level === "medium" ? 1 : 0;
   return candidates
-    .filter(candidate => candidate.prediction.lean.risk_level !== "high" && candidate.prediction.diagnostics.dc_available && candidate.prediction.diagnostics.dc_history_match_count >= 20)
+    .filter(candidate => candidate.prediction.lean.risk_level !== "high"
+      && candidate.prediction.diagnostics.dc_available
+      && candidate.prediction.diagnostics.dc_history_match_count >= 20
+      && (candidate.prediction.diagnostics.home_history_matches_used ?? 0) >= 2
+      && (candidate.prediction.diagnostics.away_history_matches_used ?? 0) >= 2)
     .sort((left, right) => (
       right.prediction.lean.probability - left.prediction.lean.probability
       || riskScore(right.prediction.lean.risk_level) - riskScore(left.prediction.lean.risk_level)
@@ -1148,6 +1152,9 @@ export function selectDailyDigestPicks<T extends Pick<Candidate, "prediction">>(
   const strictSet = new Set(strict);
   const fallback = candidates
     .filter(candidate => !strictSet.has(candidate))
+    .filter(candidate => (candidate.prediction.diagnostics.home_history_matches_used ?? 0) >= 2
+      && (candidate.prediction.diagnostics.away_history_matches_used ?? 0) >= 2
+      && candidate.prediction.diagnostics.dc_history_match_count >= 20)
     .sort((left, right) => (
       right.prediction.lean.probability - left.prediction.lean.probability
       || right.prediction.diagnostics.dc_history_match_count - left.prediction.diagnostics.dc_history_match_count
