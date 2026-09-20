@@ -9,7 +9,6 @@ import { cruzeiroFlamengoSpotlight, hasValidSpotlight } from "./spotlight";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { configureTelegramWebhook, ensureResearchSchedules, getResearchNotificationStatus } from "./telegramResearch";
 import { getSupabaseUpcomingCache } from "./supabaseCache";
-import { getGithubActionsOverview } from "./githubActions";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -110,18 +109,6 @@ export const appRouter = router({
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "焦點賽事情境資料驗證失敗。" });
       }
       return cruzeiroFlamengoSpotlight;
-    }),
-  }),
-  githubActions: router({
-    overview: publicProcedure.query(async () => {
-      try {
-        return await getGithubActionsOverview();
-      } catch (error) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: error instanceof Error ? error.message : "GitHub Actions 狀態暫時無法讀取。",
-        });
-      }
     }),
   }),
   telegramResearch: router({

@@ -1,21 +1,15 @@
 name: Admin Configuration Security Regression
 
 on:
-  pull_request:
-    paths:
-      - 'server/adminConfig.ts'
-      - 'server/_core/index.ts'
-      - 'scripts/test-admin-config-extremes.mjs'
-      - 'scripts/run-admin-config-ci.ts'
-      - '.github/workflows/admin-config-security.yml'
+  pull_request: {}
   push:
     branches: [main]
     paths:
-      - 'server/adminConfig.ts'
-      - 'server/_core/index.ts'
-      - 'scripts/test-admin-config-extremes.mjs'
-      - 'scripts/run-admin-config-ci.ts'
-      - '.github/workflows/admin-config-security.yml'
+      - "server/adminConfig.ts"
+      - "server/_core/index.ts"
+      - "scripts/test-admin-config-extremes.mjs"
+      - "scripts/run-admin-config-ci.ts"
+      - ".github/workflows/admin-config-security.yml"
   workflow_dispatch:
 
 permissions:
@@ -34,8 +28,6 @@ jobs:
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - name: Set up Node.js
         uses: actions/setup-node@v4

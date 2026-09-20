@@ -17,22 +17,6 @@ def test_fixture_mapping_uses_existing_schema_names() -> None:
     assert "api_fixture_id" not in mapped
 
 
-def test_fixture_mapping_preserves_country_for_ambiguous_league_names() -> None:
-    mapped = fixture_to_existing_schema({
-        "api_fixture_id": 1492334,
-        "league_name": "Serie A",
-        "league_country": "Brazil",
-        "kickoff_at": "2026-08-15T19:30:00+00:00",
-        "status": "NS",
-        "home_team": "Fluminense",
-        "away_team": "Palmeiras",
-        "home_goals": None,
-        "away_goals": None,
-        "synced_at": "2026-08-15T12:00:00+00:00",
-    })
-    assert mapped["league_name"] == "Brazil::Serie A"
-
-
 def test_hda_odds_are_compacted_by_bookmaker() -> None:
     rows = [{
         "api_fixture_id": 10,
@@ -71,6 +55,9 @@ def test_prediction_mapping_retains_research_label() -> None:
         "data_warning": "勝平負、大小球與BTTS均為未校準Poisson研究值；不可解讀為公平賠率、EV或命中率。",
         "generated_at": "2026-08-14T00:00:00+00:00",
     })
-    assert "[M]1.5,0.9,CD,0" in mapped["recommendation"]
+    assert "[AURELIA_META]" in mapped["recommendation"]
+    assert '"h":1.5' in mapped["recommendation"]
+    assert '"a":0.9' in mapped["recommendation"]
+    assert '"s":"英冠校準"' in mapped["recommendation"]
     assert len(mapped["recommendation"]) <= 50
     assert mapped["confidence"] == 3

@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
-import { ENV } from "./_core/env";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatDynamicEvSection, formatJobsStatus, formatLiveTeamResearch, formatModelHealthSummary, formatPredictResearch, formatPreviousDayDeliveryReceipt, formatTeamResearch, formatTelegramStatus, hasCompleteDigestCandidate, isAnyLeagueMatch, isDictionaryAdmin, isKnownTeamAlias, isLeagueMatch, normalizeTelegramCommand, parseMultiLineAdminCommands, parsePredictRequest, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, todayLeagueFilter, todayLeagueFilters, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatHktKickoff, formatLiveTeamResearch, formatLocalizedResearchCard, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -18,13 +17,6 @@ describe("研究型盤口結算", () => {
     expect(settlementForScores("Asian Handicap", "Home +0.25", 1, 1)).toBe("half_win");
   });
 
-  it("結算推播的主客和與Top 3波膽快照", () => {
-    expect(settlementForScores("Match Winner", "Away", 1, 2)).toBe("win");
-    expect(settlementForScores("Match Winner", "Home", 1, 2)).toBe("loss");
-    expect(settlementForScores("Correct Score", "1-2", 1, 2)).toBe("win");
-    expect(settlementForScores("Correct Score", "2-1", 1, 2)).toBe("loss");
-  });
-
   it("拒絕未記錄完整格式的市場資料，避免杜撰結算", () => {
     expect(settlementForScores("Asian Handicap", "Home to win", 2, 1)).toBe("void");
     expect(settlementForScores("Unknown", "Over 2.5", 3, 0)).toBe("void");
@@ -32,9 +24,9 @@ describe("研究型盤口結算", () => {
 });
 
 describe("Telegram研究排程", () => {
-  it("以UTC六欄位cron每30分鐘掃描完場覆盤，並保留日間及晚間摘要", () => {
+  it("以UTC六欄位cron對應香港時間10:30、11:00及18:30", () => {
     expect(RESEARCH_SCHEDULES).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: "settlement", cron: "0 */30 * * * *", path: "/api/scheduled/research-settlement" }),
+      expect.objectContaining({ kind: "settlement", cron: "0 30 2 * * *", path: "/api/scheduled/research-settlement" }),
       expect.objectContaining({ kind: "day_digest", cron: "0 0 3 * * *", path: "/api/scheduled/research-day" }),
       expect.objectContaining({ kind: "evening_digest", cron: "0 30 10 * * *", path: "/api/scheduled/research-evening" }),
     ]));
@@ -46,106 +38,20 @@ describe("Telegram研究排程", () => {
   });
 });
 
-describe("Telegram管理員授權", () => {
-  it("使用已配置的管理員Chat ID授權字典與入站稽核指令", () => {
-    expect(ENV.telegramAdminChatId).toMatch(/^\d+$/);
-    expect(isDictionaryAdmin(ENV.telegramAdminChatId)).toBe(true);
-    expect(isDictionaryAdmin("0")).toBe(false);
-  });
-
-  it("只接受每行一條、最多三條的受限多行管理命令", () => {
-    expect(parseMultiLineAdminCommands("/dict seed\n/dict pending\n/approve 1 測試足球會"))
-      .toEqual(["/dict seed", "/dict pending", "/approve 1 測試足球會"]);
-    expect(parseMultiLineAdminCommands("/dict pending\n/predict 布里斯托城")).toEqual([]);
-    expect(parseMultiLineAdminCommands("/dict pending\n/inbound\n/approve 1 測試足球會\n/dict pending")).toEqual([]);
-  });
-});
-
-		describe("Telegram系統指令", () => {
-	  it("/help列出全部可用的訂閱及研究指令", () => {
-	    expect(TELEGRAM_HELP_MESSAGE).toContain("/start");
-	    expect(TELEGRAM_HELP_MESSAGE).toContain("/status");
-	    expect(TELEGRAM_HELP_MESSAGE).toContain("/jobs");
-	    expect(TELEGRAM_HELP_MESSAGE).toContain("/health");
-	    expect(TELEGRAM_HELP_MESSAGE).toContain("/trend");
-    expect(TELEGRAM_HELP_MESSAGE).toContain("/today");
+describe("Telegram系統指令", () => {
+  it("/help列出全部可用的訂閱及研究指令", () => {
+    expect(TELEGRAM_HELP_MESSAGE).toContain("/start");
+    expect(TELEGRAM_HELP_MESSAGE).toContain("/status");
+    expect(TELEGRAM_HELP_MESSAGE).toContain("/trend");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/upcoming");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/report");
-    expect(TELEGRAM_HELP_MESSAGE).toContain("/predict");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/team");
     expect(TELEGRAM_HELP_MESSAGE).toContain("/stop");
-	    expect(TELEGRAM_HELP_MESSAGE).toContain("/help");
-	    expect(TELEGRAM_HELP_MESSAGE).toContain("並非投注或資金建議");
-	  });
-
-	  it("以最新週報呈現模型健康、樣本與特徵缺失狀態", () => {
-	    const output = formatModelHealthSummary({
-	      createdAt: new Date("2026-08-17T02:15:00.000Z"),
-	      settledMarkets: 30,
-	      favorableMarkets: 10,
-	      winnerMarkets: 5,
-	      favorableWinnerMarkets: 2,
-	      featureSnapshots: 0,
-	      xgMissingSnapshots: 0,
-	      oddsCoveredSnapshots: 0,
-	      restMissingSnapshots: 0,
-	      driftStatus: "insufficient",
-	    });
-	    expect(output).toContain("【狀態】樣本不足");
-	    expect(output).toContain("【已結算市場】30 項｜有利結果 33.3%");
-	    expect(output).toContain("【特徵快照】0 筆｜xG缺失 資料不足");
-	  });
-
-	  it("呈現任務下次預期、最後送達與漏發告警原因", () => {
-	    const output = formatJobsStatus([{
-	      kind: "day_digest",
-	      isEnabled: true,
-	      lastStartedAt: new Date("2026-08-17T03:00:00.000Z"),
-	      lastCompletedAt: new Date("2026-08-17T03:00:08.000Z"),
-	      lastError: null,
-	      latestEvent: {
-	        scheduleKind: "day_digest",
-	        eventType: "digest_delivery",
-	        deliveryStatus: "sent",
-	        recipientCount: 1,
-	        deliveredCount: 1,
-	        failedCount: 0,
-	        eventAt: new Date("2026-08-17T03:00:08.000Z"),
-	      },
-	    }], new Date("2026-08-17T04:00:00.000Z"));
-	    expect(output).toContain("日間摘要（11:00）】已啟用");
-	    expect(output).toContain("下次預期：18/8/2026 11:00:00");
-	    expect(output).toContain("最後送達：已送達（1/1 位訂閱者）");
-
-	    const receipt = formatPreviousDayDeliveryReceipt([{
-	      scheduleKind: "evening_digest",
-	      eventType: "schedule_missed",
-	      deliveryStatus: "alert_sent",
-	      recipientCount: 1,
-	      deliveredCount: 1,
-	      failedCount: 0,
-	      detail: "漏發偵測：逾15分鐘仍未完成。",
-	      eventAt: new Date("2026-08-17T11:00:00.000Z"),
-	    }]);
-	    expect(receipt).toContain("前日推播送達回條");
-	    expect(receipt).toContain("告警：1 項");
-	    expect(receipt).toContain("漏發偵測");
-	  });
-
-	  it("解析/today聯賽篩選並支援繁中與英文聯賽名稱", () => {
-    expect(todayLeagueFilter("/today 英超")).toBe("英超");
-    expect(todayLeagueFilter("/today@AureliaBot Premier League")).toBe("Premier League");
-    expect(isLeagueMatch("英超", "Premier League", "39")).toBe(true);
-    expect(isLeagueMatch("Premier League", "Premier League", "39")).toBe(true);
-    expect(isLeagueMatch("墨超", "Liga MX", "262")).toBe(true);
-    expect(isLeagueMatch("英超", "Liga MX", "262")).toBe(false);
-    expect(todayLeagueFilters("/today 英超 西甲")).toEqual(["英超 西甲", "英超", "西甲"]);
-    expect(isAnyLeagueMatch(todayLeagueFilters("/today 英超 西甲"), "La Liga", "140")).toBe(true);
-    expect(isAnyLeagueMatch(todayLeagueFilters("/today 英超 西甲"), "Premier League", "39")).toBe(true);
-    expect(isAnyLeagueMatch(todayLeagueFilters("/today 英超 西甲"), "Liga MX", "262")).toBe(false);
+    expect(TELEGRAM_HELP_MESSAGE).toContain("/help");
+    expect(TELEGRAM_HELP_MESSAGE).toContain("並非投注或資金建議");
   });
 
-  it("以HKT、本地化隊名、真實亞洲盤口與Top 3波膽呈現已同步的未來研究資料", () => {
+  it("以極簡市場表格及Top 3波膽呈現已同步的未來研究資料", () => {
     const bars = probabilityBars({ homeWin: 0.62, draw: 0.21, awayWin: 0.17 });
     expect(bars).toContain("🟢 主勝");
     expect(bars).toContain("🟡 和局");
@@ -153,9 +59,12 @@ describe("Telegram管理員授權", () => {
     const message = formatCachedUpcoming([{
       fixtureId: 101,
       leagueName: "MLS",
+      leagueTranslation: { nameZhHk: "美職聯", nameZhTw: "美國職業足球大聯盟" },
       eventTime: "2026-08-15T20:00:00Z",
       homeTeam: "Example Home",
+      homeTeamTranslation: { nameZhHk: "示例主隊", nameZhTw: "範例主隊" },
       awayTeam: "Example Away",
+      awayTeamTranslation: { nameZhHk: "示例客隊", nameZhTw: "範例客隊" },
       homeWin: 0.62,
       draw: 0.21,
       awayWin: 0.17,
@@ -178,42 +87,57 @@ describe("Telegram管理員授權", () => {
       ],
       topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
       odds: { home: 1.82, draw: 3.55, away: 4.4, capturedAt: "2026-08-15T10:00:00Z" },
-      handicapQuote: { source: "Bet365", homeLine: "-0.5", homeOdds: 1.91, awayLine: "+0.5", awayOdds: 1.89, capturedAt: "2026-08-15T10:00:00Z" },
+      handicapQuote: { source: "HKJC", homeSelection: "Home -1", homeOdds: 1.91, awaySelection: "Away +1", awayOdds: 1.87, capturedAt: "2026-08-15T10:00:00Z" },
     }], new Date("2026-08-15T00:00:00Z"));
-    expect(message).toContain("⏰ 賽事時間：2026-08-16 04:00 (HKT)");
-    expect(message).toContain("⚽️ 【Example Home】  vs  【Example Away】");
-    expect(message).toContain("📊 【資料來源】Dixon–Coles 模型 + HDA 賠率融合");
-    expect(message).toContain("🛡️ 【雙重機率】1X: 83.0% | X2: 38.0%");
-    expect(message).toContain("⚖️ 【實時讓球盤】Bet365 主隊 -0.5 (@1.91) / 客隊 +0.5 (@1.89)");
-    expect(message).toContain("🎯 【模型勝率預測】主勝 62.0% | 和局 21.0% | 客勝 17.0%");
-    expect(message).toContain("🔥 【大小球】大 2.5 (56.0%) | 小 2.5 (44.0%)");
-    expect(message).not.toContain("入球大細 1.5");
-    expect(message).not.toContain("亞洲讓球 0.25");
-    expect(message).not.toContain("全贏");
+    expect(message).toContain("🏆 【聯賽】美職聯 (MLS)");
+    expect(message).toContain("📅 【時間】2026-08-16 04:00 (HKT)");
+    expect(message).toContain("⚽️ 示例主隊 (Example Home)  vs  示例客隊 (Example Away)");
+    expect(message).toContain("【雙重機率】1X: 83.0% | X2: 38.0%");
+    expect(message).toContain("【實時讓球盤】HKJC [Home -1 @1.91 / Away +1 @1.87]");
+    expect(message).toContain("【模型勝率預測】主勝 62.0% | 和局 21.0% | 客勝 17.0%");
+    expect(message).toContain("【大小球】大 2.5 (56.0%) | 小 2.5 (44.0%)");
     expect(message).toContain("💡 【最高波膽 Top 3】");
     expect(message).toContain("1. 2-1 —— 12.0%");
+  });
+
+  it("嚴格使用香港時區並在翻譯表只有台灣繁中時安全回退", () => {
+    expect(formatHktKickoff("2026-08-15T20:00:00Z")).toBe("2026-08-16 04:00 (HKT)");
+    const card = formatLocalizedResearchCard({
+      leagueName: "Sample League",
+      leagueTranslation: { nameZhHk: null, nameZhTw: "示例聯賽" },
+      eventTime: "2026-08-15T20:00:00Z",
+      homeTeam: "Home FC",
+      homeTeamTranslation: { nameZhHk: null, nameZhTw: "主隊" },
+      awayTeam: "Away FC",
+      awayTeamTranslation: { nameZhHk: "客隊", nameZhTw: "客隊台譯" },
+      homeWin: 0.5, draw: 0.25, awayWin: 0.25,
+      compactMarkets: [{ market: "入球大細 2.5", selection: "Over 2.5", probability: 0.55 }],
+      topScorelines: [{ score: "1-0", probability: 0.2 }, { score: "1-1", probability: 0.18 }, { score: "2-0", probability: 0.14 }],
+      handicapQuote: { source: "API-Football Asian Handicap", homeSelection: "Home -0.5", homeOdds: 1.9, awaySelection: "Away +0.5", awayOdds: 1.94, capturedAt: null },
+    });
+    expect(card).toContain("示例聯賽 (Sample League)");
+    expect(card).toContain("主隊 (Home FC)  vs  客隊 (Away FC)");
+    expect(card).toContain("API-Football Asian Handicap [Home -0.5 @1.90 / Away +0.5 @1.94]");
   });
 
   it("/upcoming跳過缺少勝率、2.5大小球、讓球或Top 3波膽的已同步賽事", () => {
     const base = {
       fixtureId: 202, leagueName: "MLS", eventTime: "2026-08-15T20:00:00Z", homeTeam: "Example Home", awayTeam: "Example Away",
       homeWin: 0.6, draw: 0.22, awayWin: 0.18,
-      compactMarkets: [{ market: "入球大細 2.5", selection: "大 2.5", probability: 0.55 }, { market: "讓球盤 (Handicap)", selection: "主隊 -0.5", probability: 0.6 }],
+      compactMarkets: [{ market: "入球大細 2.5", selection: "大 2.5", probability: 0.55 }],
+      handicapQuote: { source: "API-Football Asian Handicap", homeSelection: "Home -0.5", homeOdds: 1.9, awaySelection: "Away +0.5", awayOdds: 1.92, capturedAt: null },
       topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
     } as never;
     const incomplete = { ...base, fixtureId: 201, homeWin: Number.NaN, topScorelines: [] };
     const text = formatCachedUpcoming([incomplete, base], new Date("2026-08-15T00:00:00Z"));
-    expect(text).toContain("暫無可驗證HKJC／亞洲盤口");
-    expect(text).toContain("【Example Home】  vs  【Example Away】");
+    expect(text).not.toContain("暫無可驗證");
+    expect(text).toContain("⚽️ Example Home  vs  Example Away");
   });
 
   it("在Telegram標題以繁體中文加英文原名顯示已知球隊，未知隊名保留原文", () => {
     expect(formatFixtureDisplay("Jeju United FC", "FC Anyang")).toBe("濟州SK (Jeju United FC) vs 安養FC (FC Anyang)");
     expect(formatFixtureDisplay("Shenyang Urban", "Sichuan Jiuniu")).toBe("瀋陽城市 (Shenyang Urban) vs 四川九牛 (Sichuan Jiuniu)");
-    expect(formatFixtureDisplay("Internacional", "Remo")).toBe("國際體育會 (Internacional) vs 雷莫 (Remo)");
     expect(formatFixtureDisplay("Unknown FC", "FC Tokyo")).toBe("Unknown FC vs FC東京 (FC Tokyo)");
-    expect(formatFixtureDisplay("Fluminense W", "America Mineiro W")).toBe("富明尼斯女足 (Fluminense W) vs 明尼路美洲女足 (America Mineiro W)");
-    expect(formatFixtureDisplay("Fluminense Women", "America Mineiro Women")).toBe("富明尼斯女足 (Fluminense Women) vs 明尼路美洲女足 (America Mineiro Women)");
   });
 
   it("解析/team並以中文別名找到下一場已同步賽事，缺少賽事時回覆明確警示", () => {
@@ -228,70 +152,8 @@ describe("Telegram管理員授權", () => {
       compactMarkets: [{ market: "主客和 (1X2)", selection: "主勝", probability: 0.61 }],
       topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
     }] as never;
-    expect(formatTeamResearch(fixtures, "曼聯", new Date("2026-08-15T00:00:00Z"))).toContain("【曼聯 (Manchester United)】  vs  【Example Away】");
+    expect(formatTeamResearch(fixtures, "曼聯", new Date("2026-08-15T00:00:00Z"))).toContain("⚽️ 曼聯 (Manchester United)  vs  Example Away");
     expect(formatTeamResearch(fixtures, "不存在的隊", new Date("2026-08-15T00:00:00Z"))).toBe("⚠️ 暫未找到 不存在的隊 的近期賽事資料，請確認隊名或嘗試其他熱門隊伍。");
-  });
-
-  it("解析/predict的fixture ID、對陣與單隊輸入，並拒絕空白指令", () => {
-    expect(parsePredictRequest("/predict 1492335")).toEqual({ kind: "fixture", fixtureId: 1492335 });
-    expect(parsePredictRequest("/predict 曼聯 vs 阿仙奴")).toEqual({ kind: "pair", homeTeam: "曼聯", awayTeam: "阿仙奴" });
-    expect(parsePredictRequest("/predict 國際米蘭")).toEqual({ kind: "team", team: "國際米蘭" });
-    expect(parsePredictRequest("/predict")).toEqual({ kind: "invalid" });
-  });
-
-  it("詳細/predict研究呈現近期勝率、Elo、預期入球、研究風險與限制", () => {
-    const output = formatPredictResearch({
-      fixtureId: 123,
-      leagueCode: "EPL",
-      homeTeam: "Manchester United",
-      awayTeam: "Arsenal",
-      kickoffAt: new Date("2026-08-20T12:00:00Z"),
-      marketContext: [],
-      prediction: {
-        prediction_as_of: "2026-08-18T00:00:00Z",
-        probabilities: { home_win: 0.46, draw: 0.28, away_win: 0.26 },
-        diagnostics: { historical_matches_used: 100, latest_historical_match: "2026-08-17", dc_history_match_count: 42, dc_available: true },
-        selected_features: { home_elo_pre: 1710, away_elo_pre: 1680, elo_diff_pre: 30, home_recent5_win_rate: 0.6, away_recent5_win_rate: 0.4, dc_expected_home_goals: 1.45, dc_expected_away_goals: 1.1 },
-        lean: { outcome: "home_win", label: "主隊傾向", team: "Manchester United", probability: 0.46, risk_level: "medium", reasons: ["主場Elo優勢"], limitations: ["市場資料有限"] },
-      },
-    } as never);
-    expect(output).toContain("【近期數據比較】");
-    expect(output).toContain("動態Elo");
-    expect(output).toContain("Dixon–Coles預期入球");
-    expect(output).toContain("【研究傾向】主隊傾向");
-    expect(output).toContain("【資料限制】");
-  });
-
-  it("以新鮮完整HDA盤口顯示研究型EV與去水市場機率", () => {
-    const candidate = {
-      fixtureId: 123,
-      leagueCode: "EPL",
-      homeTeam: "Manchester United",
-      awayTeam: "Arsenal",
-      kickoffAt: new Date("2026-08-20T12:00:00Z"),
-      prediction: {
-        probabilities: { home_win: 0.52, draw: 0.25, away_win: 0.23 },
-        selected_features: { dc_expected_home_goals: 1.55, dc_expected_away_goals: 1.05 },
-      },
-      marketContext: [
-        { marketName: "1X2", selection: "Home", decimalOdds: 2.1, capturedAt: new Date("2026-08-18T00:00:00Z"), bookmakerName: "Bet365" },
-        { marketName: "1X2", selection: "Draw", decimalOdds: 3.5, capturedAt: new Date("2026-08-18T00:00:00Z"), bookmakerName: "Bet365" },
-        { marketName: "1X2", selection: "Away", decimalOdds: 3.8, capturedAt: new Date("2026-08-18T00:00:00Z"), bookmakerName: "Bet365" },
-      ],
-    } as never;
-    const output = formatDynamicEvSection(candidate, new Date("2026-08-18T03:00:00Z"));
-    expect(output).toContain("【動態EV研究】來源 Bet365");
-    expect(output).toContain("主勝 @2.10｜模型 52.0%");
-    expect(output).toContain("市場去水");
-    expect(output).toContain("EV +9.2%");
-  });
-
-  it("拒絕以過期盤口快照計算動態EV", () => {
-    const candidate = {
-      prediction: { probabilities: { home_win: 0.5, draw: 0.25, away_win: 0.25 }, selected_features: { dc_expected_home_goals: 1.2, dc_expected_away_goals: 1 } },
-      marketContext: [{ marketName: "1X2", selection: "Home", decimalOdds: 2.1, capturedAt: new Date("2026-08-17T00:00:00Z") }],
-    } as never;
-    expect(formatDynamicEvSection(candidate, new Date("2026-08-18T07:00:00Z"))).toContain("已過期");
   });
 
   it("支援主要聯賽的常用繁體中文隊名別名，不將無關簡稱模糊命中", () => {
@@ -347,8 +209,6 @@ describe("Telegram管理員授權", () => {
 
   it("在基礎Poisson回覆標示隊伍歷史攻防或聯賽平均來源", () => {
     const base = {
-      fixtureId: 202, leagueCode: "40", kickoffAt: new Date("2026-08-16T12:00:00Z"),
-      leagueName: "Championship",
       homeTeam: "Bristol City",
       awayTeam: "Millwall",
       outcomes: { homeWin: 0.4, draw: 0.33, awayWin: 0.27 },
@@ -361,7 +221,6 @@ describe("Telegram管理員授權", () => {
     expect(formatLiveTeamResearch({ ...base, sourceMode: "team-history" })).toContain("【資料來源】隊伍歷史攻防");
     expect(formatLiveTeamResearch({ ...base, sourceMode: "league-average" })).toContain("【資料來源】聯賽平均");
     expect(formatLiveTeamResearch({ ...base, sourceMode: "team-history", calibrationLabel: "英冠正式聯賽樣本＋聯賽平均及主場優勢校準" })).toContain("【校準】英冠正式聯賽樣本");
-    expect(formatLiveTeamResearch({ ...base, sourceMode: "team-history", preMatchRisk: { tier: "caution", reasons: ["近期正式賽樣本少於5場"] } })).toContain("全場低比分訊號不可單獨推定半場和局");
   });
 
   it("以Telegram一般HTML文字包裝對齊研究內容並轉義特殊字元", () => {
@@ -391,20 +250,6 @@ describe("Telegram管理員授權", () => {
     const candidate = (probability: number, risk: "low" | "medium" | "high", samples: number, available: boolean) => ({ prediction: { lean: { probability, risk_level: risk }, diagnostics: { dc_available: available, dc_history_match_count: samples } } }) as never;
     const candidates = [candidate(0.62, "low", 25, true), candidate(0.59, "high", 6, true), candidate(0.55, "medium", 4, false), candidate(0.49, "high", 2, false)];
     expect(selectDailyDigestPicks(candidates).map(item => item.prediction.lean.probability)).toEqual([0.62, 0.59, 0.55]);
-  });
-
-  it("定時推播只接受具完整勝率、實際盤口與可推導波膽的候選", () => {
-    const prediction = {
-      probabilities: { home_win: 0.5, draw: 0.27, away_win: 0.23 },
-      selected_features: { dc_expected_home_goals: 1.4, dc_expected_away_goals: 0.9 },
-    } as never;
-    const complete = { prediction, marketContext: [
-      { marketName: "Goals Over/Under", selection: "Over 2.5", decimalOdds: 1.9 },
-      { marketName: "Asian Handicap", selection: "Home -0.5", decimalOdds: 1.85 },
-    ] } as never;
-    expect(hasCompleteDigestCandidate(complete)).toBe(true);
-    expect(hasCompleteDigestCandidate({ ...complete, marketContext: [] })).toBe(false);
-    expect(hasCompleteDigestCandidate({ ...complete, prediction: { ...prediction, probabilities: { home_win: 0.5, draw: Number.NaN, away_win: 0.5 } } })).toBe(false);
   });
 
   it("只要有未來24小時fixture就列出，部分模型與盤口會以基礎分析而非暫無賽事呈現", () => {
@@ -524,53 +369,5 @@ describe("盤路與資料品質閘門", () => {
     await expect(verifyApiFootballReadiness()).rejects.toThrow("研究摘要已安全停止");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toContain("/status");
-  });
-});
-
-
-describe("實時讓球盤一小時微型趨勢圖示", () => {
-  it("在真實讓球盤旁顯示主客水位升跌方向與快照窗口", () => {
-    const message = formatCachedUpcoming([{
-      fixtureId: 7001,
-      leagueName: "MLS",
-      eventTime: "2026-08-15T20:00:00Z",
-      homeTeam: "Example Home",
-      awayTeam: "Example Away",
-      homeWin: 0.62,
-      draw: 0.21,
-      awayWin: 0.17,
-      predictedScore: "2-1",
-      recommendation: "研究傾向：主勝",
-      confidence: 4,
-      predictionUpdatedAt: "2026-08-15T10:00:00Z",
-      hasPrediction: true,
-      compactMarkets: [
-        { market: "主客和 (1X2)", selection: "主勝", probability: 0.62 },
-        { market: "入球大細 2.5", selection: "大 2.5", probability: 0.56 },
-        { market: "讓球盤 (Handicap)", selection: "主隊 -0.5", probability: 0.6 },
-      ],
-      topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
-      odds: null,
-      handicapQuote: {
-        source: "Bet365",
-        homeLine: "-0.5",
-        homeOdds: 1.88,
-        awayLine: "+0.5",
-        awayOdds: 1.92,
-        capturedAt: "2026-08-15T10:00:00Z",
-        trend: {
-          homeDirection: "down",
-          awayDirection: "up",
-          homeDelta: -0.07,
-          awayDelta: 0.07,
-          sampleCount: 2,
-          windowMinutes: 35,
-          firstCapturedAt: "2026-08-15T09:25:00Z",
-          latestCapturedAt: "2026-08-15T10:00:00Z",
-        },
-      },
-    }], new Date("2026-08-15T00:00:00Z"));
-    expect(message).toContain("📈 【一小時水位】主 ↓0.07 | 客 ↑0.07 · 2個快照/35分鐘");
-    expect(message).toContain("⚖️ 【實時讓球盤】Bet365 主隊 -0.5 (@1.88) / 客隊 +0.5 (@1.92)");
   });
 });

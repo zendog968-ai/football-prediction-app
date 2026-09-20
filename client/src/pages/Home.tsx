@@ -22,7 +22,6 @@ import {
 import { trpc } from "@/lib/trpc";
 import { Link } from "wouter";
 import MatchSpotlightCard from "@/components/MatchSpotlightCard";
-import { LineupAdjustmentLab, ProbabilityVisual, TacticalRiskFocus } from "@/components/MatchAnalysisEnhancements";
 import { calculateMarketResearch, type MarketOdds } from "@/lib/oddsResearch";
 
 type Forecast = {
@@ -58,7 +57,7 @@ type HistoryItem = Forecast & { id: string; savedAt: number };
 const HISTORY_KEY = "aurelia-football-session-history";
 const leagueLabels: Record<string, string> = {
   BRA1: "巴甲", EPL: "英超", LL: "西甲", BL: "德甲", SA: "義甲", L1: "法甲",
-  MLS: "美職", J1: "日職", FIN1: "芬蘭聯賽", KOR1: "韓職", POR1: "葡職", MEX1: "墨西哥聯賽", AUS1: "澳職", ARG1: "阿甲", UEL: "歐霸盃", SUD: "南美球會盃", LCUP: "北美聯賽盃",
+  MLS: "美職", J1: "日職", FIN1: "芬蘭聯賽", KOR1: "韓職", POR1: "葡職", MEX1: "墨西哥聯賽", AUS1: "澳職", UEL: "歐霸盃", SUD: "南美球會盃", LCUP: "北美聯賽盃",
 };
 
 function percent(value: number) {
@@ -247,7 +246,7 @@ export default function Home() {
           <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-[0_18px_55px_rgba(15,23,42,0.07)] lg:p-8">
             <div className="flex items-start justify-between gap-4"><div><div className="mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-700"><Sparkles size={14} />賽前預測工作台</div><h1 className="max-w-xl font-serif text-4xl leading-[1.02] text-[#0d1d2a] sm:text-5xl">讓每一場對戰，
               <span className="text-emerald-700">更有依據。</span></h1></div><div className="hidden rounded-2xl bg-[#f5f0e6] p-3 text-amber-700 sm:block"><BrainCircuit size={23} /></div></div>
-            <p className="mt-5 max-w-xl text-sm leading-7 text-slate-500">先選定聯賽與對戰球隊。系統只分析17個已驗證資料範圍內的對戰，並以校準後的機器學習模型輸出三種結果機率。</p>
+            <p className="mt-5 max-w-xl text-sm leading-7 text-slate-500">先選定聯賽與對戰球隊。系統只分析16個已驗證資料範圍內的對戰，並以校準後的機器學習模型輸出三種結果機率。</p>
 
             <div className="mt-8 grid gap-5">
               <div><label htmlFor="league-selector" className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400"><Target size={13} />聯賽</label><div className="relative"><select id="league-selector" value={leagueCode} onChange={event => changeLeague(event.target.value)} className="h-13 w-full appearance-none rounded-2xl border border-slate-200 bg-slate-50/70 px-4 pr-10 text-sm font-semibold text-slate-800 outline-none transition focus:border-amber-300 focus:bg-white"><option value="">選擇聯賽</option>{leaguesQuery.data?.leagues.map(league => <option key={league.code} value={league.code}>{leagueLabels[league.code] || league.name} · {league.name}</option>)}</select><ChevronDown size={17} className="pointer-events-none absolute right-4 top-4 text-slate-400" /></div></div>
@@ -267,12 +266,10 @@ export default function Home() {
             <div className="relative flex h-full flex-col">
               <div className="flex items-start justify-between gap-4"><div><div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-200"><BarChart3 size={14} />預測結果</div><h2 className="mt-3 font-serif text-3xl">{display ? `${display.home_team} vs ${display.away_team}` : "等待你的對戰組合"}</h2></div><div className="rounded-xl border border-white/10 bg-white/5 p-2 text-emerald-300"><ShieldCheck size={19} /></div></div>
               {display ? <div className="mt-7 grid gap-3"><ProbabilityCard label="主勝" team={display.home_team} value={display.probabilities.home_win} tone="emerald" /><ProbabilityCard label="和局" team="平局" value={display.probabilities.draw} tone="slate" /><ProbabilityCard label="客勝" team={display.away_team} value={display.probabilities.away_win} tone="amber" /></div> : <div className="my-auto py-10"><div className="grid h-18 w-18 place-items-center rounded-[1.5rem] border border-white/10 bg-white/[0.04] text-amber-200"><Target size={30} /></div><p className="mt-5 max-w-sm text-sm leading-7 text-slate-300">選定兩隊後，系統會展開校準後的賽果分佈與特徵訊號。</p><div className="mt-7 space-y-3 rounded-3xl border border-white/[0.07] bg-white/[0.025] p-4"><div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[.18em] text-slate-500"><span>Calibration field</span><span>H · D · A</span></div><div className="space-y-2.5">{[["主勝", "w-3/5", "bg-emerald-400"], ["和局", "w-[34%]", "bg-slate-400"], ["客勝", "w-[47%]", "bg-amber-300"]].map(([label, width, color]) => <div key={label} className="flex items-center gap-3"><span className="w-7 text-[10px] font-bold text-slate-500">{label}</span><div className="h-1 flex-1 overflow-hidden rounded-full bg-white/10"><div className={`h-full rounded-full ${width} ${color}`} /></div></div>)}</div></div></div>}
-              {display && <><ProbabilityVisual probabilities={{ homeWin: display.probabilities.home_win, draw: display.probabilities.draw, awayWin: display.probabilities.away_win }} homeTeam={display.home_team} awayTeam={display.away_team} />{display.lean && <div className="mt-5"><LeanSummary lean={display.lean} /></div>}<TacticalRiskFocus forecast={display} /><div className="mt-5 flex items-center gap-2 text-xs text-slate-400"><Clock3 size={14} />歷史資料截點：{display.prediction_as_of}</div><div className="mt-4 rounded-2xl border border-amber-200/20 bg-amber-200/[0.06] p-4 text-xs leading-6 text-slate-300" data-testid="research-disclaimer"><div className="flex items-center gap-2 font-bold text-amber-100"><BadgeInfo size={14} />校準賽果機率與數學門檻</div><p className="mt-2">此處只顯示17個已驗證範圍內、校準後的主／和／客機率。模型公平門檻（十進制）= 1 ÷ 機率，並非機率、命中率或保證；主勝 {modelOdds(display.probabilities.home_win)}、和局 {modelOdds(display.probabilities.draw)}、客勝 {modelOdds(display.probabilities.away_win)}。</p><p className="mt-2 text-slate-400">大小球、BTTS與未涵蓋聯賽的研究數字不會被轉換為模型公平門檻或EV。下方比較僅用於校準主／和／客模型的統計研究，不構成市場賠率推薦、價值判斷或任何投注與資金建議。</p></div></>}
+              {display && <>{display.lean && <div className="mt-5"><LeanSummary lean={display.lean} /></div>}<div className="mt-5 flex items-center gap-2 text-xs text-slate-400"><Clock3 size={14} />歷史資料截點：{display.prediction_as_of}</div><div className="mt-4 rounded-2xl border border-amber-200/20 bg-amber-200/[0.06] p-4 text-xs leading-6 text-slate-300" data-testid="research-disclaimer"><div className="flex items-center gap-2 font-bold text-amber-100"><BadgeInfo size={14} />校準賽果機率與數學門檻</div><p className="mt-2">此處只顯示16個已驗證範圍內、校準後的主／和／客機率。模型公平門檻（十進制）= 1 ÷ 機率，並非機率、命中率或保證；主勝 {modelOdds(display.probabilities.home_win)}、和局 {modelOdds(display.probabilities.draw)}、客勝 {modelOdds(display.probabilities.away_win)}。</p><p className="mt-2 text-slate-400">大小球、BTTS與未涵蓋聯賽的研究數字不會被轉換為模型公平門檻或EV。下方比較僅用於校準主／和／客模型的統計研究，不構成市場賠率推薦、價值判斷或任何投注與資金建議。</p></div></>}
             </div>
           </div>
         </section>
-
-        {display && <LineupAdjustmentLab forecast={display} />}
 
         {spotlightQuery.data && <div className="mt-8"><MatchSpotlightCard match={spotlightQuery.data} /></div>}
 

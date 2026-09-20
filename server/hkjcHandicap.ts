@@ -66,9 +66,9 @@ export function parseHkjcHandicapText(value: string, capturedAt = new Date()): H
       homeTeam,
       awayTeam,
       source: "HKJC",
-      homeLine: displayLine(homeLine),
+      homeSelection: `Home ${displayLine(homeLine)}`,
       homeOdds,
-      awayLine: displayLine(awayLine),
+      awaySelection: `Away ${displayLine(awayLine)}`,
       awayOdds,
       capturedAt: capturedAt.toISOString(),
     });
@@ -98,9 +98,9 @@ export async function getHkjcHandicapQuote(homeTeam: string, awayTeam: string): 
   const match = quotes.find(quote => normalizeTeam(quote.homeTeam) === home && normalizeTeam(quote.awayTeam) === away);
   return match ? {
     source: match.source,
-    homeLine: match.homeLine,
+    homeSelection: match.homeSelection,
     homeOdds: match.homeOdds,
-    awayLine: match.awayLine,
+    awaySelection: match.awaySelection,
     awayOdds: match.awayOdds,
     capturedAt: match.capturedAt,
   } : null;

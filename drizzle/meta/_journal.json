@@ -29,69 +29,6 @@
       "when": 1786808328341,
       "tag": "0003_stale_joystick",
       "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "5",
-      "when": 1786812624664,
-      "tag": "0004_rainy_gideon",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "5",
-      "when": 1786814152416,
-      "tag": "0005_lonely_satana",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "5",
-      "when": 1786814901953,
-      "tag": "0006_sweet_iron_monger",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "5",
-      "when": 1786839343012,
-      "tag": "0007_large_medusa",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "5",
-      "when": 1786850207846,
-      "tag": "0008_loose_justin_hammer",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "5",
-      "when": 1786946869912,
-      "tag": "0009_productive_tiger_shark",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "5",
-      "when": 1786955638123,
-      "tag": "0010_daffy_solo",
-      "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "5",
-      "when": 1786966863877,
-      "tag": "0011_rainy_kulan_gath",
-      "breakpoints": true
-    },
-    {
-      "idx": 12,
-      "version": "5",
-      "when": 1786967810958,
-      "tag": "0012_sleepy_true_believers",
-      "breakpoints": true
     }
   ]
 }

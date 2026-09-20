@@ -10,7 +10,6 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { handleScheduledResearch, handleTelegramWebhook } from "../telegramResearch";
 import { handleScheduledAllLeagueSync } from "../allLeagueSync";
-import { handleScheduledWeeklyModelReport } from "../weeklyModelReport";
 import { registerAdminConfigRoutes } from "../adminConfig";
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -41,9 +40,6 @@ async function startServer() {
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   // External Telegram updates are authenticated with Telegram's webhook secret.
-  app.get("/api/integrations/telegram/webhook", (_req, res) => {
-    res.status(200).json({ ok: true, service: "telegram-webhook", inboundAudit: true });
-  });
   app.post("/api/integrations/telegram/webhook", (req, res) => {
     void handleTelegramWebhook(req, res).catch(error => {
       res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
@@ -54,7 +50,6 @@ async function startServer() {
   app.post("/api/scheduled/research-day", (req, res) => void handleScheduledResearch(req, res, "day_digest"));
   app.post("/api/scheduled/research-evening", (req, res) => void handleScheduledResearch(req, res, "evening_digest"));
   app.post("/api/scheduled/all-league-sync", (req, res) => void handleScheduledAllLeagueSync(req, res));
-  app.post("/api/scheduled/model-drift-weekly", (req, res) => void handleScheduledWeeklyModelReport(req, res));
   registerAdminConfigRoutes(app);
   // tRPC API
   app.use(

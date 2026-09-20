@@ -29,73 +29,6 @@ function scoreGrid(homeMean: number, awayMean: number) {
   return raw.map(item => ({ ...item, probability: item.probability / normalizer }));
 }
 
-export type OneXTwoProbabilities = { homeWin: number; draw: number; awayWin: number };
-
-export type MarketImpliedProbabilities = { homeWin: number; draw: number; awayWin: number };
-
-/**
- * Returns the gross expected return less stake for a unit-stake market price.
- * This is a research metric only; callers must separately validate source,
- * snapshot freshness, calibration and model limitations before displaying it.
- */
-export function expectedValue(probability: number | null | undefined, decimalOdds: number | null | undefined): number | null {
-  if (typeof probability !== "number" || !Number.isFinite(probability) || probability < 0 || probability > 1) return null;
-  if (typeof decimalOdds !== "number" || !Number.isFinite(decimalOdds) || decimalOdds <= 1) return null;
-  return probability * decimalOdds - 1;
-}
-
-export function dixonColesScoreGrid(homeMean: number, awayMean: number, rho: number) {
-  if (!validMean(homeMean) || !validMean(awayMean) || !Number.isFinite(rho) || rho < -0.25 || rho > 0.25) return [];
-  const tau = (homeGoals: number, awayGoals: number) => {
-    if (homeGoals === 0 && awayGoals === 0) return 1 - homeMean * awayMean * rho;
-    if (homeGoals === 0 && awayGoals === 1) return 1 + homeMean * rho;
-    if (homeGoals === 1 && awayGoals === 0) return 1 + awayMean * rho;
-    if (homeGoals === 1 && awayGoals === 1) return 1 - rho;
-    return 1;
-  };
-  const raw = Array.from({ length: MAX_GOALS + 1 }, (_, homeGoals) => Array.from({ length: MAX_GOALS + 1 }, (_, awayGoals) => ({
-    homeGoals,
-    awayGoals,
-    probability: Math.max(tau(homeGoals, awayGoals), 1e-8) * poisson(homeGoals, homeMean) * poisson(awayGoals, awayMean),
-  }))).flat();
-  const normalizer = raw.reduce((total, item) => total + item.probability, 0);
-  return raw.map(item => ({ ...item, probability: item.probability / normalizer }));
-}
-
-export function outcomesFromScoreGrid(grid: Array<{ homeGoals: number; awayGoals: number; probability: number }>): OneXTwoProbabilities | null {
-  if (!grid.length) return null;
-  return grid.reduce((outcomes, item) => {
-    if (item.homeGoals > item.awayGoals) outcomes.homeWin += item.probability;
-    else if (item.homeGoals === item.awayGoals) outcomes.draw += item.probability;
-    else outcomes.awayWin += item.probability;
-    return outcomes;
-  }, { homeWin: 0, draw: 0, awayWin: 0 });
-}
-
-export function deVigOneXTwo(homeOdds?: number | null, drawOdds?: number | null, awayOdds?: number | null): MarketImpliedProbabilities | null {
-  const values = [homeOdds, drawOdds, awayOdds];
-  if (!values.every((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 1)) return null;
-  const inverse = values.map(value => 1 / value);
-  const total = inverse.reduce((sum, value) => sum + value, 0);
-  return total > 0 ? { homeWin: inverse[0]! / total, draw: inverse[1]! / total, awayWin: inverse[2]! / total } : null;
-}
-
-export function blendOneXTwo(model: OneXTwoProbabilities, market: MarketImpliedProbabilities | null, marketWeight = 0.5): OneXTwoProbabilities {
-  if (!market) return model;
-  const weight = Math.max(0, Math.min(1, marketWeight));
-  const raw = {
-    homeWin: (1 - weight) * model.homeWin + weight * market.homeWin,
-    draw: (1 - weight) * model.draw + weight * market.draw,
-    awayWin: (1 - weight) * model.awayWin + weight * market.awayWin,
-  };
-  const total = raw.homeWin + raw.draw + raw.awayWin;
-  return { homeWin: raw.homeWin / total, draw: raw.draw / total, awayWin: raw.awayWin / total };
-}
-
-export function doubleChanceProbabilities(outcomes: OneXTwoProbabilities) {
-  return { oneX: outcomes.homeWin + outcomes.draw, xTwo: outcomes.draw + outcomes.awayWin };
-}
-
 export function topScorelines(homeMean: number | null | undefined, awayMean: number | null | undefined): ScorelineProbability[] {
   if (!validMean(homeMean) || !validMean(awayMean)) return [];
   return scoreGrid(homeMean, awayMean)
@@ -106,7 +39,12 @@ export function topScorelines(homeMean: number | null | undefined, awayMean: num
 
 export function outcomeProbabilities(homeMean: number | null | undefined, awayMean: number | null | undefined): { homeWin: number; draw: number; awayWin: number } | null {
   if (!validMean(homeMean) || !validMean(awayMean)) return null;
-  return outcomesFromScoreGrid(scoreGrid(homeMean, awayMean));
+  return scoreGrid(homeMean, awayMean).reduce((outcomes, item) => {
+    if (item.homeGoals > item.awayGoals) outcomes.homeWin += item.probability;
+    else if (item.homeGoals === item.awayGoals) outcomes.draw += item.probability;
+    else outcomes.awayWin += item.probability;
+    return outcomes;
+  }, { homeWin: 0, draw: 0, awayWin: 0 });
 }
 
 export function totalSelectionProbability(selection: string | null | undefined, homeMean: number | null | undefined, awayMean: number | null | undefined): number | null {

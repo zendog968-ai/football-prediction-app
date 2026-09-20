@@ -14,8 +14,8 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent
 DATABASE = BASE_DIR / "football_data_expanded.db"
 MODEL = BASE_DIR / "expanded_model_artifacts" / "soccer_predict_model.pkl"
-PREDICTOR = BASE_DIR.parent / "scripts" / "predict_upcoming.py"
-LEAGUES = ["MLS", "J1", "FIN1", "KOR1", "POR1", "MEX1", "AUS1", "ARG1"]
+PREDICTOR = BASE_DIR / "predict_upcoming.py"
+LEAGUES = ["MLS", "J1", "FIN1", "KOR1", "POR1", "MEX1", "AUS1"]
 
 
 def representative_teams(connection: sqlite3.Connection, league_code: str) -> tuple[str, str, str]:
@@ -45,26 +45,16 @@ def representative_teams(connection: sqlite3.Connection, league_code: str) -> tu
 
 
 def main() -> None:
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--database", type=Path)
-    parser.add_argument("--model", type=Path)
-    parser.add_argument("--as-of", help="Not used but accepted for compatibility")
-    args = parser.parse_args()
-
-    database = args.database or DATABASE
-    model = args.model or MODEL
-
-    if not database.exists() or not model.exists():
-        raise FileNotFoundError(f"Missing: {database} or {model}")
+    if not DATABASE.exists() or not MODEL.exists():
+        raise FileNotFoundError("Expanded database or calibrated model is missing")
     results = []
-    with sqlite3.connect(database) as connection, tempfile.TemporaryDirectory(prefix="expanded-league-smoke-") as temp_dir:
+    with sqlite3.connect(DATABASE) as connection, tempfile.TemporaryDirectory(prefix="expanded-league-smoke-") as temp_dir:
         for league_code in LEAGUES:
             season, home, away = representative_teams(connection, league_code)
             output = Path(temp_dir) / f"{league_code}.json"
             command = [
                 sys.executable, str(PREDICTOR), "--home", home, "--away", away,
-                "--league", league_code, "--database", str(database), "--model", str(model),
+                "--league", league_code, "--database", str(DATABASE), "--model", str(MODEL),
                 "--json-out", str(output),
             ]
             completed = subprocess.run(command, check=True, text=True, capture_output=True, timeout=180)

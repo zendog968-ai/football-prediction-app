@@ -22,73 +22,9 @@ describe("英冠Supabase研究卡快取", () => {
     const card = cache.fixtures[0];
     expect(card?.researchSource).toContain("英冠正式聯賽樣本");
     expect(card?.compactMarkets.some(item => item.market === "入球大細 2.5")).toBe(true);
-    expect(card?.compactMarkets.some(item => item.market === "讓球盤 (Handicap)")).toBe(true);
+    expect(card?.compactMarkets.some(item => item.market === "讓球盤 (Handicap)")).toBe(false);
     expect(card?.handicapQuote).toBeNull();
     expect(card?.topScorelines).toHaveLength(3);
-    expect(card?.expectedHomeGoals).toBeCloseTo(0.7183);
-    expect(card?.expectedAwayGoals).toBeCloseTo(1.1175);
-  });
-
-  it("只配對同一書商、相反讓球線的真實上下盤水位", async () => {
-    const fetchMock = vi.fn(async (input: URL | string) => ({
-      ok: true,
-      json: async () => {
-        const url = String(input);
-        if (url.includes("fixtures?")) return [{ fixture_id: 2001, league_name: "J1 League", event_time: "2026-08-20T12:00:00Z", home_team: "Vissel Kobe", away_team: "FC Tokyo", status: "NS", updated_at: "2026-08-17T05:59:00Z" }];
-        if (url.includes("ai_predictions?")) return [{ fixture_id: 2001, home_win_prob: 0.58, draw_prob: 0.24, away_win_prob: 0.18, predicted_score: "1-0", recommendation: "\n[AURELIA_META]{\"h\":1.3,\"a\":0.7,\"s\":\"E\"}", confidence: 4, updated_at: "2026-08-17T05:59:00Z" }];
-        if (url.includes("odds_snapshots?")) return [
-          { fixture_id: 2001, market_type: "HDC | Bet365", handicap: "Home -0.5", home_odds: 1.91, draw_odds: null, away_odds: null, snapshot_time: "2026-08-17T05:59:00Z" },
-          { fixture_id: 2001, market_type: "HDC | Bet365", handicap: "Away +0.5", home_odds: null, draw_odds: null, away_odds: 1.89, snapshot_time: "2026-08-17T05:59:00Z" },
-          { fixture_id: 2001, market_type: "HDC | 10Bet", handicap: "Away +0.5", home_odds: null, draw_odds: null, away_odds: 1.80, snapshot_time: "2026-08-17T05:59:00Z" },
-        ];
-        return [];
-      },
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-    const cache = await getSupabaseUpcomingCache(true);
-    expect(cache.fixtures[0]?.handicapQuote).toEqual({
-      source: "Bet365",
-      homeLine: "-0.5",
-      homeOdds: 1.91,
-      awayLine: "+0.5",
-      awayOdds: 1.89,
-      capturedAt: "2026-08-17T05:59:00Z",
-    });
-  });
-
-  it("元資料沒有可驗證預期入球時維持空值，不以賽果機率反推或填補", async () => {
-    const fetchMock = vi.fn(async (input: URL | string) => ({
-      ok: true,
-      json: async () => {
-        const url = String(input);
-        if (url.includes("fixtures?")) return [{ fixture_id: 3002, league_name: "Premier League", event_time: "2026-08-22T12:30:00Z", home_team: "Arsenal", away_team: "Chelsea", status: "NS", updated_at: "2026-08-20T10:00:00Z" }];
-        if (url.includes("ai_predictions?")) return [{ fixture_id: 3002, home_win_prob: 0.42, draw_prob: 0.29, away_win_prob: 0.29, predicted_score: "1-1", recommendation: "研究來源尚未提供預期入球", confidence: 2, updated_at: "2026-08-20T10:00:00Z" }];
-        return [];
-      },
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const cache = await getSupabaseUpcomingCache(true);
-    expect(cache.fixtures[0]?.expectedHomeGoals).toBeNull();
-    expect(cache.fixtures[0]?.expectedAwayGoals).toBeNull();
-    expect(cache.fixtures[0]?.topScorelines).toEqual([]);
-  });
-
-  it("可選翻譯表404時安全降級，不阻塞賽程與研究機率", async () => {
-    const fetchMock = vi.fn(async (input: URL | string) => {
-      const url = String(input);
-      if (url.includes("team_translations?") || url.includes("league_translations?")) return { ok: false, status: 404, json: async () => ({ message: "relation not found" }) };
-      if (url.includes("fixtures?")) return { ok: true, json: async () => [{ fixture_id: 3003, league_name: "J1 League", event_time: "2026-08-22T12:30:00Z", home_team: "Vissel Kobe", away_team: "FC Tokyo", status: "NS", updated_at: "2026-08-20T10:00:00Z" }] };
-      if (url.includes("ai_predictions?")) return { ok: true, json: async () => [{ fixture_id: 3003, home_win_prob: 0.5, draw_prob: 0.25, away_win_prob: 0.25, predicted_score: "1-0", recommendation: "\n[AURELIA_META]{\"h\":1.4,\"a\":0.9,\"s\":\"D\"}", confidence: 3, updated_at: "2026-08-20T10:00:00Z" }] };
-      return { ok: true, json: async () => [] };
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const cache = await getSupabaseUpcomingCache(true);
-    expect(cache.available).toBe(true);
-    expect(cache.fixtures[0]?.hasPrediction).toBe(true);
-    expect(cache.fixtures[0]?.homeTeamTranslation).toBeUndefined();
-    expect(cache.fixtures[0]?.expectedHomeGoals).toBeCloseTo(1.4);
   });
 });
 
@@ -121,32 +57,24 @@ describe("Supabase繁中翻譯與讓球盤資料契約", () => {
     expect(card?.awayTeamTranslation).toEqual({ nameZhHk: null, nameZhTw: "阿森納" });
     expect(card?.handicapQuote).toEqual({
       source: "API-Football Asian Handicap",
-      homeLine: "-0.5",
+      homeSelection: "Home -0.5",
       homeOdds: 1.91,
-      awayLine: "+0.5",
+      awaySelection: "Away +0.5",
       awayOdds: 1.89,
       capturedAt: "2026-08-18T10:00:00Z",
     });
   });
-});
 
-
-describe("一小時讓球水位趨勢", () => {
-  it("以同一書商及同一盤線的至少兩個快照計算上下盤方向", async () => {
-    const now = Date.now();
-    const earlier = new Date(now - 45 * 60 * 1000).toISOString();
-    const latest = new Date(now - 10 * 60 * 1000).toISOString();
+  it("配對同步器分開儲存的主客亞洲盤水位", async () => {
     const fetchMock = vi.fn(async (input: URL | string) => ({
       ok: true,
       json: async () => {
         const url = String(input);
-        if (url.includes("fixtures?")) return [{ fixture_id: 4001, league_name: "La Liga", event_time: new Date(now + 2 * 60 * 60 * 1000).toISOString(), home_team: "Athletic Bilbao", away_team: "Elche", status: "NS", updated_at: latest }];
-        if (url.includes("ai_predictions?")) return [{ fixture_id: 4001, home_win_prob: 0.55, draw_prob: 0.25, away_win_prob: 0.20, predicted_score: "1-0", recommendation: "\\n[AURELIA_META]{\"h\":1.3,\"a\":0.8,\"s\":\"E\"}", confidence: 4, updated_at: latest }];
+        if (url.includes("fixtures?")) return [{ fixture_id: 992, league_name: "Liga MX", event_time: "2026-09-20T03:00:00Z", home_team: "Club America", away_team: "Guadalajara Chivas", status: "NS", updated_at: "2026-09-19T10:00:00Z" }];
+        if (url.includes("ai_predictions?")) return [{ fixture_id: 992, home_win_prob: 0.48, draw_prob: 0.28, away_win_prob: 0.24, predicted_score: "2-1", recommendation: "\n[AURELIA_META]{\"h\":1.62,\"a\":1.08,\"s\":\"隊史\"}", confidence: 3, updated_at: "2026-09-19T10:00:00Z" }];
         if (url.includes("odds_snapshots?")) return [
-          { fixture_id: 4001, market_type: "HDC | Bet365", handicap: "Home -0.5", home_odds: 1.95, away_odds: null, snapshot_time: earlier },
-          { fixture_id: 4001, market_type: "HDC | Bet365", handicap: "Away +0.5", home_odds: null, away_odds: 1.85, snapshot_time: earlier },
-          { fixture_id: 4001, market_type: "HDC | Bet365", handicap: "Home -0.5", home_odds: 1.88, away_odds: null, snapshot_time: latest },
-          { fixture_id: 4001, market_type: "HDC | Bet365", handicap: "Away +0.5", home_odds: null, away_odds: 1.92, snapshot_time: latest },
+          { fixture_id: 992, market_type: "HDC | Bet365", handicap: "Home -0.5", home_odds: 1.91, away_odds: null, snapshot_time: "2026-09-19T10:00:00Z" },
+          { fixture_id: 992, market_type: "HDC | Bet365", handicap: "Away +0.5", home_odds: null, away_odds: 1.89, snapshot_time: "2026-09-19T10:00:00Z" },
         ];
         return [];
       },
@@ -154,35 +82,13 @@ describe("一小時讓球水位趨勢", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const cache = await getSupabaseUpcomingCache(true);
-    expect(cache.fixtures[0]?.handicapQuote?.trend).toMatchObject({
-      homeDirection: "down",
-      awayDirection: "up",
-      homeDelta: -0.07,
-      awayDelta: 0.07,
-      sampleCount: 2,
-      windowMinutes: 35,
+    expect(cache.fixtures[0]?.handicapQuote).toEqual({
+      source: "API-Football Asian Handicap",
+      homeSelection: "Home -0.5",
+      homeOdds: 1.91,
+      awaySelection: "Away +0.5",
+      awayOdds: 1.89,
+      capturedAt: "2026-09-19T10:00:00Z",
     });
-  });
-
-  it("只有一個快照時不顯示趨勢方向", async () => {
-    const now = Date.now();
-    const capturedAt = new Date(now - 10 * 60 * 1000).toISOString();
-    const fetchMock = vi.fn(async (input: URL | string) => ({
-      ok: true,
-      json: async () => {
-        const url = String(input);
-        if (url.includes("fixtures?")) return [{ fixture_id: 4002, league_name: "La Liga", event_time: new Date(now + 2 * 60 * 60 * 1000).toISOString(), home_team: "Athletic Bilbao", away_team: "Elche", status: "NS", updated_at: capturedAt }];
-        if (url.includes("ai_predictions?")) return [{ fixture_id: 4002, home_win_prob: 0.55, draw_prob: 0.25, away_win_prob: 0.20, predicted_score: "1-0", recommendation: "\\n[AURELIA_META]{\"h\":1.3,\"a\":0.8,\"s\":\"E\"}", confidence: 4, updated_at: capturedAt }];
-        if (url.includes("odds_snapshots?")) return [
-          { fixture_id: 4002, market_type: "HDC | Bet365", handicap: "Home -0.5", home_odds: 1.90, away_odds: null, snapshot_time: capturedAt },
-          { fixture_id: 4002, market_type: "HDC | Bet365", handicap: "Away +0.5", home_odds: null, away_odds: 1.90, snapshot_time: capturedAt },
-        ];
-        return [];
-      },
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const cache = await getSupabaseUpcomingCache(true);
-    expect(cache.fixtures[0]?.handicapQuote?.trend).toBeUndefined();
   });
 });

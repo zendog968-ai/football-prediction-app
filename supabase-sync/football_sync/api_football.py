@@ -100,7 +100,6 @@ def normalize_fixture(raw: dict[str, Any], captured_at: datetime) -> dict[str, A
         "api_fixture_id": fixture_id,
         "league_id": league.get("id"),
         "league_name": league.get("name"),
-        "league_country": league.get("country"),
         "season": league.get("season"),
         "kickoff_at": kickoff,
         "status": fixture.get("status", {}).get("short"),

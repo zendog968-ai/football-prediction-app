@@ -12,18 +12,10 @@ def _selection_key(value: str) -> str:
     return value.strip().lower()
 
 
-def _league_identity(name: object, country: object) -> str | None:
-    league = str(name or "").strip()
-    nation = str(country or "").strip()
-    if not league:
-        return None
-    return f"{nation}::{league}" if nation else league
-
-
 def fixture_to_existing_schema(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "fixture_id": row["api_fixture_id"],
-        "league_name": _league_identity(row.get("league_name"), row.get("league_country")),
+        "league_name": row.get("league_name"),
         "event_time": row["kickoff_at"],
         "status": row.get("status"),
         "home_team": row["home_team"],
@@ -79,24 +71,19 @@ def odds_to_existing_schema(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def prediction_to_existing_schema(row: dict[str, Any]) -> dict[str, Any]:
-    championship = "championship" in str(row.get("model_version", ""))
-    legacy = str(row.get("model_version", "")).startswith("poisson-")
-    source_code = ("C" if championship else "") + ("E" if row.get("ensemble_used") else "D")
-    # ai_predictions.recommendation is varchar(50).  Keep this compact and let the
-    # server cache decode it; historical verbose AURELIA_META remains supported.
-    metadata = ",".join((
-        f"{float(row.get('expected_home_goals') or 0):.3g}",
-        f"{float(row.get('expected_away_goals') or 0):.3g}",
-        source_code,
-        f"{float(row.get('dc_rho') or 0):.3g}",
-    ))
+    championship = str(row.get("model_version", "")).startswith("poisson-v3-championship")
+    metadata = json.dumps({
+        "h": row.get("expected_home_goals"),
+        "a": row.get("expected_away_goals"),
+        "s": "英冠校準" if championship else "隊史",
+    }, ensure_ascii=False, separators=(",", ":"))
     return {
         "fixture_id": row["api_fixture_id"],
         "home_win_prob": row["home_win_probability"],
         "draw_prob": row["draw_probability"],
         "away_win_prob": row["away_win_probability"],
         "predicted_score": row["most_likely_score"],
-        "recommendation": f"\n[M]{metadata}",
+        "recommendation": f"\n[AURELIA_META]{metadata}",
         "confidence": row["evidence_stars"],
         "updated_at": row["generated_at"],
     }
@@ -122,7 +109,3 @@ class SupabaseStore:
 
     def upsert_predictions(self, rows: list[dict[str, Any]]) -> None:
         self.client.table("ai_predictions").upsert([prediction_to_existing_schema(row) for row in rows], on_conflict="fixture_id").execute()
-
-    def insert_feature_snapshots(self, rows: list[dict[str, Any]]) -> None:
-        if rows:
-            self.client.table("model_feature_snapshots").insert(rows, returning="minimal").execute()

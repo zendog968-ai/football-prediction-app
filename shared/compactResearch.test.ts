@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blendOneXTwo, deVigOneXTwo, dixonColesScoreGrid, doubleChanceProbabilities, handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, outcomesFromScoreGrid, topScorelines, totalSelectionProbability } from "./compactResearch";
+import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, totalSelectionProbability } from "./compactResearch";
 
 describe("compact research contract", () => {
   it("orders the three most likely scorelines from verified Poisson inputs", () => {
@@ -35,25 +35,5 @@ describe("compact research contract", () => {
   it("returns the highest complete 1X2 outcome without inventing partial probabilities", () => {
     expect(highestOutcome(0.52, 0.25, 0.23)).toEqual({ market: "主客和 (1X2)", selection: "主勝", probability: 0.52 });
     expect(highestOutcome(0.52, Number.NaN, 0.23)).toBeNull();
-  });
-
-  it("applies bounded Dixon–Coles low-score correction while preserving a normalized 1X2 distribution", () => {
-    const grid = dixonColesScoreGrid(1.3, 0.9, -0.08);
-    const outcomes = outcomesFromScoreGrid(grid);
-    expect(grid).toHaveLength(81);
-    expect(grid.reduce((sum, item) => sum + item.probability, 0)).toBeCloseTo(1, 8);
-    expect(outcomes).not.toBeNull();
-    expect(outcomes!.homeWin + outcomes!.draw + outcomes!.awayWin).toBeCloseTo(1, 8);
-  });
-
-  it("de-vigs verified 1X2 odds, blends them 50/50 and exposes double chance", () => {
-    const market = deVigOneXTwo(2.0, 3.5, 4.0);
-    expect(market).not.toBeNull();
-    expect(market!.homeWin + market!.draw + market!.awayWin).toBeCloseTo(1, 8);
-    const blended = blendOneXTwo({ homeWin: 0.50, draw: 0.28, awayWin: 0.22 }, market);
-    const doubleChance = doubleChanceProbabilities(blended);
-    expect(blended.homeWin + blended.draw + blended.awayWin).toBeCloseTo(1, 8);
-    expect(doubleChance.oneX).toBeCloseTo(blended.homeWin + blended.draw, 8);
-    expect(doubleChance.xTwo).toBeCloseTo(blended.draw + blended.awayWin, 8);
   });
 });

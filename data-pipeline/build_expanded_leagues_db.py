@@ -28,7 +28,6 @@ TARGETS = {
     "portugal": ("POR1", "Primeira Liga", "split"),
     "mexico": ("MEX1", "Liga MX", "mexico"),
     "australia": ("AUS1", "A-League Men", "split"),
-    "argentina": ("ARG1", "Liga Profesional Argentina", "calendar"),
 }
 
 
@@ -103,14 +102,43 @@ def validate(connection: sqlite3.Connection) -> None:
     rows = connection.execute(
         """SELECT league_code, COUNT(*), COUNT(DISTINCT season),
                   SUM(CASE WHEN home_xg IS NOT NULL OR away_xg IS NOT NULL THEN 1 ELSE 0 END)
-           FROM matches WHERE league_code IN ('MLS','J1','FIN1','KOR1','POR1','MEX1','AUS1','ARG1')
+           FROM matches WHERE league_code IN ('MLS','J1','FIN1','KOR1','POR1','MEX1','AUS1')
            GROUP BY league_code ORDER BY league_code"""
     ).fetchall()
-    if len(rows) != 8 or any(row[1] == 0 or row[2] < 5 or row[3] != 0 for row in rows):
+    if len(rows) != 7 or any(row[1] == 0 or row[2] < 5 or row[3] != 0 for row in rows):
         raise RuntimeError(f"新增聯賽資料驗證失敗：{rows}")
     print("\n驗證完成：所有新增聯賽均含至少五個賽季，且xG欄位保持NULL。")
     for row in rows:
         print(f"{row[0]} | {row[1]:,} 場 | {row[2]} 個賽季 | xG賽事 {row[3]}")
+
+
+def filter_existing_records(connection: sqlite3.Connection, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Skip exact duplicates already present in a release snapshot.
+
+    A fallback release may already contain the seven expanded leagues. Exact
+    identity matches are safe to ignore; rows with any differing field remain
+    visible to SQLite's integrity checks instead of being silently overwritten.
+    """
+    existing = {
+        tuple(row)
+        for row in connection.execute(
+            """SELECT league_code, season, match_date, home_team, away_team,
+                      home_goals, away_goals
+               FROM matches
+               WHERE league_code IN ('MLS','J1','FIN1','KOR1','POR1','MEX1','AUS1')"""
+        )
+    }
+    filtered = [
+        record for record in records
+        if (
+            record["league_code"], record["season"], record["match_date"],
+            record["home_team"], record["away_team"], record["home_goals"], record["away_goals"]
+        ) not in existing
+    ]
+    skipped = len(records) - len(filtered)
+    if skipped:
+        print(f"已從 Release 快照跳過完全重複賽事：{skipped:,} 場")
+    return filtered
 
 
 def main() -> None:
@@ -129,7 +157,7 @@ def main() -> None:
     records = make_records(source, reference_date)
     with sqlite3.connect(output) as connection:
         connection.execute("DELETE FROM team_stats")
-        insert_matches(connection, records)
+        insert_matches(connection, filter_existing_records(connection, records))
         compute_team_stats(connection)
         validate(connection)
         connection.commit()

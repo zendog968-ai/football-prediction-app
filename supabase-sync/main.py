@@ -16,7 +16,6 @@ from typing import Any
 
 from football_sync.api_football import ApiFootballClient, normalize_fixture, normalize_odds
 from football_sync.config import Settings
-from football_sync.feature_snapshot import build_feature_snapshot
 from football_sync.poisson import InsufficientHistory, predict_fixture
 from football_sync.supabase_store import SupabaseStore
 
@@ -101,7 +100,7 @@ def run() -> dict[str, Any]:
     )
 
     store = None if args.dry_run else SupabaseStore.from_settings(settings)
-    counts = {"fixtures": 0, "leagues": 0, "countries": 0, "research_fixtures": 0, "odds_snapshots": 0, "ai_predictions": 0, "feature_snapshots": 0, "prediction_skipped": 0}
+    counts = {"fixtures": 0, "leagues": 0, "countries": 0, "research_fixtures": 0, "odds_snapshots": 0, "ai_predictions": 0, "prediction_skipped": 0}
     summaries: list[dict[str, Any]] = []
     now = datetime.now(UTC)
     fixture_rows = [normalize_fixture(raw_fixture, now) for raw_fixture in fixtures]
@@ -154,23 +153,14 @@ def run() -> dict[str, Any]:
             )
             league_history = client.league_recent_fixtures(league_id, history_season) if league_id == 40 else None
             prediction_fixture = {**fixture_row, "season": history_season}
-            prediction = predict_fixture(
-                prediction_fixture,
-                home_history,
-                away_history,
-                generated_at=now,
-                league_history=league_history,
-                odds_rows=odds_rows,
-            )
+            prediction = predict_fixture(prediction_fixture, home_history, away_history, generated_at=now, league_history=league_history)
         except InsufficientHistory as exc:
             LOGGER.info("Skipping fixture %s: %s", fixture_row["api_fixture_id"], exc)
             counts["prediction_skipped"] += 1
             continue
         if store:
             store.upsert_predictions([prediction.to_row()])
-            store.insert_feature_snapshots([build_feature_snapshot(fixture_row, home_history, away_history, prediction.to_row())])
         counts["ai_predictions"] += 1
-        counts["feature_snapshots"] += 1
         summaries.append({
             "league": fixture_row.get("league_name") or "Unknown league",
             "home_team": fixture_row["home_team"],

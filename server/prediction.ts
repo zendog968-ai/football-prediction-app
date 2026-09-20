@@ -14,7 +14,7 @@ const databasePath = path.join(runtimeDirectory, "football_data_expanded_with_cl
 const modelPath = path.join(runtimeDirectory, "soccer_predict_model_expanded.pkl");
 
 export const SUPPORTED_LEAGUE_CODES = new Set([
-  "BRA1", "EPL", "LL", "BL", "SA", "L1", "MLS", "J1", "FIN1", "KOR1", "POR1", "MEX1", "AUS1", "ARG1", "UEL", "SUD", "LCUP",
+  "BRA1", "EPL", "LL", "BL", "SA", "L1", "MLS", "J1", "FIN1", "KOR1", "POR1", "MEX1", "AUS1", "UEL", "SUD", "LCUP",
 ]);
 
 export class PredictionScopeError extends Error {
@@ -266,7 +266,7 @@ export async function getLeagueMetadata(request: Request): Promise<LeagueMetadat
 export async function getTeams(request: Request, leagueCode: string): Promise<string[]> {
   const normalizedLeague = leagueCode.trim().toUpperCase();
   if (!SUPPORTED_LEAGUE_CODES.has(normalizedLeague)) {
-    throw new PredictionScopeError("超出模型範疇：目前只支援17個已驗證資料範圍內的對戰；未涵蓋盃賽與聯賽不會輸出未校準機率。");
+    throw new PredictionScopeError("超出模型範疇：目前只支援16個已驗證資料範圍內的對戰；未涵蓋盃賽與聯賽不會輸出未校準機率。");
   }
   await ensureRuntimeAssets(request);
   const stdout = await runPython("list_teams.py", ["--database", databasePath, "--league", normalizedLeague]);

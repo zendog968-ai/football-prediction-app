@@ -5,7 +5,6 @@ import { ENV } from "./_core/env";
 import { sdk } from "./_core/sdk";
 import { getDb } from "./db";
 import { deliverAllLeagueCoverageSummary } from "./telegramResearch";
-import { encodeLeagueIdentity } from "../shared/leagueDisplay";
 
 type ApiFixture = {
   fixture?: { id?: number; date?: string; status?: { short?: string } };
@@ -52,7 +51,7 @@ function asFixtureRow(item: ApiFixture, now: string): FixtureRow | null {
   if (!Number.isInteger(id) || !eventTime || !home || !away) return null;
   return {
     fixture_id: id!,
-    league_name: encodeLeagueIdentity(item.league?.name || "Unknown League", item.league?.country),
+    league_name: item.league?.name || "Unknown League",
     event_time: eventTime,
     home_team: home,
     away_team: away,

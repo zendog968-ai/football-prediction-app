@@ -55,55 +55,22 @@ jobs:
           retention-days: 30
       - name: Publish only the validated versioned assets
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_STATUS_TOKEN || github.token }}
-        run: |
-          for i in 1 2 3; do
-            echo "Publish attempt $i/3..."
-            bash scripts/publish_github_release.sh build/daily && exit 0
-            echo "Attempt $i failed. Sleeping 30s..."
-            sleep 30
-          done
-          exit 1
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/publish_github_release.sh build/daily
 
   notify-on-failure:
     needs: [build-validate-publish]
-    if: ${{ always() && (needs['build-validate-publish'].result == 'failure' || needs['build-validate-publish'].result == 'cancelled') }}
+    if: ${{ always() && needs['build-validate-publish'].result == 'failure' }}
     runs-on: ubuntu-latest
     permissions:
-      contents: read
       issues: write
     steps:
-      - name: Check out source for alert scripts
-        uses: actions/checkout@v4
-      - name: Set up Python for alert scripts
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
       - name: Create one actionable data-quality alert for this failed run
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_STATUS_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
           RUN_TITLE: "[Aurelia Data Alert] Daily refresh failed · run ${{ github.run_id }}"
           RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         run: |
-          # Use a subshell to prevent issue-creation errors from stopping the Telegram alert
-          (
-            # Search for existing open issues with the same title
-            ISSUE_COUNT=$(gh issue list --repo "${{ github.repository }}" --state open --search "$RUN_TITLE" --json number --jq 'length' 2>/dev/null || echo "0")
-            if [ "$ISSUE_COUNT" = "0" ]; then
-              gh issue create --repo "${{ github.repository }}" --title "$RUN_TITLE" --body "每日資料刷新或品質閘門未通過。既有不可變Release會繼續服務；請開啟工作流程紀錄查閱失敗步驟及保留的候選稽核檔案。\n\n失敗執行：[查看工作流程紀錄]($RUN_URL)\n\n此Issue由工作流程自動建立，同一run只會建立一次。"
-            else
-              echo "An open issue for this run already exists."
-            fi
-          ) || echo "Warning: Failed to manage GitHub Issues. Proceeding to Telegram alert."
-      - name: Send failure alert to Telegram
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN || vars.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || vars.TELEGRAM_CHAT_ID }}
-          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-        run: |
-          if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
-            cd supabase-sync
-            PYTHONPATH=. python scripts/telegram_alert.py --kind failure --detail "Aurelia每日數據刷新失敗。Run: $RUN_URL"
-          else
-            echo "Telegram credentials missing, skipping alert."
+          if gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$RUN_TITLE" --json number --jq 'length' | grep -qx '0'; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$RUN_TITLE" --body "每日資料刷新或品質閘門未通過。既有不可變Release會繼續服務；請開啟工作流程紀錄查閱失敗步驟及保留的候選稽核檔案。\n\n失敗執行：[查看工作流程紀錄]($RUN_URL)\n\n此Issue由工作流程自動建立，同一run只會建立一次。"
           fi

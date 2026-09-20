@@ -1,30 +1,26 @@
 import { timingSafeEqual } from "node:crypto";
 import type { Request, Response } from "express";
-import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { parse as parseCookie } from "cookie";
 import { COOKIE_NAME } from "@shared/const";
-import { formatFixtureDisplay, formatTeamDisplay } from "@shared/teamDisplay";
-import { formatLeagueDisplay, localizeLeagueName } from "@shared/leagueDisplay";
+import { formatFixtureDisplay, formatTranslatedTeamDisplay } from "@shared/teamDisplay";
+import { formatLeagueDisplay } from "@shared/leagueDisplay";
 import {
   oddsSnapshots,
-  researchDeliveryEvents,
   researchDigests,
-  researchDigestFixtures,
   researchScheduleJobs,
   researchSettlements,
-  telegramInboundEvents,
   telegramSubscriptions,
-  weeklyModelReports,
 } from "../drizzle/schema";
 import { getDb } from "./db";
 import { ENV } from "./_core/env";
 import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
 import { sdk } from "./_core/sdk";
 import { getPrediction, getTeams, type PredictionResult } from "./prediction";
-import { getSupabaseUpcomingCache, type CachedUpcomingFixture } from "./supabaseCache";
+import { getSupabaseUpcomingCache, type CachedHandicapQuote, type CachedUpcomingFixture } from "./supabaseCache";
 import { fetchLiveTeamResearch, fetchLiveUpcomingResearch, hasCompleteLiveResearch, type LiveTeamResearch } from "./livePoissonResearch";
-import { deVigOneXTwo, expectedValue, handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, totalSelectionProbability, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
-import { approvePendingTeamTranslation, ensureTelegramTeamTranslations, listPendingTeamTranslations, listRecentTeamTranslations, overrideTeamTranslation, resetTeamTranslation, seedPendingTeamTranslationsForTest, undoLastTeamTranslationOverride } from "./teamTranslation";
+import { getHkjcHandicapQuote } from "./hkjcHandicap";
+import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
 
 export type ResearchWindow = "day" | "evening" | "settlement";
 export type ScheduleKind = "settlement" | "day_digest" | "evening_digest";
@@ -74,9 +70,6 @@ type MarketContext = {
   selection: string;
   decimalOdds: number;
   capturedAt: Date;
-  bookmakerName?: string;
-  opposingSelection?: string;
-  opposingOdds?: number;
   openingSelection?: string;
   openingOdds?: number;
   openingCapturedAt?: Date;
@@ -90,24 +83,17 @@ type TeamResearchResponse = { text: string; buttons?: TelegramInlineButton[] };
 type Candidate = {
   fixtureId: number;
   leagueCode: string;
+  leagueName: string;
+  leagueTranslation?: CachedUpcomingFixture["leagueTranslation"];
   homeTeam: string;
+  homeTeamTranslation?: CachedUpcomingFixture["homeTeamTranslation"];
   awayTeam: string;
+  awayTeamTranslation?: CachedUpcomingFixture["awayTeamTranslation"];
   kickoffAt: Date;
   prediction: PredictionResult;
   marketContext: MarketContext[];
+  handicapQuote?: CachedHandicapQuote | null;
 };
-
-type DynamicEvLine = {
-  selection: string;
-  decimalOdds: number;
-  modelProbability: number;
-  marketProbability: number | null;
-  expectedValue: number;
-  capturedAt: Date;
-  bookmakerName: string | null;
-};
-
-const EV_SNAPSHOT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 const LEAGUES: Record<string, { apiLeagueId: number; season: number }> = {
   BRA1: { apiLeagueId: 71, season: 2026 },
@@ -129,15 +115,8 @@ const LEAGUES: Record<string, { apiLeagueId: number; season: number }> = {
   LCUP: { apiLeagueId: 772, season: 2026 },
 };
 
-const RESEARCH_LEAGUE_NAMES: Record<string, string> = {
-  BRA1: "Brazil::Serie A", EPL: "Premier League", LL: "La Liga", BL: "Bundesliga", SA: "Italy::Serie A", L1: "Ligue 1",
-  MLS: "Major League Soccer", J1: "J1 League", FIN1: "Veikkausliiga", KOR1: "K League 1", CSL: "Super League",
-  POR1: "Primeira Liga", MEX1: "Liga MX", AUS1: "A-League", UEL: "UEFA Europa League", SUD: "CONMEBOL Sudamericana", LCUP: "Leagues Cup",
-  "253": "Major League Soccer", "262": "Liga MX", "71": "Brazil::Serie A", "39": "Premier League", "140": "La Liga", "78": "Bundesliga", "135": "Italy::Serie A",
-};
-
 export const RESEARCH_SCHEDULES: Array<{ kind: ScheduleKind; cron: string; path: string; description: string }> = [
-  { kind: "settlement", cron: "0 */30 * * * *", path: "/api/scheduled/research-settlement", description: "每30分鐘掃描完場賽事並推播研究覆盤" },
+  { kind: "settlement", cron: "0 30 2 * * *", path: "/api/scheduled/research-settlement", description: "每日10:30香港時間研究統計複盤" },
   { kind: "day_digest", cron: "0 0 3 * * *", path: "/api/scheduled/research-day", description: "每日11:00香港時間日間研究摘要" },
   { kind: "evening_digest", cron: "0 30 10 * * *", path: "/api/scheduled/research-evening", description: "每日18:30香港時間晚間研究摘要" },
 ];
@@ -147,16 +126,10 @@ export const TELEGRAM_HELP_MESSAGE = [
   "",
   "/start — 啟用研究通知。",
   "/status — 查閱訂閱狀態、Heartbeat任務與API剩餘額度。",
-  "/jobs — 查閱各推播任務的預期下次執行、最後完成與送達結果。",
-  "/health — 查閱最新模型健康度、樣本規模與特徵缺失狀態。",
   "/trend <fixture ID> 或 /trend 主隊 vs 客隊 — 查詢已保存盤口走勢。",
-  "/today — 重新查看今日已送達且資料完整的研究清單；若尚未建立，會生成一次僅供查閱的清單。",
   "/upcoming — 查詢未來24小時所有已同步賽事；完整模型以研究分析、部分資料以【基礎分析】呈現。",
   "/report — 顯示最新24小時賽事摘要（與/upcoming相同）。",
-  "/predict <主隊> vs <客隊>、/predict <隊伍名稱> 或 /predict <fixture ID> — 查詢賽前詳細研究：勝和負機率、近期勝率、Elo、預期入球及風險限制。",
   "/team <隊伍名稱> — 查詢該隊最近一場已同步賽事的極簡機率表格與Top 3波膽。",
-  "/dict — 管理員查看詞典；/dict pending 查閱待審音譯，/approve <ID> <繁中譯名> 批核。亦可用 /dict set、reset、undo 管理已存詞典。",
-  "/inbound — 管理員查閱近期Telegram入站指令接收與處理狀態（不保存訊息內容）。",
   "/stop — 停止研究通知；可隨時以/start重新啟用。",
   "/help — 顯示本指令說明。",
   "",
@@ -177,18 +150,17 @@ type OutcomeSnapshot = { homeWin: number; draw: number; awayWin: number };
 function hasCompleteCachedResearch(item: CachedUpcomingFixture): boolean {
   const outcomes = [item.homeWin, item.draw, item.awayWin];
   const totals = item.compactMarkets.find(row => row.market === "入球大細 2.5");
-  const handicap = item.compactMarkets.find(row => row.market === "讓球盤 (Handicap)");
-  const validProbability = (value: number | undefined) => Number.isFinite(value) && value! > 0 && value! < 1;
-  return outcomes.every(validProbability) && Math.abs(outcomes.reduce((total, value) => total + value, 0) - 1) < 0.02
-    && Boolean(totals?.selection && validProbability(totals.probability))
-    && Boolean(handicap?.selection && validProbability(handicap.probability))
+  const quote = item.handicapQuote;
+  return outcomes.every(value => Number.isFinite(value) && value >= 0 && value <= 1)
+    && Boolean(totals && Number.isFinite(totals.probability))
+    && Boolean(quote && Number.isFinite(quote.homeOdds) && Number.isFinite(quote.awayOdds))
     && item.topScorelines.length >= 3
-    && item.topScorelines.slice(0, 3).every(scoreline => Boolean(scoreline.score) && validProbability(scoreline.probability));
+    && item.topScorelines.slice(0, 3).every(scoreline => Boolean(scoreline.score) && Number.isFinite(scoreline.probability));
 }
 
-function formatHktKickoff(value: Date | string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "時間待確認";
+export function formatHktKickoff(value: Date | string): string {
+  const kickoff = new Date(value);
+  if (!Number.isFinite(kickoff.getTime())) return "資料不足";
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Hong_Kong",
     year: "numeric",
@@ -197,36 +169,39 @@ function formatHktKickoff(value: Date | string): string {
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
-  }).formatToParts(date);
-  const valueOf = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value || "00";
-  return `${valueOf("year")}-${valueOf("month")}-${valueOf("day")} ${valueOf("hour")}:${valueOf("minute")} (HKT)`;
+  }).formatToParts(kickoff);
+  const field = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? "00";
+  return `${field("year")}-${field("month")}-${field("day")} ${field("hour")}:${field("minute")} (HKT)`;
 }
 
-function formatLocalizedFixture(homeTeam: string, awayTeam: string): string {
-  return `⚽️ 【${formatTeamDisplay(homeTeam)}】  vs  【${formatTeamDisplay(awayTeam)}】`;
+function displayHandicapQuote(quote: CachedHandicapQuote | null | undefined): string {
+  if (!quote || !Number.isFinite(quote.homeOdds) || !Number.isFinite(quote.awayOdds)) return "⚖️ 【實時讓球盤】資料不足（沒有完整主客兩邊實際盤口）";
+  const source = quote.source === "HKJC" ? "HKJC" : quote.source;
+  return `⚖️ 【實時讓球盤】${source} [${quote.homeSelection} @${quote.homeOdds.toFixed(2)} / ${quote.awaySelection} @${quote.awayOdds.toFixed(2)}]`;
 }
 
-function formatCachedResearchSource(item: CachedUpcomingFixture): string {
-  return `📊 【資料來源】${item.researchSource || "Dixon–Coles 模型 + HDA 賠率融合"}`;
-}
-
-function formatHandicapTrend(trend: NonNullable<NonNullable<CachedUpcomingFixture["handicapQuote"]>["trend"]>): string {
-  const icon = (direction: "up" | "down" | "flat") => direction === "up" ? "↑" : direction === "down" ? "↓" : "→";
-  const delta = (direction: "up" | "down" | "flat", value: number) => `${icon(direction)}${Math.abs(value).toFixed(2)}`;
-  return `📈 【一小時水位】主 ${delta(trend.homeDirection, trend.homeDelta)} | 客 ${delta(trend.awayDirection, trend.awayDelta)} · ${trend.sampleCount}個快照/${trend.windowMinutes}分鐘`;
-}
-
-function formatCachedResearchExtras(item: CachedUpcomingFixture): string[] {
-  const oneX = item.homeWin + item.draw;
-  const xTwo = item.draw + item.awayWin;
-  const topWinner = Math.max(item.homeWin, item.awayWin);
+export function formatLocalizedResearchCard(item: Pick<CachedUpcomingFixture, "leagueName" | "leagueTranslation" | "eventTime" | "homeTeam" | "homeTeamTranslation" | "awayTeam" | "awayTeamTranslation" | "homeWin" | "draw" | "awayWin" | "compactMarkets" | "topScorelines" | "handicapQuote">): string {
+  const percent = (value: number) => Number.isFinite(value) && value >= 0 && value <= 1 ? `${(value * 100).toFixed(1)}%` : "資料不足";
   const total = item.compactMarkets.find(row => row.market === "入球大細 2.5");
-  const over25 = total?.selection.startsWith("大") ? total.probability : total ? 1 - total.probability : 0;
-  const high = topWinner > 0.60 || over25 > 0.75;
+  const over = total && (/^大(?:\s|$)/.test(total.selection) || /^over\b/i.test(total.selection)) ? total.probability : total ? 1 - total.probability : null;
+  const under = total && over !== null ? 1 - over : null;
+  const home = formatTranslatedTeamDisplay(item.homeTeam, item.homeTeamTranslation ?? undefined);
+  const away = formatTranslatedTeamDisplay(item.awayTeam, item.awayTeamTranslation ?? undefined);
   return [
-    `【雙重機率】1X ${(oneX * 100).toFixed(1)}% | X2 ${(xTwo * 100).toFixed(1)}%`,
-    `🔎 【研究分層】${high ? "符合研究分層門檻" : "未達研究分層門檻"}`,
-  ];
+    `🏆 【聯賽】${formatLeagueDisplay(item.leagueName, undefined, item.leagueTranslation ?? undefined)}`,
+    `📅 【時間】${formatHktKickoff(item.eventTime)}`,
+    "---",
+    `⚽️ ${home}  vs  ${away}`,
+    "---",
+    "📊 【資料來源】Dixon-Coles 模型 + HDA 賠率融合",
+    `🛡️ 【雙重機率】1X: ${percent(item.homeWin + item.draw)} | X2: ${percent(item.draw + item.awayWin)}`,
+    displayHandicapQuote(item.handicapQuote),
+    `🎯 【模型勝率預測】主勝 ${percent(item.homeWin)} | 和局 ${percent(item.draw)} | 客勝 ${percent(item.awayWin)}`,
+    `🔥 【大小球】${over === null || under === null ? "資料不足" : `大 2.5 (${percent(over)}) | 小 2.5 (${percent(under)})`}`,
+    "---",
+    "💡 【最高波膽 Top 3】",
+    ...[0, 1, 2].map(index => `${index + 1}. ${item.topScorelines[index] ? `${item.topScorelines[index]!.score} —— ${percent(item.topScorelines[index]!.probability)}` : "資料不足"}`),
+  ].join("\n");
 }
 
 function formatCompactTable(rows: CompactMarketRow[], scorelines: ScorelineProbability[], outcomes: OutcomeSnapshot): string {
@@ -249,38 +224,20 @@ function formatCompactTable(rows: CompactMarketRow[], scorelines: ScorelineProba
 
 export function toTelegramHtml(text: string): string {
   const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return escaped
-    .replace("【主客和】", "<b>【主客和】</b>")
-    .replace("【大細球】", "<b>【大細球】</b>")
-    .replace("【讓球盤】", "<b>【讓球盤】</b>")
-    .replace("🎯 【最高波膽 Top 3】", "🎯 <b>【最高波膽 Top 3】</b>");
-}
-
-function formatCachedResearchCard(item: CachedUpcomingFixture, index: number): string {
-  const percent = (value: number) => Number.isFinite(value) && value >= 0 && value <= 1 ? `${(value * 100).toFixed(1)}%` : "資料待補";
-  const total = item.compactMarkets.find(row => row.market === "入球大細 2.5");
-  const over25 = total?.selection.startsWith("大") ? total.probability : total ? 1 - total.probability : null;
-  const under25 = over25 === null ? null : 1 - over25;
-  const oneX = item.homeWin + item.draw;
-  const xTwo = item.draw + item.awayWin;
-  const handicap = item.handicapQuote
-    ? `⚖️ 【實時讓球盤】${item.handicapQuote.source} 主隊 ${item.handicapQuote.homeLine} (@${item.handicapQuote.homeOdds.toFixed(2)}) / 客隊 ${item.handicapQuote.awayLine} (@${item.handicapQuote.awayOdds.toFixed(2)})${item.handicapQuote.trend ? `  ${formatHandicapTrend(item.handicapQuote.trend)}` : ""}`
-    : "⚖️ 【實時讓球盤】暫無可驗證HKJC／亞洲盤口；不以模型讓球代替市場水位。";
-  return [
-    `${index}. 🏆 【聯賽】${localizeLeagueName(item.leagueName)}`,
-    "---",
-    formatLocalizedFixture(item.homeTeam, item.awayTeam),
-    `⏰ 賽事時間：${formatHktKickoff(item.eventTime)}`,
-    "---",
-    formatCachedResearchSource(item),
-    `🛡️ 【雙重機率】1X: ${percent(oneX)} | X2: ${percent(xTwo)}`,
-    handicap,
-    `🎯 【模型勝率預測】主勝 ${percent(item.homeWin)} | 和局 ${percent(item.draw)} | 客勝 ${percent(item.awayWin)}`,
-    `🔥 【大小球】${over25 === null || under25 === null ? "暫無可驗證2.5盤口" : `大 2.5 (${percent(over25)}) | 小 2.5 (${percent(under25)})`}`,
-    "---",
+  const headings = [
+    "🏆 【聯賽】",
+    "📅 【時間】",
+    "📊 【資料來源】",
+    "🛡️ 【雙重機率】",
+    "⚖️ 【實時讓球盤】",
+    "🎯 【模型勝率預測】",
+    "🔥 【大小球】",
     "💡 【最高波膽 Top 3】",
-    ...item.topScorelines.slice(0, 3).map((scoreline, scoreIndex) => `${scoreIndex + 1}. ${scoreline.score} —— ${percent(scoreline.probability)}`),
-  ].join("\n");
+    "【主客和】",
+    "【大細球】",
+    "【讓球盤】",
+  ];
+  return headings.reduce((rendered, heading) => rendered.replace(heading, `<b>${heading}</b>`), escaped);
 }
 
 export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = new Date()): string {
@@ -291,17 +248,12 @@ export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = ne
     return Number.isFinite(kickoff) && kickoff >= start && kickoff <= end && hasCompleteCachedResearch(item);
   }).slice(0, 3);
   if (!upcoming.length) return "";
-  return upcoming.map((item, index) => formatCachedResearchCard(item, index + 1)).join("\n\n");
+  return upcoming.map((item, index) => `${index + 1}. ${formatLocalizedResearchCard(item)}`).join("\n\n");
 }
 
 async function telegramUpcoming(): Promise<string> {
   const cached = await getSupabaseUpcomingCache();
   const now = Date.now();
-  const cachedDisplayable = cached.fixtures.filter(item => {
-    const kickoff = new Date(item.eventTime).getTime();
-    return Number.isFinite(kickoff) && kickoff >= now && kickoff <= now + 24 * 60 * 60_000 && hasCompleteCachedResearch(item);
-  }).slice(0, 3);
-  await ensureTelegramTeamTranslations(cachedDisplayable.flatMap(item => [item.homeTeam, item.awayTeam]));
   const hasCachedUpcoming = cached.available && cached.fixtures.some(item => {
     const kickoff = new Date(item.eventTime).getTime();
     return Number.isFinite(kickoff) && kickoff >= now && kickoff <= now + 24 * 60 * 60_000 && hasCompleteCachedResearch(item);
@@ -309,7 +261,6 @@ async function telegramUpcoming(): Promise<string> {
   if (hasCachedUpcoming) return formatCachedUpcoming(cached.fixtures);
   const live = await fetchLiveUpcomingResearch(3).catch(() => []);
   const completeLive = live.filter(hasCompleteLiveResearch);
-  await ensureTelegramTeamTranslations(completeLive.flatMap(item => [item.homeTeam, item.awayTeam]));
   if (completeLive.length > 0) return completeLive.map((item, index) => `${index + 1}. ${formatLiveTeamResearch(item)}`).join("\n\n");
   return "暫未找到可驗證未來賽事";
 }
@@ -341,6 +292,51 @@ function parseLine(value: string): string | null {
   return match?.[1] ?? null;
 }
 
+type AsianHandicapSnapshot = {
+  marketName: string;
+  selection: string;
+  decimalOdds: string;
+  bookmakerName: string;
+  capturedAt: Date;
+};
+
+function parseAsianHandicapSelection(value: string): { side: "Home" | "Away"; line: number } | null {
+  const match = /^(Home|Away)\s+([+-]?\d+(?:\.\d+)?)$/i.exec(value.trim());
+  if (!match) return null;
+  const line = Number(match[2]);
+  if (!Number.isFinite(line)) return null;
+  return { side: match[1]!.toLocaleLowerCase() === "home" ? "Home" : "Away", line };
+}
+
+function formatAsianHandicapSelection(side: "Home" | "Away", line: number): string {
+  const rounded = Math.round(line * 100) / 100;
+  return `${side} ${rounded > 0 ? "+" : ""}${rounded}`;
+}
+
+function pairedAsianHandicapQuote(rows: AsianHandicapSnapshot[]): CachedHandicapQuote | null {
+  const candidates = rows
+    .filter(row => row.marketName === "Asian Handicap")
+    .map(row => ({ row, parsed: parseAsianHandicapSelection(row.selection), odds: Number(row.decimalOdds) }))
+    .filter((item): item is { row: AsianHandicapSnapshot; parsed: { side: "Home" | "Away"; line: number }; odds: number } => Boolean(item.parsed) && Number.isFinite(item.odds) && item.odds > 1)
+    .sort((left, right) => right.row.capturedAt.getTime() - left.row.capturedAt.getTime());
+  for (const home of candidates.filter(item => item.parsed.side === "Home")) {
+    const away = candidates.find(item => item.parsed.side === "Away"
+      && item.row.bookmakerName === home.row.bookmakerName
+      && item.row.capturedAt.getTime() === home.row.capturedAt.getTime()
+      && Math.abs(item.parsed.line + home.parsed.line) < 0.000001);
+    if (!away) continue;
+    return {
+      source: "API-Football Asian Handicap",
+      homeSelection: formatAsianHandicapSelection("Home", home.parsed.line),
+      homeOdds: home.odds,
+      awaySelection: formatAsianHandicapSelection("Away", away.parsed.line),
+      awayOdds: away.odds,
+      capturedAt: home.row.capturedAt.toISOString(),
+    };
+  }
+  return null;
+}
+
 function hasRelevantMarket(name: string): boolean {
   return name === "Asian Handicap" || name === "Goals Over/Under";
 }
@@ -359,17 +355,15 @@ async function apiFootball<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function verifyApiFootballReadiness(options: { checkOdds?: boolean } = {}): Promise<void> {
+export async function verifyApiFootballReadiness(): Promise<void> {
   const status = await apiFootball<ApiFootballStatus>("/status");
   if (apiErrorCount(status) > 0 || status.response?.subscription?.active !== true || (status.response?.requests?.limit_day ?? 0) < 1000) {
     throw new Error("API-Football帳戶未通過授權或額度健康檢查；研究摘要已安全停止。");
   }
-  if (options.checkOdds) {
-    const mls = LEAGUES.MLS;
-    const mlsOdds = await apiFootball<ApiFootballOddsResponse>(`/odds?league=${mls.apiLeagueId}&season=${mls.season}`);
-    if (apiErrorCount(mlsOdds) > 0 || !Array.isArray(mlsOdds.response) || mlsOdds.response.length === 0) {
-      throw new Error("API-Football未提供2026 MLS盤口覆蓋；研究摘要已安全停止。");
-    }
+  const mls = LEAGUES.MLS;
+  const mlsOdds = await apiFootball<ApiFootballOddsResponse>(`/odds?league=${mls.apiLeagueId}&season=${mls.season}`);
+  if (apiErrorCount(mlsOdds) > 0 || !Array.isArray(mlsOdds.response) || mlsOdds.response.length === 0) {
+    throw new Error("API-Football未提供2026 MLS盤口覆蓋；研究摘要已安全停止。");
   }
 }
 
@@ -397,164 +391,6 @@ export function formatTelegramStatus(snapshot: TelegramStatusSnapshot): string {
 
 export function normalizeTelegramCommand(text: string | undefined): string | undefined {
   return text?.trim().toLowerCase().split(/\s+/)[0]?.replace(/@[a-z0-9_]+$/i, "");
-}
-
-const MULTI_LINE_ADMIN_COMMANDS = new Set(["/dict", "/approve", "/inbound"]);
-
-/**
- * Telegram users often paste several administrator commands in one message.
- * Only the explicitly allow-listed, command-per-line administrative actions are
- * accepted here; research, subscription and natural-language messages stay
- * single-command to avoid surprising repeated external calls.
- */
-export function parseMultiLineAdminCommands(text: string | undefined): string[] {
-  const lines = (text ?? "").split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  if (lines.length < 2 || lines.length > 3) return [];
-  return lines.every(line => MULTI_LINE_ADMIN_COMMANDS.has(normalizeTelegramCommand(line) ?? "")) ? lines : [];
-}
-
-export function parseDictionaryCommand(rawText: string | undefined):
-  | { kind: "list" }
-  | { kind: "pending" }
-  | { kind: "seed" }
-  | { kind: "set"; englishName: string; traditionalName: string }
-  | { kind: "reset"; englishName: string }
-  | { kind: "undo"; englishName?: string }
-  | { kind: "invalid" } {
-  const body = rawText?.trim().replace(/^\/dict(?:@[a-z0-9_]+)?\s*/i, "") ?? "";
-  if (!body) return { kind: "list" };
-  if (/^pending$/i.test(body)) return { kind: "pending" };
-  if (/^seed$/i.test(body)) return { kind: "seed" };
-  const undo = /^undo(?:\s+(.+))?$/i.exec(body);
-  if (undo) return { kind: "undo", ...(undo[1]?.trim() ? { englishName: undo[1].trim() } : {}) };
-  const set = /^set\s+(.+?)\s*=>\s*(.+)$/i.exec(body);
-  if (set) return { kind: "set", englishName: set[1]!.trim(), traditionalName: set[2]!.trim() };
-  const reset = /^reset\s+(.+)$/i.exec(body);
-  if (reset) return { kind: "reset", englishName: reset[1]!.trim() };
-  return { kind: "invalid" };
-}
-
-export function parseDictionaryApproveCommand(rawText: string | undefined): { id: number; traditionalName: string } | null {
-  const match = rawText?.trim().match(/^\/approve(?:@[a-z0-9_]+)?\s+(\d+)\s+(.+)$/i);
-  if (!match) return null;
-  const id = Number(match[1]);
-  const traditionalName = match[2]?.trim();
-  return Number.isInteger(id) && id > 0 && traditionalName ? { id, traditionalName } : null;
-}
-
-export function isDictionaryAdmin(chatId: string): boolean {
-  return Boolean(ENV.telegramAdminChatId) && chatId === ENV.telegramAdminChatId;
-}
-
-async function telegramDictionaryForAdmin(chatId: string, rawText: string | undefined): Promise<string> {
-  if (!isDictionaryAdmin(chatId)) return "🔒 無權限：此詞典指令僅限系統管理員使用。";
-  const command = parseDictionaryCommand(rawText);
-  if (command.kind === "invalid") {
-    return "用法：\n/dict\n/dict pending\n/dict seed（建立明確測試待審項目）\n/approve 1 國際體育會\n/dict set Atlante FC => 繁中譯名\n/dict reset Atlante FC\n/dict undo\n/dict undo Atlante FC";
-  }
-  if (command.kind === "seed") {
-    await seedPendingTeamTranslationsForTest();
-    return "🧪 已建立測試待審項目：TestFC、Demo United。\n傳送 /dict pending 查看；以 /approve [ID] [繁中譯名] 批核。";
-  }
-  if (command.kind === "pending") {
-    const pending = await listPendingTeamTranslations();
-    if (!pending.length) return "📥 【待審核隊名】\n目前沒有待審核音譯。";
-    return [
-      "📥 【待審核隊名】",
-      "──────────────────",
-      ...pending.map(entry => `${entry.id}. ${entry.englishName} → ${entry.suggestedTraditionalName}（${entry.source === "test" ? "測試" : "安全音譯"}｜出現${entry.seenCount}次）`),
-      "",
-      "批核：/approve [ID] [正確繁中譯名]",
-    ].join("\n");
-  }
-  if (command.kind === "set") {
-    await overrideTeamTranslation({ ...command, adminChatId: chatId });
-    return `✅ 已覆寫\n${command.englishName} → ${command.traditionalName}\n\n變更已記錄，後續Telegram推播會優先使用此譯名。`;
-  }
-  if (command.kind === "reset") {
-    const removed = await resetTeamTranslation({ englishName: command.englishName, adminChatId: chatId });
-    return removed
-      ? `↩️ 已重設 ${command.englishName}\n下次需要時會恢復使用詞庫或重新進行安全翻譯。`
-      : `找不到 ${command.englishName} 的可重設自動／覆寫譯名。`;
-  }
-  if (command.kind === "undo") {
-    if (command.englishName && (!/^[\x20-\x7E]+$/.test(command.englishName) || !/[A-Za-z]/.test(command.englishName) || command.englishName.length > 160)) {
-      return "指定隊名須為不超過160字元的英文隊名。";
-    }
-    const undone = await undoLastTeamTranslationOverride(chatId, command.englishName);
-    if (!undone) return command.englishName ? `找不到 ${command.englishName} 可復原的詞典覆寫。` : "目前沒有可復原的詞典覆寫。";
-    return undone.traditionalName
-      ? `↩️ 已復原最近覆寫\n${undone.englishName} → ${undone.traditionalName}\n\n此復原已記錄至詞典稽核。`
-      : `↩️ 已移除最近覆寫\n${undone.englishName} 已還原至內建詞庫或待下次安全翻譯。`;
-  }
-  const recent = await listRecentTeamTranslations(12);
-  if (!recent.length) return "📚 詞典目前沒有已快取的自動譯名。";
-  return [
-    "📚 【近期自動隊名詞典】",
-    ...recent.map((entry, index) => `${index + 1}. ${entry.englishName} → ${entry.traditionalName} ${entry.source === "llm" ? "🤖" : "✍️"}`),
-    "",
-    "覆寫：/dict set 英文隊名 => 繁中譯名",
-    "待審音譯：/dict pending",
-    "批核待審：/approve 1 國際體育會",
-    "重設：/dict reset 英文隊名",
-    "復原最近覆寫：/dict undo",
-    "復原指定隊名：/dict undo Atlante FC",
-  ].join("\n");
-}
-
-async function telegramApproveForAdmin(chatId: string, rawText: string | undefined): Promise<string> {
-  if (!isDictionaryAdmin(chatId)) return "🔒 無權限：此詞典指令僅限系統管理員使用。";
-  const input = parseDictionaryApproveCommand(rawText);
-  if (!input) return "用法：/approve [待審ID] [正確繁中譯名]\n例如：/approve 1 國際體育會";
-  const approved = await approvePendingTeamTranslation({ ...input, adminChatId: chatId });
-  return approved
-    ? `✅ 已批核 #${input.id}\n${approved.englishName} → ${approved.traditionalName}\n\n翻譯快取已刷新，後續 /upcoming 與定時推播會立即使用此名稱。`
-    : `找不到待審核項目 #${input.id}，或該項目已處理。`;
-}
-
-type InboundAuditStatus = typeof telegramInboundEvents.$inferSelect.status;
-
-async function recordTelegramInboundEvent(input: { updateId: string; chatId: string | null; command: string }): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.insert(telegramInboundEvents).values({
-    telegramUpdateId: input.updateId,
-    chatId: input.chatId,
-    command: input.command.slice(0, 64),
-    status: "received",
-  }).onDuplicateKeyUpdate({
-    set: { chatId: input.chatId, command: input.command.slice(0, 64), status: "received", errorSummary: null, receivedAt: new Date(), handledAt: null },
-  });
-}
-
-async function completeTelegramInboundEvent(updateId: string, status: InboundAuditStatus, errorSummary?: string): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.update(telegramInboundEvents).set({
-    status,
-    errorSummary: errorSummary?.replace(/[\r\n]+/g, " ").slice(0, 255) ?? null,
-    handledAt: new Date(),
-  }).where(eq(telegramInboundEvents.telegramUpdateId, updateId));
-}
-
-function safeInboundError(error: unknown): string {
-  return error instanceof Error ? error.message : "未知處理錯誤";
-}
-
-async function telegramInboundForAdmin(chatId: string): Promise<string> {
-  if (!isDictionaryAdmin(chatId)) return "🔒 無權限：入站稽核僅限系統管理員使用。";
-  const db = await getDb();
-  if (!db) throw new Error("入站稽核資料暫時無法使用。");
-  const rows = await db.select().from(telegramInboundEvents).orderBy(desc(telegramInboundEvents.receivedAt)).limit(20);
-  if (!rows.length) return "📨 【入站事件稽核】\n目前沒有已記錄的Webhook事件。";
-  const statusLabel: Record<InboundAuditStatus, string> = { received: "已接收", processed: "已處理", rejected: "已拒絕", failed: "失敗", ignored: "已忽略" };
-  return [
-    "📨 【入站事件稽核】",
-    "──────────────────",
-    ...rows.map(row => `${new Date(row.receivedAt).toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong", hour12: false })}｜${row.chatId ?? "無聊天室"}｜${row.command}｜${statusLabel[row.status]}${row.errorSummary ? `\n　↳ ${row.errorSummary}` : ""}`),
-    "",
-    "註：僅保存指令類型與處理狀態，不保存原始訊息內容。",
-  ].join("\n");
 }
 
 export function parseTrendRequest(text: string | undefined): { fixtureId?: number; homeTeam?: string; awayTeam?: string } | null {
@@ -759,24 +595,6 @@ export function parseTeamRequest(text: string | undefined): string | null {
   return team.length >= 2 && team.length <= 120 ? team : null;
 }
 
-export type PredictRequest =
-  | { kind: "fixture"; fixtureId: number }
-  | { kind: "pair"; homeTeam: string; awayTeam: string }
-  | { kind: "team"; team: string }
-  | { kind: "invalid" };
-
-export function parsePredictRequest(text: string | undefined): PredictRequest {
-  const body = text?.trim().replace(/^\/predict(?:@[a-z0-9_]+)?\s*/i, "") || "";
-  if (!body) return { kind: "invalid" };
-  if (/^\d+$/.test(body)) {
-    const fixtureId = Number(body);
-    return Number.isSafeInteger(fixtureId) && fixtureId > 0 ? { kind: "fixture", fixtureId } : { kind: "invalid" };
-  }
-  const pair = body.split(/\s+(?:vs|v)\.?\s+/i).map(part => part.trim()).filter(Boolean);
-  if (pair.length === 2 && pair.every(team => team.length >= 2 && team.length <= 120)) return { kind: "pair", homeTeam: pair[0]!, awayTeam: pair[1]! };
-  return body.length >= 2 && body.length <= 120 ? { kind: "team", team: body } : { kind: "invalid" };
-}
-
 function resolvedAliasTarget(value: string): string | null {
   const normalized = normalizeTeam(value);
   const exact = Object.entries(TEAM_QUERY_ALIASES).find(([alias]) => normalizeTeam(alias) === normalized)?.[1];
@@ -817,33 +635,12 @@ export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedT
     })
     .sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime())[0];
   if (!match) return noRecentFixtureMessage(requestedTeam);
-  return formatCachedResearchCard(match, 1);
+  return formatLocalizedResearchCard(match);
 }
 
 export function formatLiveTeamResearch(research: LiveTeamResearch): string {
   const source = research.sourceMode === "team-history" ? "隊伍歷史攻防" : "聯賽平均";
-  const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
-  const doubleChance = research.doubleChance ?? { oneX: research.outcomes.homeWin + research.outcomes.draw, xTwo: research.outcomes.draw + research.outcomes.awayWin };
-  const total = research.compactMarkets.find(row => row.market === "入球大細 2.5");
-  const over25 = total?.selection.startsWith("大") ? total.probability : total ? 1 - total.probability : null;
-  const under25 = over25 === null ? null : 1 - over25;
-  return [
-    `🏆 【聯賽】${localizeLeagueName(research.leagueName)}`,
-    "---",
-    formatLocalizedFixture(research.homeTeam, research.awayTeam),
-    `⏰ 賽事時間：${formatHktKickoff(research.kickoffAt)}`,
-    "---",
-    `📊 【資料來源】${source}`,
-    research.calibrationLabel ? `⚙️ 【校準】${research.calibrationLabel}` : null,
-    research.preMatchRisk?.tier === "caution" ? `⚠️ 【賽前風險】${research.preMatchRisk.reasons.join("；")}；全場低比分訊號不可單獨推定半場和局。` : null,
-    `🛡️ 【雙重機率】1X: ${percent(doubleChance.oneX)} | X2: ${percent(doubleChance.xTwo)}`,
-    "⚖️ 【實時讓球盤】暫無可驗證HKJC／亞洲盤口；不以模型讓球代替市場水位。",
-    `🎯 【模型勝率預測】主勝 ${percent(research.outcomes.homeWin)} | 和局 ${percent(research.outcomes.draw)} | 客勝 ${percent(research.outcomes.awayWin)}`,
-    `🔥 【大小球】${over25 === null || under25 === null ? "暫無可驗證2.5盤口" : `大 2.5 (${percent(over25)}) | 小 2.5 (${percent(under25)})`}`,
-    "---",
-    "💡 【最高波膽 Top 3】",
-    ...research.topScorelines.slice(0, 3).map((scoreline, index) => `${index + 1}. ${scoreline.score} —— ${percent(scoreline.probability)}`),
-  ].filter(Boolean).join("\n");
+  return [formatFixtureDisplay(research.homeTeam, research.awayTeam), `📊 【資料來源】${source}`, research.calibrationLabel ? `⚙️ 【校準】${research.calibrationLabel}` : null, formatCompactTable(research.compactMarkets, research.topScorelines, research.outcomes)].filter(Boolean).join("\n");
 }
 
 function findUpcomingTeamFixture(fixtures: CachedUpcomingFixture[], requestedTeam: string, now = new Date()): CachedUpcomingFixture | null {
@@ -908,145 +705,6 @@ async function telegramTeamResearch(request: Request, text: string | undefined):
   return suggestions.length > 0
     ? { text: "請選擇相近隊伍", buttons: suggestions.map(item => ({ text: formatFixtureDisplay(item.homeTeam, item.awayTeam), callback_data: `team:${item.fixtureId}` })) }
     : { text: noRecentFixtureMessage(requestedTeam) };
-}
-
-function findPredictFixture(fixtures: CachedUpcomingFixture[], query: PredictRequest, now = new Date()): CachedUpcomingFixture | null {
-  const upcoming = fixtures.filter(item => new Date(item.eventTime).getTime() >= now.getTime());
-  if (query.kind === "fixture") return upcoming.find(item => item.fixtureId === query.fixtureId) ?? null;
-  if (query.kind === "team") return findUpcomingTeamFixture(upcoming, query.team, now);
-  if (query.kind === "pair") {
-    const home = normalizedTeamQuery(query.homeTeam);
-    const away = normalizedTeamQuery(query.awayTeam);
-    return upcoming.find(item => normalizeTeam(item.homeTeam) === home && normalizeTeam(item.awayTeam) === away)
-      ?? upcoming.find(item => normalizeTeam(item.homeTeam).includes(home) && normalizeTeam(item.awayTeam).includes(away))
-      ?? null;
-  }
-  return null;
-}
-
-export function formatPredictResearch(candidate: Candidate): string {
-  const prediction = candidate.prediction;
-  const features = prediction.selected_features;
-  const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
-  const goals = (value: number | null) => value === null || !Number.isFinite(value) ? "資料待補" : value.toFixed(2);
-  const risk = prediction.lean.risk_level === "low" ? "較低" : prediction.lean.risk_level === "medium" ? "中等" : "較高";
-  return [
-    "🔮 【詳細賽前研究】",
-    formatCandidate(candidate),
-    "---",
-    "📈 【近期數據比較】",
-    `近5場勝率：${formatTeamDisplay(candidate.homeTeam)} ${percent(features.home_recent5_win_rate)} ｜ ${formatTeamDisplay(candidate.awayTeam)} ${percent(features.away_recent5_win_rate)}`,
-    `動態Elo：${formatTeamDisplay(candidate.homeTeam)} ${features.home_elo_pre.toFixed(0)} ｜ ${formatTeamDisplay(candidate.awayTeam)} ${features.away_elo_pre.toFixed(0)}（主客差 ${features.elo_diff_pre >= 0 ? "+" : ""}${features.elo_diff_pre.toFixed(0)}）`,
-    `Dixon–Coles預期入球：主 ${goals(features.dc_expected_home_goals)} ｜ 客 ${goals(features.dc_expected_away_goals)}`,
-    `歷史資料：${prediction.diagnostics.historical_matches_used} 場；Dixon–Coles樣本 ${prediction.diagnostics.dc_history_match_count} 場；截止 ${prediction.prediction_as_of.slice(0, 10)}`,
-    formatDynamicEvSection(candidate),
-    "---",
-    `🧭 【研究傾向】${prediction.lean.label}（${percent(prediction.lean.probability)}｜風險${risk}）`,
-    ...prediction.lean.reasons.slice(0, 3).map(reason => `• ${reason}`),
-    ...(prediction.lean.limitations.length ? ["⚠️ 【資料限制】", ...prediction.lean.limitations.slice(0, 3).map(limitation => `• ${limitation}`)] : []),
-    "所有內容只供模型與戰術研究，並非投注或資金建議。",
-  ].join("\n");
-}
-
-function displayMarketSelection(selection: string): string {
-  return selection
-    .replace(/^Home$/i, "主勝")
-    .replace(/^Draw$/i, "和局")
-    .replace(/^Away$/i, "客勝")
-    .replace(/^Home\s+/i, "主隊 ")
-    .replace(/^Away\s+/i, "客隊 ")
-    .replace(/^Over\s+/i, "大 ")
-    .replace(/^Under\s+/i, "小 ");
-}
-
-function modelProbabilityForMarket(candidate: Candidate, item: MarketContext): number | null {
-  const probabilities = candidate.prediction.probabilities;
-  if (item.marketName === "1X2") {
-    if (/^Home$/i.test(item.selection)) return probabilities.home_win;
-    if (/^Draw$/i.test(item.selection)) return probabilities.draw;
-    if (/^Away$/i.test(item.selection)) return probabilities.away_win;
-  }
-  const homeMean = candidate.prediction.selected_features.dc_expected_home_goals;
-  const awayMean = candidate.prediction.selected_features.dc_expected_away_goals;
-  if (item.marketName === "Goals Over/Under") return totalSelectionProbability(item.selection, homeMean, awayMean);
-  if (item.marketName.startsWith("Asian Handicap")) return handicapSelectionProbability(item.selection, homeMean, awayMean);
-  return null;
-}
-
-function marketProbabilityForContext(item: MarketContext, hda: ReturnType<typeof deVigOneXTwo>): number | null {
-  if (item.marketName === "1X2" && hda) {
-    if (/^Home$/i.test(item.selection)) return hda.homeWin;
-    if (/^Draw$/i.test(item.selection)) return hda.draw;
-    if (/^Away$/i.test(item.selection)) return hda.awayWin;
-  }
-  if (item.opposingOdds && item.opposingOdds > 1) {
-    const own = 1 / item.decimalOdds;
-    const opposing = 1 / item.opposingOdds;
-    return own / (own + opposing);
-  }
-  return null;
-}
-
-export function formatDynamicEvSection(candidate: Candidate, now = new Date()): string {
-  const validSnapshots = candidate.marketContext.filter(item => Number.isFinite(item.decimalOdds) && item.decimalOdds > 1 && item.capturedAt instanceof Date && !Number.isNaN(item.capturedAt.getTime()));
-  if (!validSnapshots.length) return "⚠️ 【動態EV研究】暫無完整可驗證盤口快照；不計算EV。";
-  const fresh = validSnapshots.filter(item => now.getTime() - item.capturedAt.getTime() <= EV_SNAPSHOT_MAX_AGE_MS && item.capturedAt.getTime() <= now.getTime() + 5 * 60_000);
-  if (!fresh.length) return "⚠️ 【動態EV研究】最新可驗證盤口快照已過期（超過6小時）；不計算EV。";
-
-  const home = fresh.find(item => item.marketName === "1X2" && /^Home$/i.test(item.selection));
-  const draw = fresh.find(item => item.marketName === "1X2" && /^Draw$/i.test(item.selection));
-  const away = fresh.find(item => item.marketName === "1X2" && /^Away$/i.test(item.selection));
-  const hda = deVigOneXTwo(home?.decimalOdds, draw?.decimalOdds, away?.decimalOdds);
-  const lines = fresh.flatMap<DynamicEvLine>(item => {
-    const modelProbability = modelProbabilityForMarket(candidate, item);
-    const researchEv = expectedValue(modelProbability, item.decimalOdds);
-    if (modelProbability === null || researchEv === null) return [];
-    return [{
-      selection: displayMarketSelection(item.selection),
-      decimalOdds: item.decimalOdds,
-      modelProbability,
-      marketProbability: marketProbabilityForContext(item, hda),
-      expectedValue: researchEv,
-      capturedAt: item.capturedAt,
-      bookmakerName: item.bookmakerName ?? null,
-    }];
-  }).sort((left, right) => right.expectedValue - left.expectedValue).slice(0, 3);
-  if (!lines.length) return "⚠️ 【動態EV研究】盤口快照與模型市場未能配對；不輸出EV。";
-
-  const freshest = lines.reduce((latest, line) => line.capturedAt > latest ? line.capturedAt : latest, lines[0]!.capturedAt);
-  const sources = Array.from(new Set(lines.map(line => line.bookmakerName || "API-Football"))).join("／");
-  const rows = lines.map(line => {
-    const market = line.marketProbability === null ? "市場去水機率待補" : `市場去水 ${(line.marketProbability * 100).toFixed(1)}%`;
-    return `• ${line.selection} @${line.decimalOdds.toFixed(2)}｜模型 ${(line.modelProbability * 100).toFixed(1)}%｜${market}｜EV ${line.expectedValue >= 0 ? "+" : ""}${(line.expectedValue * 100).toFixed(1)}%`;
-  });
-  const materialDivergence = lines.some(line => line.marketProbability !== null && Math.abs(line.modelProbability - line.marketProbability) >= 0.12);
-  return [
-    `📐 【動態EV研究】來源 ${sources}｜快照 ${formatHktKickoff(freshest)}`,
-    ...rows,
-    materialDivergence ? "⚠️ 模型與去水市場機率差距較大；僅作研究比較，已降級風險解讀。" : "⚠️ EV為校準模型的研究估計，仍受快照時效、盤口變動與模型限制影響。",
-  ].join("\n");
-}
-
-async function telegramPredict(request: Request, text: string | undefined): Promise<TeamResearchResponse> {
-  const query = parsePredictRequest(text);
-  if (query.kind === "invalid") return { text: "用法：/predict 主隊 vs 客隊\n或：/predict 隊伍名稱\n或：/predict fixture ID" };
-  const cached = await getSupabaseUpcomingCache();
-  const fixture = cached.available ? findPredictFixture(cached.fixtures, query) : null;
-  if (fixture) {
-    await ensureTelegramTeamTranslations([fixture.homeTeam, fixture.awayTeam]);
-    const db = await getDb();
-    const latestSnapshot = db ? (await db.select({ leagueCode: oddsSnapshots.leagueCode }).from(oddsSnapshots)
-      .where(eq(oddsSnapshots.apiFixtureId, fixture.fixtureId)).orderBy(desc(oddsSnapshots.capturedAt)).limit(1))[0] : null;
-    const candidate = latestSnapshot?.leagueCode && LEAGUES[latestSnapshot.leagueCode]
-      ? await resolveCandidate(request, latestSnapshot.leagueCode, fixture.fixtureId).catch(() => null)
-      : null;
-    return { text: candidate ? formatPredictResearch(candidate) : `🔮 【詳細賽前研究】\n${formatCachedResearchCard(fixture, 1)}\n\n⚠️ 詳細近期特徵暫未載入；以下為已同步研究卡。\n所有內容只供模型與戰術研究，並非投注或資金建議。` };
-  }
-  if (query.kind === "team") {
-    const live = await fetchLiveTeamResearch(normalizedTeamQuery(query.team)).catch(() => null);
-    if (live) return { text: `🔮 【詳細賽前研究】\n${formatLiveTeamResearch(live)}\n\n⚠️ 即時回退研究未必包含完整Elo及近5場特徵；請以資料來源標示為準。` };
-  }
-  return { text: "⚠️ 未找到符合條件的未來已同步賽事。請使用完整隊名、`主隊 vs 客隊`或fixture ID。" };
 }
 
 async function telegramNaturalLanguageTeamResearch(request: Request, text: string | undefined): Promise<TeamResearchResponse | null> {
@@ -1215,78 +873,27 @@ async function getSubscriptionChatIds(): Promise<string[]> {
   return rows.map(row => row.chatId);
 }
 
-type DeliveryEventInput = {
-  kind: ScheduleKind;
-  eventType: "digest_delivery" | "schedule_failure" | "schedule_missed";
-  status: "sent" | "partial" | "failed" | "alert_sent";
-  digestId?: number;
-  recipientCount: number;
-  deliveredCount: number;
-  failedCount: number;
-  detail?: string | null;
-};
-
-async function recordDeliveryEvent(input: DeliveryEventInput): Promise<void> {
-  const db = await getDb();
-  if (!db) throw new Error("推播稽核資料庫暫時無法使用。");
-  await db.insert(researchDeliveryEvents).values({
-    scheduleKind: input.kind,
-    eventType: input.eventType,
-    deliveryStatus: input.status,
-    ...(input.digestId ? { digestId: input.digestId } : {}),
-    recipientCount: input.recipientCount,
-    deliveredCount: input.deliveredCount,
-    failedCount: input.failedCount,
-    detail: input.detail?.slice(0, 4000) || null,
-  });
-}
-
-async function notifyDigestFailure(kind: ScheduleKind, detail: string, eventType: "schedule_failure" | "schedule_missed" = "schedule_failure"): Promise<void> {
+async function notifyDigestFailure(kind: ScheduleKind, detail: string): Promise<void> {
   const chatIds = await getSubscriptionChatIds();
-  const label = kind === "day_digest" ? "日間摘要" : kind === "evening_digest" ? "晚間摘要" : "賽後結算";
-  const heading = eventType === "schedule_missed" ? "⚠️ Aurelia Football 偵測到漏發" : "🚨 Aurelia Football 自動摘要失敗";
-  const message = `${heading}\n任務：${label}\n系統將依Heartbeat規則重試。\n原因：${detail.slice(0, 300)}`;
-  const results = await Promise.allSettled(chatIds.map(chatId => sendTelegramMessage(chatId, message)));
-  const delivered = results.filter(result => result.status === "fulfilled").length;
-  await recordDeliveryEvent({
-    kind,
-    eventType,
-    status: "alert_sent",
-    recipientCount: chatIds.length,
-    deliveredCount: delivered,
-    failedCount: chatIds.length - delivered,
-    detail,
-  });
+  const message = `⚠️ Aurelia Football 自動摘要失敗\n時段：${kind}\n系統將依Heartbeat規則重試。\n原因：${detail.slice(0, 300)}`;
+  await Promise.allSettled(chatIds.map(chatId => sendTelegramMessage(chatId, message)));
 }
 
-async function deliverDigest(digestId: number, content: string, kind: ScheduleKind): Promise<void> {
+async function deliverDigest(digestId: number, content: string): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("資料庫暫時無法使用。");
   const chatIds = await getSubscriptionChatIds();
   if (chatIds.length === 0) {
     await db.update(researchDigests).set({ deliveryStatus: "sent", sentAt: new Date() }).where(eq(researchDigests.id, digestId));
-    await recordDeliveryEvent({ kind, eventType: "digest_delivery", status: "sent", digestId, recipientCount: 0, deliveredCount: 0, failedCount: 0, detail: "沒有啟用訂閱者；摘要已保存但未外發。" });
     return;
   }
   const results = await Promise.allSettled(chatIds.map(chatId => sendTelegramMessage(chatId, content)));
   const failed = results.filter(result => result.status === "rejected");
-  const status = failed.length === 0 ? "sent" : failed.length === chatIds.length ? "failed" : "partial";
-  const detail = failed.map(item => String((item as PromiseRejectedResult).reason)).join(" | ").slice(0, 4000) || null;
   await db.update(researchDigests).set({
-    deliveryStatus: status,
-    deliveryError: detail,
+    deliveryStatus: failed.length === 0 ? "sent" : failed.length === chatIds.length ? "failed" : "partial",
+    deliveryError: failed.map(item => String((item as PromiseRejectedResult).reason)).join(" | ").slice(0, 4000) || null,
     sentAt: new Date(),
   }).where(eq(researchDigests.id, digestId));
-  await recordDeliveryEvent({
-    kind,
-    eventType: "digest_delivery",
-    status,
-    digestId,
-    recipientCount: chatIds.length,
-    deliveredCount: chatIds.length - failed.length,
-    failedCount: failed.length,
-    detail,
-  });
   if (failed.length === chatIds.length) throw new Error("所有Telegram研究訊息均未能送達。");
 }
 
@@ -1300,13 +907,6 @@ export async function deliverAllLeagueCoverageSummary(summary: { fixtures: numbe
     `更新：${new Date(summary.generatedAt).toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong", hour12: false })}`,
     "資料層：全量賽程與隊伍識別；賠率及歷史研究按資料可用性分層提供。",
   ].join("\n");
-  const results = await Promise.allSettled(chatIds.map(chatId => sendTelegramMessage(chatId, content)));
-  return { recipients: chatIds.length, delivered: results.filter(result => result.status === "fulfilled").length };
-}
-
-/** Sends the weekly research-health report through the same bounded-retry subscription channel. */
-export async function deliverWeeklyModelHealthReport(content: string): Promise<{ recipients: number; delivered: number }> {
-  const chatIds = await getSubscriptionChatIds();
   const results = await Promise.allSettled(chatIds.map(chatId => sendTelegramMessage(chatId, content)));
   return { recipients: chatIds.length, delivered: results.filter(result => result.status === "fulfilled").length };
 }
@@ -1386,8 +986,11 @@ async function resolveCandidate(request: Request, leagueCode: string, fixtureId:
   if (!db) throw new Error("資料庫暫時無法使用。");
   const snapshotRows = await db.select().from(oddsSnapshots).where(and(
     eq(oddsSnapshots.apiFixtureId, fixtureId),
-    inArray(oddsSnapshots.marketName, ["Match Winner", "Asian Handicap", "Goals Over/Under"]),
+    inArray(oddsSnapshots.marketName, ["Asian Handicap", "Goals Over/Under"]),
   )).orderBy(desc(oddsSnapshots.capturedAt));
+  const cached = await getSupabaseUpcomingCache();
+  const cachedFixture = cached.available ? cached.fixtures.find(item => item.fixtureId === fixtureId) : null;
+  const hkjcHandicapQuote = await getHkjcHandicapQuote(home, away).catch(() => null);
   const marketDefinitions = [
     { source: "Goals Over/Under", label: "Goals Over/Under", accepts: () => true },
     { source: "Asian Handicap", label: "Asian Handicap", accepts: (selection: string) => /^(Home|Away)\s+[+-]?\d+(?:\.5)?$/i.test(selection) },
@@ -1408,17 +1011,11 @@ async function resolveCandidate(request: Request, leagueCode: string, fixtureId:
       ? renderOddsTrend(sameMarketBookmaker.map(snapshot => Number(snapshot.decimalOdds))) ?? undefined
       : `盤口線已由 ${opening?.selection ?? "未知"} 調整至 ${latest.selection}，不以不同線位繪製同一價格走勢。`;
     const anomalySummary = assessMarketAnomaly(sameMarketBookmaker.map(snapshot => ({ selection: snapshot.selection, decimalOdds: Number(snapshot.decimalOdds) })));
-    const sideAndLine = /^(Home|Away)\s+([+-]?\d+(?:\.25|\.5|\.75)?)$/i.exec(latest.selection);
-    const opposite = sideAndLine
-      ? snapshotRows.find(snapshot => snapshot.marketName === definition.source && snapshot.bookmakerId === latest.bookmakerId && new RegExp(`^${sideAndLine[1]!.toLowerCase() === "home" ? "Away" : "Home"}\\s+${sideAndLine[2]!.startsWith("-") ? `\\+${sideAndLine[2]!.slice(1)}` : sideAndLine[2]!.startsWith("+") ? `-${sideAndLine[2]!.slice(1)}` : `-${sideAndLine[2]}`}$`, "i").test(snapshot.selection))
-      : undefined;
     return [{
       marketName: definition.label,
       selection: latest.selection,
       decimalOdds: Number(latest.decimalOdds),
       capturedAt: latest.capturedAt,
-      bookmakerName: latest.bookmakerName,
-      ...(opposite ? { opposingSelection: opposite.selection, opposingOdds: Number(opposite.decimalOdds) } : {}),
       ...(opening && opening.capturedAt.getTime() !== latest.capturedAt.getTime() ? {
         openingSelection: opening.selection,
         openingOdds: Number(opening.decimalOdds),
@@ -1428,17 +1025,20 @@ async function resolveCandidate(request: Request, leagueCode: string, fixtureId:
       ...(anomalySummary ? { anomalySummary } : {}),
     }];
   });
-  const oneXTwoRows = ["Home", "Draw", "Away"].flatMap<MarketContext>(selection => {
-    const latest = snapshotRows.find(snapshot => snapshot.marketName === "Match Winner" && new RegExp(`^${selection}$`, "i").test(snapshot.selection));
-    return latest ? [{
-      marketName: "1X2",
-      selection,
-      decimalOdds: Number(latest.decimalOdds),
-      capturedAt: latest.capturedAt,
-      bookmakerName: latest.bookmakerName,
-    }] : [];
-  });
-  return { fixtureId, leagueCode, homeTeam: home, awayTeam: away, kickoffAt: details.kickoffAt, prediction, marketContext: [...marketContext, ...oneXTwoRows] };
+  return {
+    fixtureId,
+    leagueCode,
+    leagueName: cachedFixture?.leagueName ?? leagueCode,
+    leagueTranslation: cachedFixture?.leagueTranslation ?? null,
+    homeTeam: home,
+    homeTeamTranslation: cachedFixture?.homeTeamTranslation ?? null,
+    awayTeam: away,
+    awayTeamTranslation: cachedFixture?.awayTeamTranslation ?? null,
+    kickoffAt: details.kickoffAt,
+    prediction,
+    marketContext,
+    handicapQuote: hkjcHandicapQuote ?? cachedFixture?.handicapQuote ?? pairedAsianHandicapQuote(snapshotRows),
+  };
 }
 
 export function describeMarketMovement(item: MarketContext): string {
@@ -1480,31 +1080,45 @@ function formatCandidate(candidate: Candidate): string {
   const homeMean = candidate.prediction.selected_features.dc_expected_home_goals;
   const awayMean = candidate.prediction.selected_features.dc_expected_away_goals;
   const handicap = candidate.marketContext.find(item => item.marketName === "Asian Handicap" && /^(Home|Away)\s+[+-]?\d+(?:\.5)?$/i.test(item.selection));
-  const total = mainstreamTotals(homeMean, awayMean).find(row => row.market === "入球大細 2.5");
-  const over25 = total?.selection.startsWith("大") ? total.probability : total ? 1 - total.probability : null;
-  const under25 = over25 === null ? null : 1 - over25;
-  const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
-  const formatSelection = (value: string) => value.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊");
-  const quote = handicap
-    ? `⚖️ 【實時讓球盤】${handicap.bookmakerName || "API-Football"} ${formatSelection(handicap.selection)} (@${handicap.decimalOdds.toFixed(2)})${handicap.opposingSelection && handicap.opposingOdds ? ` / ${formatSelection(handicap.opposingSelection)} (@${handicap.opposingOdds.toFixed(2)})` : ""}`
-    : "⚖️ 【實時讓球盤】暫無可驗證HKJC／亞洲盤口；不以模型讓球代替市場水位。";
-  const scorelines = topScorelines(homeMean, awayMean);
-  const probabilities = candidate.prediction.probabilities;
-  return [
-    `🏆 【聯賽】${localizeLeagueName(RESEARCH_LEAGUE_NAMES[candidate.leagueCode] ?? candidate.leagueCode)}`,
-    "---",
-    formatLocalizedFixture(candidate.homeTeam, candidate.awayTeam),
-    `⏰ 賽事時間：${formatHktKickoff(candidate.kickoffAt)}`,
-    "---",
-    "📊 【資料來源】Dixon–Coles 模型 + HDA 賠率融合",
-    `🛡️ 【雙重機率】1X: ${percent(probabilities.home_win + probabilities.draw)} | X2: ${percent(probabilities.draw + probabilities.away_win)}`,
-    quote,
-    `🎯 【模型勝率預測】主勝 ${percent(probabilities.home_win)} | 和局 ${percent(probabilities.draw)} | 客勝 ${percent(probabilities.away_win)}`,
-    `🔥 【大小球】${over25 === null || under25 === null ? "暫無可驗證2.5盤口" : `大 2.5 (${percent(over25)}) | 小 2.5 (${percent(under25)})`}`,
-    "---",
-    "💡 【最高波膽 Top 3】",
-    ...scorelines.slice(0, 3).map((scoreline, index) => `${index + 1}. ${scoreline.score} —— ${percent(scoreline.probability)}`),
-  ].join("\n");
+  const handicap025 = candidate.marketContext.find(item => item.marketName === "Asian Handicap 0.25");
+  const handicap075 = candidate.marketContext.find(item => item.marketName === "Asian Handicap 0.75");
+  const handicap125 = candidate.marketContext.find(item => item.marketName === "Asian Handicap 1.25");
+  const handicap175 = candidate.marketContext.find(item => item.marketName === "Asian Handicap 1.75");
+  const outcome = highestOutcome(candidate.prediction.probabilities.home_win, candidate.prediction.probabilities.draw, candidate.prediction.probabilities.away_win);
+  const handicapProbability = handicapSelectionProbability(handicap?.selection, homeMean, awayMean);
+  const handicapDistribution = handicapWinDistribution(handicap?.selection, homeMean, awayMean);
+  const handicap025Probability = handicapSelectionProbability(handicap025?.selection, homeMean, awayMean);
+  const handicap075Probability = handicapSelectionProbability(handicap075?.selection, homeMean, awayMean);
+  const handicap125Probability = handicapSelectionProbability(handicap125?.selection, homeMean, awayMean);
+  const handicap175Probability = handicapSelectionProbability(handicap175?.selection, homeMean, awayMean);
+  const handicap025Distribution = handicapWinDistribution(handicap025?.selection, homeMean, awayMean);
+  const handicap075Distribution = handicapWinDistribution(handicap075?.selection, homeMean, awayMean);
+  const handicap125Distribution = handicapWinDistribution(handicap125?.selection, homeMean, awayMean);
+  const handicap175Distribution = handicapWinDistribution(handicap175?.selection, homeMean, awayMean);
+  const rows = [
+    outcome,
+    ...mainstreamTotals(homeMean, awayMean),
+    handicap && handicapProbability !== null && handicapDistribution ? { market: "讓球盤 (Handicap)" as const, selection: handicap.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicapProbability, distribution: handicapDistribution } : null,
+    handicap025 && handicap025Probability !== null && handicap025Distribution ? { market: "亞洲讓球 0.25" as const, selection: handicap025.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap025Probability, distribution: handicap025Distribution } : null,
+    handicap075 && handicap075Probability !== null && handicap075Distribution ? { market: "亞洲讓球 0.75" as const, selection: handicap075.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap075Probability, distribution: handicap075Distribution } : null,
+    handicap125 && handicap125Probability !== null && handicap125Distribution ? { market: "亞洲讓球 1.25" as const, selection: handicap125.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap125Probability, distribution: handicap125Distribution } : null,
+    handicap175 && handicap175Probability !== null && handicap175Distribution ? { market: "亞洲讓球 1.75" as const, selection: handicap175.selection.replace(/^Home/i, "主隊").replace(/^Away/i, "客隊"), probability: handicap175Probability, distribution: handicap175Distribution } : null,
+  ].filter((item): item is CompactMarketRow => item !== null);
+  return formatLocalizedResearchCard({
+    leagueName: candidate.leagueName,
+    leagueTranslation: candidate.leagueTranslation ?? null,
+    eventTime: candidate.kickoffAt.toISOString(),
+    homeTeam: candidate.homeTeam,
+    homeTeamTranslation: candidate.homeTeamTranslation ?? null,
+    awayTeam: candidate.awayTeam,
+    awayTeamTranslation: candidate.awayTeamTranslation ?? null,
+    homeWin: candidate.prediction.probabilities.home_win,
+    draw: candidate.prediction.probabilities.draw,
+    awayWin: candidate.prediction.probabilities.away_win,
+    compactMarkets: rows,
+    topScorelines: topScorelines(homeMean, awayMean),
+    handicapQuote: candidate.handicapQuote ?? null,
+  });
 }
 
 export function rankDailyPicks<T extends Pick<Candidate, "prediction">>(candidates: T[]): T[] {
@@ -1532,75 +1146,17 @@ export function selectDailyDigestPicks<T extends Pick<Candidate, "prediction">>(
   return [...strict, ...fallback].slice(0, 3);
 }
 
-export function hasCompleteDigestCandidate(candidate: Pick<Candidate, "prediction" | "marketContext">): boolean {
-  const probabilities = [candidate.prediction.probabilities.home_win, candidate.prediction.probabilities.draw, candidate.prediction.probabilities.away_win];
-  const validProbability = (value: number | undefined) => Number.isFinite(value) && value! > 0 && value! < 1;
-  const expectedGoals = [candidate.prediction.selected_features.dc_expected_home_goals, candidate.prediction.selected_features.dc_expected_away_goals];
-  const hasTotals = candidate.marketContext.some(item => item.marketName === "Goals Over/Under" && Boolean(item.selection) && Number.isFinite(item.decimalOdds) && item.decimalOdds > 1);
-  const hasHandicap = candidate.marketContext.some(item => item.marketName === "Asian Handicap" && Boolean(item.selection) && Number.isFinite(item.decimalOdds) && item.decimalOdds > 1);
-  return probabilities.every(validProbability)
-    && Math.abs(probabilities.reduce((total, value) => total + value, 0) - 1) < 0.02
-    && expectedGoals.every(value => value !== null && Number.isFinite(value) && value > 0)
-    && hasTotals && hasHandicap;
-}
-
-function hasHighConfidenceDigestCandidate(candidate: Pick<Candidate, "prediction" | "marketContext">): boolean {
-  const outcomes = candidate.prediction.probabilities;
-  const winner = Math.max(outcomes.home_win, outcomes.away_win) > 0.60;
-  const homeMean = candidate.prediction.selected_features.dc_expected_home_goals;
-  const awayMean = candidate.prediction.selected_features.dc_expected_away_goals;
-  const totals = mainstreamTotals(homeMean, awayMean);
-  const highOver = totals.some(row => (row.market === "入球大細 1.5" || row.market === "入球大細 2.5") && row.selection.startsWith("大") && row.probability > 0.75);
-  const handicap = candidate.marketContext.find(item => item.marketName === "Asian Handicap" && /^(Home|Away)\s+[+-]?\d+(?:\.25|\.5|\.75)?$/i.test(item.selection));
-  const handicapProbability = handicap ? handicapSelectionProbability(handicap.selection, homeMean, awayMean) : null;
-  return winner || (handicapProbability !== null && handicapProbability > 0.60) || highOver;
-}
-
-function modelSettlementRows(candidate: Candidate, digestId: number) {
-  const homeMean = candidate.prediction.selected_features.dc_expected_home_goals;
-  const awayMean = candidate.prediction.selected_features.dc_expected_away_goals;
-  const outcome = highestOutcome(candidate.prediction.probabilities.home_win, candidate.prediction.probabilities.draw, candidate.prediction.probabilities.away_win);
-  const total = mainstreamTotals(homeMean, awayMean).find(row => row.market === "入球大細 2.5");
-  const handicap = candidate.marketContext.find(item => item.marketName === "Asian Handicap" && /^(Home|Away)\s+[+-]?\d+(?:\.25|\.5|\.75)?$/i.test(item.selection));
-  const scorelines = topScorelines(homeMean, awayMean);
-  const rows: Array<{ digestId: number; apiFixtureId: number; marketName: string; selection: string }> = [];
-  if (outcome) {
-    const selection = outcome.selection === "主勝" ? "Home" : outcome.selection === "客勝" ? "Away" : "Draw";
-    rows.push({ digestId, apiFixtureId: candidate.fixtureId, marketName: "Match Winner", selection });
-  }
-  if (total) rows.push({ digestId, apiFixtureId: candidate.fixtureId, marketName: "Goals Over/Under", selection: total.selection.startsWith("大") ? "Over 2.5" : "Under 2.5" });
-  if (handicap) rows.push({ digestId, apiFixtureId: candidate.fixtureId, marketName: "Asian Handicap", selection: handicap.selection });
-  for (const scoreline of scorelines) rows.push({ digestId, apiFixtureId: candidate.fixtureId, marketName: "Correct Score", selection: scoreline.score });
-  return rows;
-}
-
-function liveModelSettlementRows(research: LiveTeamResearch, digestId: number) {
-  const outcome = highestOutcome(research.outcomes.homeWin, research.outcomes.draw, research.outcomes.awayWin);
-  const total = research.compactMarkets.find(row => row.market === "入球大細 2.5");
-  const handicap = research.compactMarkets.find(row => row.market === "讓球盤 (Handicap)");
-  const rows: Array<{ digestId: number; apiFixtureId: number; marketName: string; selection: string }> = [];
-  if (outcome) {
-    const selection = outcome.selection === "主勝" ? "Home" : outcome.selection === "客勝" ? "Away" : "Draw";
-    rows.push({ digestId, apiFixtureId: research.fixtureId, marketName: "Match Winner", selection });
-  }
-  if (total) rows.push({ digestId, apiFixtureId: research.fixtureId, marketName: "Goals Over/Under", selection: total.selection.startsWith("大") ? "Over 2.5" : "Under 2.5" });
-  const handicapMatch = handicap?.selection.match(/^(主隊|客隊)\s*([+-]\d+(?:\.25|\.5|\.75)?)/);
-  if (handicapMatch) rows.push({ digestId, apiFixtureId: research.fixtureId, marketName: "Asian Handicap", selection: `${handicapMatch[1] === "主隊" ? "Home" : "Away"} ${handicapMatch[2]}` });
-  for (const scoreline of research.topScorelines.slice(0, 3)) rows.push({ digestId, apiFixtureId: research.fixtureId, marketName: "Correct Score", selection: scoreline.score });
-  return rows;
-}
-
 function hktDateKey(value: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit" }).format(value);
 }
 
-export async function runResearchDigest(request: Request, window: "day" | "evening", options: { deliver?: boolean } = {}): Promise<{ digestId: number; signalCount: number }> {
+export async function runResearchDigest(request: Request, window: "day" | "evening"): Promise<{ digestId: number; signalCount: number }> {
   const now = new Date();
   const db = await getDb();
   if (!db) throw new Error("資料庫暫時無法使用。");
   let apiReady = true;
   try {
-    await verifyApiFootballReadiness({ checkOdds: true });
+    await verifyApiFootballReadiness();
   } catch {
     apiReady = false;
   }
@@ -1625,12 +1181,8 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
       // Team naming / individual inference failures are intentionally skipped, not inferred.
     }
   }
-  const selected = selectDailyDigestPicks(candidates.filter(candidate => hasCompleteDigestCandidate(candidate) && hasHighConfidenceDigestCandidate(candidate)));
-  const liveFallback = selected.length > 0 || !apiReady ? [] : (await fetchLiveUpcomingResearch(3).catch(() => [])).filter(hasCompleteLiveResearch);
-  await ensureTelegramTeamTranslations([
-    ...selected.flatMap(candidate => [candidate.homeTeam, candidate.awayTeam]),
-    ...liveFallback.flatMap(research => [research.homeTeam, research.awayTeam]),
-  ]);
+  const selected = selectDailyDigestPicks(candidates);
+  const liveFallback = selected.length > 0 || !apiReady ? [] : await fetchLiveUpcomingResearch(3).catch(() => []);
   const anomalyCandidates = candidates
     .filter(candidate => candidate.marketContext.some(market => Boolean(market.anomalySummary)))
     .slice(0, 3);
@@ -1643,260 +1195,15 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
   const signalCount = selected.length || liveFallback.length;
   const inserted = await db.insert(researchDigests).values({ window, asOf: now, content, signalCount });
   const digestId = Number(inserted[0].insertId);
-  const digestFixtureRows = [
-    ...selected.map(candidate => ({
-      digestId,
-      apiFixtureId: candidate.fixtureId,
-      leagueCode: candidate.leagueCode,
-      leagueName: RESEARCH_LEAGUE_NAMES[candidate.leagueCode] ?? candidate.leagueCode,
-      fixtureKickoffAt: candidate.kickoffAt,
-      homeTeamName: candidate.homeTeam,
-      awayTeamName: candidate.awayTeam,
-    })),
-    ...liveFallback.map(research => ({
-      digestId,
-      apiFixtureId: research.fixtureId,
-      leagueCode: research.leagueCode,
-      leagueName: research.leagueName,
-      fixtureKickoffAt: research.kickoffAt,
-      homeTeamName: research.homeTeam,
-      awayTeamName: research.awayTeam,
-    })),
-  ];
-  if (digestFixtureRows.length > 0) await db.insert(researchDigestFixtures).values(digestFixtureRows);
-  const settlementRows = [
-    ...selected.flatMap(candidate => modelSettlementRows(candidate, digestId)),
-    ...liveFallback.flatMap(research => liveModelSettlementRows(research, digestId)),
-  ];
-  if (settlementRows.length > 0) await db.insert(researchSettlements).values(settlementRows);
-  if (options.deliver !== false) await deliverDigest(digestId, content, window === "day" ? "day_digest" : "evening_digest");
-  return { digestId, signalCount };
-}
-
-function hktDayBounds(now = new Date()): { start: Date; end: Date } {
-  const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
-  const start = new Date(`${date}T00:00:00+08:00`);
-  return { start, end: new Date(start.getTime() + 24 * 60 * 60_000) };
-}
-
-const SCHEDULE_LABELS: Record<ScheduleKind, string> = {
-  settlement: "賽後結算（每30分鐘）",
-  day_digest: "日間摘要（11:00）",
-  evening_digest: "晚間摘要（18:30）",
-};
-
-function hktTimestamp(value: Date | null | undefined): string {
-  return value ? value.toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong", hour12: false }) : "尚無紀錄";
-}
-
-function expectedNextRun(kind: ScheduleKind, now = new Date()): Date {
-  if (kind === "settlement") {
-    const next = new Date(now);
-    next.setUTCSeconds(0, 0);
-    next.setUTCMinutes(Math.floor(next.getUTCMinutes() / 30) * 30 + 30);
-    return next;
-  }
-  const { start } = hktDayBounds(now);
-  const expected = new Date(start.getTime() + (kind === "day_digest" ? 11 : 18.5) * 60 * 60_000);
-  return expected > now ? expected : new Date(expected.getTime() + 24 * 60 * 60_000);
-}
-
-function expectedRunToday(kind: "day_digest" | "evening_digest", now = new Date()): Date {
-  const { start } = hktDayBounds(now);
-  return new Date(start.getTime() + (kind === "day_digest" ? 11 : 18.5) * 60 * 60_000);
-}
-
-type DeliveryReceipt = {
-  scheduleKind: ScheduleKind;
-  eventType: "digest_delivery" | "schedule_failure" | "schedule_missed";
-  deliveryStatus: "sent" | "partial" | "failed" | "alert_sent";
-  recipientCount: number;
-  deliveredCount: number;
-  failedCount: number;
-  detail?: string | null;
-  eventAt: Date;
-};
-
-function deliveryStatusText(event: DeliveryReceipt): string {
-  if (event.eventType !== "digest_delivery") return `告警已發送｜${event.detail || "未提供原因"}`;
-  const result = event.deliveryStatus === "sent" ? "已送達" : event.deliveryStatus === "partial" ? "部分送達" : "送達失敗";
-  const counts = `${event.deliveredCount}/${event.recipientCount} 位訂閱者`;
-  return `${result}（${counts}）${event.detail ? `｜${event.detail}` : ""}`;
-}
-
-export function formatPreviousDayDeliveryReceipt(events: DeliveryReceipt[]): string {
-  const digestEvents = events.filter(event => event.eventType === "digest_delivery");
-  const alerts = events.filter(event => event.eventType !== "digest_delivery");
-  if (!digestEvents.length && !alerts.length) return "【前日送達回條】沒有日間、晚間或結算推播紀錄。";
-  const latestDigestByKind = new Map<ScheduleKind, DeliveryReceipt>();
-  for (const event of digestEvents) {
-    const current = latestDigestByKind.get(event.scheduleKind);
-    if (!current || event.eventAt > current.eventAt) latestDigestByKind.set(event.scheduleKind, event);
-  }
-  const rows = (["day_digest", "evening_digest", "settlement"] as ScheduleKind[])
-    .map(kind => latestDigestByKind.get(kind))
-    .filter((event): event is DeliveryReceipt => Boolean(event))
-    .map(event => `• ${SCHEDULE_LABELS[event.scheduleKind]}：${deliveryStatusText(event)}`);
-  const alertText = alerts.length > 0
-    ? `• 告警：${alerts.length} 項｜${alerts.at(-1)?.detail || "請以/jobs查看詳情"}`
-    : "• 告警：無";
-  return ["📬 <b>前日推播送達回條</b>", ...rows, alertText].join("\n");
-}
-
-async function previousDayDeliveryReceipt(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, now = new Date()): Promise<string> {
-  const { start } = hktDayBounds(now);
-  const previousStart = new Date(start.getTime() - 24 * 60 * 60_000);
-  const events = await db.select().from(researchDeliveryEvents)
-    .where(and(gte(researchDeliveryEvents.eventAt, previousStart), lt(researchDeliveryEvents.eventAt, start)))
-    .orderBy(desc(researchDeliveryEvents.eventAt));
-  return formatPreviousDayDeliveryReceipt(events);
-}
-
-export function formatJobsStatus(rows: Array<{
-  kind: ScheduleKind;
-  isEnabled: boolean;
-  lastStartedAt: Date | null;
-  lastCompletedAt: Date | null;
-  lastError: string | null;
-  latestEvent?: DeliveryReceipt;
-}>, now = new Date()): string {
-  const body = rows
-    .sort((left, right) => (["settlement", "day_digest", "evening_digest"] as ScheduleKind[]).indexOf(left.kind) - (["settlement", "day_digest", "evening_digest"] as ScheduleKind[]).indexOf(right.kind))
-    .map(row => [
-      `【${SCHEDULE_LABELS[row.kind]}】${row.isEnabled ? "已啟用" : "已停用"}`,
-      `下次預期：${hktTimestamp(expectedNextRun(row.kind, now))}`,
-      `最後完成：${hktTimestamp(row.lastCompletedAt)}`,
-      `最後送達：${row.latestEvent ? deliveryStatusText(row.latestEvent) : "尚無送達回條"}`,
-      row.lastError ? `最近錯誤：${row.lastError.slice(0, 180)}` : null,
-    ].filter(Boolean).join("\n"))
-    .join("\n──────────────────\n");
-  return ["⚙️ <b>Aurelia 推播任務監控</b>", "──────────────────", body || "尚未建立推播任務。", "註：下次預期時間按香港時區排程計算；送達回條來自實際Telegram傳送結果。"].join("\n");
-}
-
-export async function telegramJobs(): Promise<string> {
-  const db = await getDb();
-  if (!db) throw new Error("任務監控資料暫時無法使用。");
-  const [jobs, events] = await Promise.all([
-    db.select().from(researchScheduleJobs),
-    db.select().from(researchDeliveryEvents).orderBy(desc(researchDeliveryEvents.eventAt)).limit(100),
-  ]);
-  const latestEvents = new Map<ScheduleKind, DeliveryReceipt>();
-  for (const event of events) {
-    if (!latestEvents.has(event.scheduleKind)) latestEvents.set(event.scheduleKind, event);
-  }
-  return formatJobsStatus(jobs.map(job => ({
-    kind: job.kind,
-    isEnabled: job.isEnabled,
-    lastStartedAt: job.lastStartedAt,
-    lastCompletedAt: job.lastCompletedAt,
-    lastError: job.lastError,
-    ...(latestEvents.get(job.kind) ? { latestEvent: latestEvents.get(job.kind) } : {}),
+  const settlementRows = selected.flatMap(candidate => candidate.marketContext.map(market => ({
+    digestId,
+    apiFixtureId: candidate.fixtureId,
+    marketName: market.marketName,
+    selection: market.selection,
   })));
-}
-
-async function monitorMissedDigestSchedules(now = new Date()): Promise<void> {
-  const db = await getDb();
-  if (!db) throw new Error("排程監控資料庫暫時無法使用。");
-  const jobs = await db.select().from(researchScheduleJobs).where(inArray(researchScheduleJobs.kind, ["day_digest", "evening_digest"]));
-  for (const job of jobs) {
-    if (job.kind === "settlement") continue;
-    const expected = expectedRunToday(job.kind, now);
-    const deadline = new Date(expected.getTime() + 15 * 60_000);
-    if (!job.isEnabled || now < deadline || (job.lastCompletedAt && job.lastCompletedAt >= expected)) continue;
-    if (job.lastStartedAt && job.lastStartedAt >= expected && job.lastError) continue;
-    const marker = `漏發偵測：預期 ${hktTimestamp(expected)}，逾15分鐘仍未完成。`;
-    if (job.lastError === marker) continue;
-    await db.update(researchScheduleJobs).set({ lastError: marker }).where(eq(researchScheduleJobs.id, job.id));
-    await notifyDigestFailure(job.kind, marker, "schedule_missed");
-  }
-}
-
-export function todayLeagueFilter(rawCommand?: string): string {
-  return (rawCommand || "").replace(/^\/today(?:@\w+)?\s*/i, "").trim();
-}
-
-export function todayLeagueFilters(rawCommand?: string): string[] {
-  const raw = todayLeagueFilter(rawCommand);
-  if (!raw) return [];
-  const explicit = raw.split(/[、,，/|]+/).map(value => value.trim()).filter(Boolean);
-  if (explicit.length > 1) return Array.from(new Set(explicit));
-  const tokens = raw.split(/\s+/).filter(Boolean);
-  return tokens.length > 1 ? Array.from(new Set([raw, ...tokens])) : [raw];
-}
-
-export function isLeagueMatch(filter: string, leagueName?: string | null, leagueCode?: string): boolean {
-  const query = filter.trim().toLocaleLowerCase();
-  if (!query) return true;
-  const raw = leagueName || RESEARCH_LEAGUE_NAMES[leagueCode || ""] || leagueCode || "";
-  const localized = localizeLeagueName(raw);
-  return [raw, localized, formatLeagueDisplay(raw), leagueCode || ""].some(value => value.toLocaleLowerCase().includes(query));
-}
-
-export function isAnyLeagueMatch(filters: string[], leagueName?: string | null, leagueCode?: string): boolean {
-  return filters.length === 0 || filters.some(filter => isLeagueMatch(filter, leagueName, leagueCode));
-}
-
-export async function telegramToday(request: Request, rawCommand?: string): Promise<string> {
-  const db = await getDb();
-  if (!db) throw new Error("資料庫暫時無法使用。");
-  const filter = todayLeagueFilter(rawCommand);
-  const filters = todayLeagueFilters(rawCommand);
-  const { start, end } = hktDayBounds();
-  const existing = await db.select().from(researchDigests)
-    .where(and(
-      inArray(researchDigests.window, ["day", "evening"]),
-      eq(researchDigests.deliveryStatus, "sent"),
-      gte(researchDigests.asOf, start),
-      lt(researchDigests.asOf, end),
-    ))
-    .orderBy(desc(researchDigests.asOf))
-    .limit(1);
-  if (existing[0]?.content) {
-    if (!filter) return existing[0].content;
-    const links = await db.select().from(researchDigestFixtures).where(eq(researchDigestFixtures.digestId, existing[0].id)).orderBy(researchDigestFixtures.id);
-    const cards = existing[0].content.split(/(?=^\d+\. .+ vs .+$)/m).filter(Boolean);
-    const filteredCards = cards.filter((card, index) => links[index] && isAnyLeagueMatch(filters, links[index].leagueName, links[index].leagueCode));
-    return filteredCards.length > 0
-      ? filteredCards.join("\n\n")
-      : `今日已送達的完整研究中，未找到「${filter}」的賽事。可嘗試英文聯賽名稱或其他繁中名稱。`;
-  }
-  const generated = await runResearchDigest(request, "day", { deliver: false });
-  const created = await db.select({ content: researchDigests.content }).from(researchDigests).where(eq(researchDigests.id, generated.digestId)).limit(1);
-  return created[0]?.content || "今日暫無可驗證未來賽事。";
-}
-
-type ModelHealthSummary = Pick<typeof weeklyModelReports.$inferSelect,
-  "createdAt" | "settledMarkets" | "favorableMarkets" | "winnerMarkets" | "favorableWinnerMarkets" | "featureSnapshots" | "xgMissingSnapshots" | "oddsCoveredSnapshots" | "restMissingSnapshots" | "driftStatus">;
-
-function healthPercent(numerator: number, denominator: number): string {
-  return denominator > 0 ? `${(numerator / denominator * 100).toFixed(1)}%` : "資料不足";
-}
-
-/** Formats the latest persisted weekly report without creating new predictive or settlement data. */
-export function formatModelHealthSummary(report: ModelHealthSummary): string {
-  const status = report.driftStatus === "stable"
-    ? "穩定"
-    : report.driftStatus === "watch"
-      ? "留意"
-      : "樣本不足";
-  return [
-    "🩺 <b>Aurelia 模型健康度</b>",
-    "──────────────────",
-    `【狀態】${status}`,
-    `【已結算市場】${report.settledMarkets} 項｜有利結果 ${healthPercent(report.favorableMarkets, report.settledMarkets)}`,
-    `【主客和研究】${report.winnerMarkets} 項｜有利結果 ${healthPercent(report.favorableWinnerMarkets, report.winnerMarkets)}`,
-    `【特徵快照】${report.featureSnapshots} 筆｜xG缺失 ${healthPercent(report.xgMissingSnapshots, report.featureSnapshots)}`,
-    `【資料覆蓋】去水1X2 ${healthPercent(report.oddsCoveredSnapshots, report.featureSnapshots)}｜休養日缺失 ${healthPercent(report.restMissingSnapshots, report.featureSnapshots)}`,
-    `【更新】${new Date(report.createdAt).toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong", hour12: false })}`,
-    "註：本摘要用於模型與資料品質監測，非投注或資金建議。",
-  ].join("\n");
-}
-
-export async function telegramHealth(): Promise<string> {
-  const db = await getDb();
-  if (!db) throw new Error("模型健康資料暫時無法使用。");
-  const report = (await db.select().from(weeklyModelReports).orderBy(desc(weeklyModelReports.createdAt)).limit(1))[0];
-  return report ? formatModelHealthSummary(report) : "📊 尚未產生模型健康週報。系統會在下一個每週排程後提供健康度摘要。";
+  if (settlementRows.length > 0) await db.insert(researchSettlements).values(settlementRows);
+  await deliverDigest(digestId, content);
+  return { digestId, signalCount };
 }
 
 function splitAsianLine(line: number): number[] {
@@ -1911,12 +1218,6 @@ function splitAsianLine(line: number): number[] {
 export function settlementForScores(marketName: string, selection: string, homeGoals: number, awayGoals: number): typeof researchSettlements.$inferInsert.outcome {
   const asian = selection.match(/^(Home|Away)\s+([+-]?\d+(?:\.\d+)?)$/i);
   const total = selection.match(/^(Over|Under)\s+(\d+(?:\.\d+)?)$/i);
-  const score = selection.match(/^(\d+)-(\d+)$/);
-  if (marketName === "Match Winner") {
-    const actual = homeGoals > awayGoals ? "Home" : homeGoals < awayGoals ? "Away" : "Draw";
-    return selection === actual ? "win" : "loss";
-  }
-  if (marketName === "Correct Score") return score && Number(score[1]) === homeGoals && Number(score[2]) === awayGoals ? "win" : "loss";
   if (marketName !== "Asian Handicap" && marketName !== "Goals Over/Under") return "void";
   if ((marketName === "Asian Handicap" && !asian) || (marketName === "Goals Over/Under" && !total)) return "void";
   const side = asian?.[1]?.toLowerCase();
@@ -1944,30 +1245,7 @@ function accuracy(rows: Array<{ outcome: string }>): string {
   return `${(units / resolved.length * 100 + 50).toFixed(1)}%`;
 }
 
-function describeReviewOutcome(outcome: string): string {
-  return outcome === "win" ? "命中" : outcome === "loss" ? "未命中" : outcome === "push" ? "走盤" : outcome === "half_win" ? "半贏" : outcome === "half_loss" ? "半輸" : "不納入";
-}
-
-function formatCompletedFixtureReview(link: typeof researchDigestFixtures.$inferSelect, rows: Array<typeof researchSettlements.$inferSelect>): string {
-  const first = rows[0]!;
-  const primary = rows.find(row => row.marketName === "Match Winner");
-  const total = rows.find(row => row.marketName === "Goals Over/Under");
-  const handicap = rows.find(row => row.marketName === "Asian Handicap");
-  const scorelines = rows.filter(row => row.marketName === "Correct Score");
-  const outcomes = [
-    primary && `【主客和】${primary.selection}：${describeReviewOutcome(primary.outcome)}`,
-    total && `【大細球】${total.selection}：${describeReviewOutcome(total.outcome)}`,
-    handicap && `【讓球盤】${handicap.selection}：${describeReviewOutcome(handicap.outcome)}`,
-    scorelines.length > 0 && `【Top 3波膽】${scorelines.some(row => row.outcome === "win") ? "命中" : "未命中"}`,
-  ].filter(Boolean);
-  return [
-    `⚽ <b>${formatFixtureDisplay(link.homeTeamName, link.awayTeamName)}</b>`,
-    `【完場】${first.homeGoals}-${first.awayGoals}`,
-    ...outcomes,
-  ].join("\n");
-}
-
-export async function runSettlementDigest(): Promise<{ digestId: number | null; settled: number; reviewed: number }> {
+export async function runSettlementDigest(): Promise<{ digestId: number; settled: number }> {
   await verifyApiFootballReadiness();
   const db = await getDb();
   if (!db) throw new Error("資料庫暫時無法使用。");
@@ -1980,34 +1258,17 @@ export async function runSettlementDigest(): Promise<{ digestId: number | null; 
     await db.update(researchSettlements).set({ homeGoals: details.homeGoals, awayGoals: details.awayGoals, outcome, settledAt: new Date(), sourcePayload: { status: details.status } }).where(eq(researchSettlements.id, row.id));
     settled += 1;
   }
-  const pendingReviews = await db.select().from(researchDigestFixtures).where(isNull(researchDigestFixtures.reviewDigestId)).orderBy(researchDigestFixtures.fixtureKickoffAt).limit(12);
-  const completed: Array<{ link: typeof researchDigestFixtures.$inferSelect; rows: Array<typeof researchSettlements.$inferSelect> }> = [];
-  for (const link of pendingReviews) {
-    const rows = await db.select().from(researchSettlements).where(and(eq(researchSettlements.digestId, link.digestId), eq(researchSettlements.apiFixtureId, link.apiFixtureId)));
-    if (rows.length === 0 || rows.some(row => row.outcome === "pending")) continue;
-    completed.push({ link, rows });
-  }
-  if (completed.length === 0) return { digestId: null, settled, reviewed: 0 };
   const [lastSevenDays, lastThirtyDays] = [new Date(Date.now() - 7 * 24 * 60 * 60_000), new Date(Date.now() - 30 * 24 * 60 * 60_000)];
   const [sevenRows, thirtyRows, allRows] = await Promise.all([
     db.select({ outcome: researchSettlements.outcome }).from(researchSettlements).where(gte(researchSettlements.settledAt, lastSevenDays)),
     db.select({ outcome: researchSettlements.outcome }).from(researchSettlements).where(gte(researchSettlements.settledAt, lastThirtyDays)),
     db.select({ outcome: researchSettlements.outcome }).from(researchSettlements),
   ]);
-  const deliveryReceipt = await previousDayDeliveryReceipt(db);
-  const content = [
-    "🏁 <b>Aurelia Football｜賽後研究覆盤</b>",
-    ...completed.map(item => formatCompletedFixtureReview(item.link, item.rows)),
-    `近7日：${accuracy(sevenRows)}｜近30日：${accuracy(thirtyRows)}｜累積：${accuracy(allRows)}。`,
-    "只計入已推播並具備最終賽果的研究市場；走盤與無法辨識盤口不納入命中率。",
-    deliveryReceipt,
-    "此訊息只供模型效能與戰術研究，並非投注或資金建議。",
-  ].join("\n\n");
+  const content = `Aurelia Football｜賽後研究統計\n\n近7日：${accuracy(sevenRows)}｜近30日：${accuracy(thirtyRows)}｜累積：${accuracy(allRows)}。\n\n只計入具備已驗證盤口線與最終賽果的資料；走盤與無法辨識的盤口不納入命中率。\n\n此訊息只供模型效能與戰術研究，並非投注或資金建議。`;
   const inserted = await db.insert(researchDigests).values({ window: "settlement", asOf: new Date(), content, signalCount: sevenRows.length });
   const digestId = Number(inserted[0].insertId);
-  await Promise.all(completed.map(item => db.update(researchDigestFixtures).set({ reviewDigestId: digestId, reviewedAt: new Date() }).where(eq(researchDigestFixtures.id, item.link.id))));
-  await deliverDigest(digestId, content, "settlement");
-  return { digestId, settled, reviewed: completed.length };
+  await deliverDigest(digestId, content);
+  return { digestId, settled };
 }
 
 export async function handleTelegramWebhook(req: Request, res: Response): Promise<void> {
@@ -2018,7 +1279,6 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     return;
   }
   const update = req.body as {
-    update_id?: number | string;
     message?: { chat?: { id?: number | string }; from?: { first_name?: string; username?: string }; text?: string };
     callback_query?: { id?: string; data?: string; message?: { chat?: { id?: number | string } } };
   };
@@ -2036,70 +1296,32 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
   }
   const message = update.message;
   const chatId = message?.chat?.id;
-  const rawText = message?.text;
-  const text = normalizeTelegramCommand(rawText);
-  const multiLineAdminCommands = parseMultiLineAdminCommands(rawText);
-  const auditUpdateId = String(update.update_id ?? `message-${Date.now()}`);
-  await recordTelegramInboundEvent({ updateId: auditUpdateId, chatId: chatId ? String(chatId) : null, command: text || "non_command" });
+  const text = normalizeTelegramCommand(message?.text);
   if (!chatId || !text) {
-    await completeTelegramInboundEvent(auditUpdateId, "ignored");
     res.status(200).json({ ok: true, ignored: true });
     return;
   }
-  try {
-    const db = await getDb();
-    if (!db) throw new Error("資料庫暫時無法使用。");
-    const displayName = message.from?.username || message.from?.first_name || null;
-    if (multiLineAdminCommands.length > 0) {
-      if (!isDictionaryAdmin(String(chatId))) {
-        await sendTelegramMessage(String(chatId), "🔒 無權限：此多行管理指令僅限系統管理員使用。");
-      } else {
-        for (let index = 0; index < multiLineAdminCommands.length; index += 1) {
-          const line = multiLineAdminCommands[index]!;
-          const command = normalizeTelegramCommand(line);
-          const response = command === "/dict"
-            ? await telegramDictionaryForAdmin(String(chatId), line)
-            : command === "/approve"
-              ? await telegramApproveForAdmin(String(chatId), line)
-              : await telegramInboundForAdmin(String(chatId));
-          await sendTelegramMessage(String(chatId), `【多行指令 ${index + 1}/${multiLineAdminCommands.length}】\n${response}`);
-        }
-      }
-    } else if (text === "/start") {
-    const isAdmin = isDictionaryAdmin(String(chatId));
-    await db.insert(telegramSubscriptions).values({ chatId: String(chatId), displayName, isActive: true, isAdmin, stoppedAt: null })
-      .onDuplicateKeyUpdate({ set: { displayName, isActive: true, isAdmin, stoppedAt: null } });
+  const db = await getDb();
+  if (!db) throw new Error("資料庫暫時無法使用。");
+  const displayName = message.from?.username || message.from?.first_name || null;
+  if (text === "/start") {
+    await db.insert(telegramSubscriptions).values({ chatId: String(chatId), displayName, isActive: true, stoppedAt: null })
+      .onDuplicateKeyUpdate({ set: { displayName, isActive: true, stoppedAt: null } });
     await sendTelegramMessage(String(chatId), "Aurelia Football研究通知已啟用。你會收到經資料品質檢核的研究摘要與賽後統計；回覆 /stop 可停止通知。所有內容僅供研究，並非投注或資金建議。");
   } else if (text === "/help") {
     await sendTelegramMessage(String(chatId), TELEGRAM_HELP_MESSAGE);
-  // Dictionary commands are admin-gated inside telegramDictionaryForAdmin, including /dict undo.
-  } else if (text === "/dict") {
-    await sendTelegramMessage(String(chatId), await telegramDictionaryForAdmin(String(chatId), rawText));
-  } else if (text === "/approve") {
-    await sendTelegramMessage(String(chatId), await telegramApproveForAdmin(String(chatId), rawText));
-  } else if (text === "/inbound") {
-    await sendTelegramMessage(String(chatId), await telegramInboundForAdmin(String(chatId)));
   } else if (text === "/trend") {
-    await sendTelegramMessage(String(chatId), await telegramTrendForRequest(rawText));
-  } else if (text === "/today") {
-    await sendTelegramMessage(String(chatId), await telegramToday(req, rawText));
+    await sendTelegramMessage(String(chatId), await telegramTrendForRequest(message?.text));
   } else if (text === "/upcoming" || text === "/report") {
     await sendTelegramMessage(String(chatId), await telegramUpcoming());
-  } else if (text === "/predict") {
-    const result = await telegramPredict(req, rawText);
-    await sendTelegramMessage(String(chatId), result.text, result.buttons);
   } else if (text === "/team") {
-    const result = await telegramTeamResearch(req, rawText);
+    const result = await telegramTeamResearch(req, message?.text);
     await sendTelegramMessage(String(chatId), result.text, result.buttons);
   } else if (!text.startsWith("/")) {
-    const result = await telegramNaturalLanguageTeamResearch(req, rawText);
+    const result = await telegramNaturalLanguageTeamResearch(req, message?.text);
     if (result) await sendTelegramMessage(String(chatId), result.text, result.buttons);
   } else if (text === "/status") {
     await sendTelegramMessage(String(chatId), await telegramStatusForChat(String(chatId)));
-  } else if (text === "/jobs") {
-    await sendTelegramMessage(String(chatId), await telegramJobs());
-  } else if (text === "/health") {
-    await sendTelegramMessage(String(chatId), await telegramHealth());
   } else if (text === "/stop") {
     const existing = (await db.select().from(telegramSubscriptions).where(eq(telegramSubscriptions.chatId, String(chatId))).limit(1))[0];
     if (!existing) {
@@ -2110,13 +1332,8 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
       await db.update(telegramSubscriptions).set({ isActive: false, stoppedAt: new Date() }).where(eq(telegramSubscriptions.chatId, String(chatId)));
       await sendTelegramMessage(String(chatId), "Aurelia Football研究通知已停止。重新傳送 /start 可再次訂閱。");
     }
-    }
-    await completeTelegramInboundEvent(auditUpdateId, "processed");
-    res.status(200).json({ ok: true });
-  } catch (error) {
-    await completeTelegramInboundEvent(auditUpdateId, "failed", safeInboundError(error));
-    throw error;
   }
+  res.status(200).json({ ok: true });
 }
 
 export async function configureTelegramWebhook(request: Request): Promise<{ webhookUrl: string }> {
@@ -2174,7 +1391,6 @@ export async function handleScheduledResearch(req: Request, res: Response, kind:
     }
     await db.update(researchScheduleJobs).set({ lastStartedAt: new Date(), lastError: null }).where(eq(researchScheduleJobs.id, job.id));
     const outcome = kind === "settlement" ? await runSettlementDigest() : await runResearchDigest(req, kind === "day_digest" ? "day" : "evening");
-    if (kind === "settlement") await monitorMissedDigestSchedules();
     await db.update(researchScheduleJobs).set({ lastCompletedAt: new Date(), lastError: null }).where(eq(researchScheduleJobs.id, job.id));
     res.json({ ok: true, ...outcome });
   } catch (error) {
