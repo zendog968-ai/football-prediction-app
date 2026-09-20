@@ -88,6 +88,75 @@ function displayHandicapSelection(side: "Home" | "Away", line: number): string {
   return `${side} ${rounded > 0 ? "+" : ""}${display}`;
 }
 
+type HandicapSnapshotCandidate = {
+  fixtureId: number;
+  marketType: string;
+  selection: string;
+  side: "Home" | "Away";
+  line: number;
+  odds: number;
+  capturedAt: string | null;
+};
+
+function parseHandicapCandidate(snapshot: Record<string, unknown>): HandicapSnapshotCandidate[] {
+  const fixtureId = Number(snapshot.fixture_id);
+  const marketType = typeof snapshot.market_type === "string" ? snapshot.market_type : "";
+  const selection = typeof snapshot.handicap === "string" ? snapshot.handicap.trim() : "";
+  if (!Number.isInteger(fixtureId) || !(marketType.startsWith("HDC") || marketType.startsWith("HKJC_HDC"))) return [];
+  const match = /^(Home|Away)\s+([+-]?\d+(?:\.\d+)?)$/i.exec(selection);
+  if (!match) return [];
+  const line = Number(match[2]);
+  if (!Number.isFinite(line)) return [];
+  const side = match[1]!.toLowerCase() === "home" ? "Home" : "Away";
+  const homeOdds = normalizeOdds(snapshot.home_odds);
+  const awayOdds = normalizeOdds(snapshot.away_odds);
+  const candidates: HandicapSnapshotCandidate[] = [];
+  const capturedAt = typeof snapshot.snapshot_time === "string" ? snapshot.snapshot_time : null;
+  if ((side === "Home" ? homeOdds : awayOdds) !== null) candidates.push({
+    fixtureId,
+    marketType,
+    selection,
+    side,
+    line,
+    odds: (side === "Home" ? homeOdds : awayOdds)!,
+    capturedAt,
+  });
+  const oppositeOdds = side === "Home" ? awayOdds : homeOdds;
+  if (oppositeOdds !== null) candidates.push({
+    fixtureId,
+    marketType,
+    selection: `${side === "Home" ? "Away" : "Home"} ${-line >= 0 ? "+" : ""}${-line}`,
+    side: side === "Home" ? "Away" : "Home",
+    line: -line,
+    odds: oppositeOdds,
+    capturedAt,
+  });
+  return candidates;
+}
+
+function pairHandicapSnapshots(rows: Array<Record<string, unknown>>): Map<number, CachedHandicapQuote> {
+  const candidates = rows.flatMap(row => parseHandicapCandidate(row));
+  const result = new Map<number, CachedHandicapQuote>();
+  for (const home of candidates.filter(item => item.side === "Home")) {
+    if (result.has(home.fixtureId)) continue;
+    const away = candidates.find(item => item.fixtureId === home.fixtureId
+      && item.side === "Away"
+      && item.marketType === home.marketType
+      && item.capturedAt === home.capturedAt
+      && Math.abs(item.line + home.line) < 0.000001);
+    if (!away) continue;
+    result.set(home.fixtureId, {
+      source: home.marketType.startsWith("HKJC_HDC") ? "HKJC" : "API-Football Asian Handicap",
+      homeSelection: displayHandicapSelection("Home", home.line),
+      homeOdds: home.odds,
+      awaySelection: displayHandicapSelection("Away", away.line),
+      awayOdds: away.odds,
+      capturedAt: home.capturedAt,
+    });
+  }
+  return result;
+}
+
 function parseResearchMetadata(value: unknown) {
   const recommendation = typeof value === "string" ? value : "";
   const marker = "\n[AURELIA_META]";
@@ -211,7 +280,7 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
     const handicap075ByFixture = new Map<number, CachedMarketSelection>();
     const handicap125ByFixture = new Map<number, CachedMarketSelection>();
     const handicap175ByFixture = new Map<number, CachedMarketSelection>();
-    const handicapQuoteByFixture = new Map<number, CachedHandicapQuote>();
+    const handicapQuoteByFixture = pairHandicapSnapshots(oddsSnapshots);
 
     for (const snapshot of oddsSnapshots) {
       const fixtureId = Number(snapshot.fixture_id);
@@ -236,21 +305,6 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       }
       if (marketType.startsWith("HDC") && !handicapByFixture.has(fixtureId) && /^(Home|Away)\s+[+-]?\d+(?:\.5)?$/i.test(selection)) {
         handicapByFixture.set(fixtureId, { selection, odds: selectionOdds });
-      }
-      if ((marketType.startsWith("HDC") || marketType.startsWith("HKJC_HDC")) && !handicapQuoteByFixture.has(fixtureId)) {
-        const line = normalizeHandicapLine(snapshot.handicap);
-        const homeOdds = normalizeOdds(snapshot.home_odds);
-        const awayOdds = normalizeOdds(snapshot.away_odds);
-        if (line !== null && homeOdds !== null && awayOdds !== null) {
-          handicapQuoteByFixture.set(fixtureId, {
-            source: marketType.startsWith("HKJC_HDC") ? "HKJC" : "API-Football Asian Handicap",
-            homeSelection: displayHandicapSelection("Home", line),
-            homeOdds,
-            awaySelection: displayHandicapSelection("Away", -line),
-            awayOdds,
-            capturedAt: typeof snapshot.snapshot_time === "string" ? snapshot.snapshot_time : null,
-          });
-        }
       }
       if (oddsByFixture.has(fixtureId) || !marketType.startsWith("HDA")) continue;
       const home = normalizeOdds(snapshot.home_odds);

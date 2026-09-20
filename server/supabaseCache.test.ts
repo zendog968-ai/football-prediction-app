@@ -64,4 +64,31 @@ describe("Supabase繁中翻譯與讓球盤資料契約", () => {
       capturedAt: "2026-08-18T10:00:00Z",
     });
   });
+
+  it("配對同步器分開儲存的主客亞洲盤水位", async () => {
+    const fetchMock = vi.fn(async (input: URL | string) => ({
+      ok: true,
+      json: async () => {
+        const url = String(input);
+        if (url.includes("fixtures?")) return [{ fixture_id: 992, league_name: "Liga MX", event_time: "2026-09-20T03:00:00Z", home_team: "Club America", away_team: "Guadalajara Chivas", status: "NS", updated_at: "2026-09-19T10:00:00Z" }];
+        if (url.includes("ai_predictions?")) return [{ fixture_id: 992, home_win_prob: 0.48, draw_prob: 0.28, away_win_prob: 0.24, predicted_score: "2-1", recommendation: "\n[AURELIA_META]{\"h\":1.62,\"a\":1.08,\"s\":\"隊史\"}", confidence: 3, updated_at: "2026-09-19T10:00:00Z" }];
+        if (url.includes("odds_snapshots?")) return [
+          { fixture_id: 992, market_type: "HDC | Bet365", handicap: "Home -0.5", home_odds: 1.91, away_odds: null, snapshot_time: "2026-09-19T10:00:00Z" },
+          { fixture_id: 992, market_type: "HDC | Bet365", handicap: "Away +0.5", home_odds: null, away_odds: 1.89, snapshot_time: "2026-09-19T10:00:00Z" },
+        ];
+        return [];
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const cache = await getSupabaseUpcomingCache(true);
+    expect(cache.fixtures[0]?.handicapQuote).toEqual({
+      source: "API-Football Asian Handicap",
+      homeSelection: "Home -0.5",
+      homeOdds: 1.91,
+      awaySelection: "Away +0.5",
+      awayOdds: 1.89,
+      capturedAt: "2026-09-19T10:00:00Z",
+    });
+  });
 });
