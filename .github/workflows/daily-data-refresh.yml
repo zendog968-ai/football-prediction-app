@@ -74,3 +74,22 @@ jobs:
           if gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$RUN_TITLE" --json number --jq 'length' | grep -qx '0'; then
             gh issue create --repo "$GITHUB_REPOSITORY" --title "$RUN_TITLE" --body "每日資料刷新或品質閘門未通過。既有不可變Release會繼續服務；請開啟工作流程紀錄查閱失敗步驟及保留的候選稽核檔案。\n\n失敗執行：[查看工作流程紀錄]($RUN_URL)\n\n此Issue由工作流程自動建立，同一run只會建立一次。"
           fi
+      - name: Send failure alert to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN || vars.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || vars.TELEGRAM_CHAT_ID }}
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          set -euo pipefail
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+            echo "Telegram alert skipped: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is not configured."
+            exit 0
+          fi
+          MESSAGE="🚨 <b>Aurelia Football daily refresh 失敗</b>
+          資料刷新或品質驗證未完成，既有版本繼續服務。
+          查看詳細錯誤：${RUN_URL}"
+          curl --fail --silent --show-error --retry 2 --connect-timeout 10 --max-time 30 \
+            -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "text=${MESSAGE}"
