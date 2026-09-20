@@ -12,7 +12,7 @@ function finished(homeId: number, awayId: number, homeGoals: number, awayGoals: 
 }
 
 const upcoming = {
-  fixture: { id: 1, date: "2026-08-20T10:00:00+00:00", status: { short: "NS" } },
+  fixture: { id: 1, date: "2099-08-20T10:00:00+00:00", status: { short: "NS" } },
   league: { id: 98, season: 2026, name: "J1 League" },
   teams: { home: { id: 1, name: "Vissel Kobe" }, away: { id: 2, name: "FC Tokyo" } },
 };
@@ -67,7 +67,7 @@ describe("即時可驗證Poisson回退", () => {
 
   it("英冠布里斯托城即使缺少即時賠率，仍只以真實歷史賽果產出完整基礎Poisson研究", async () => {
     const championshipFixture = {
-      fixture: { id: 1563083, date: "2026-08-16T14:00:00+00:00", status: { short: "NS" } },
+      fixture: { id: 1563083, date: "2099-08-16T14:00:00+00:00", status: { short: "NS" } },
       league: { id: 40, season: 2026, name: "Championship" },
       teams: { home: { id: 55, name: "Bristol City" }, away: { id: 64, name: "Millwall" } },
     };
