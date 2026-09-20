@@ -38,6 +38,9 @@ export type PredictionResult = {
   probabilities: { home_win: number; draw: number; away_win: number };
   diagnostics: {
     historical_matches_used: number;
+    home_history_matches_used?: number;
+    away_history_matches_used?: number;
+    league_history_matches_used?: number;
     latest_historical_match: string;
     dc_history_match_count: number;
     dc_available: boolean;

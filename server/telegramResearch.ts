@@ -180,7 +180,7 @@ function displayHandicapQuote(quote: CachedHandicapQuote | null | undefined): st
   return `⚖️ 【實時讓球盤】${source} [${quote.homeSelection} @${quote.homeOdds.toFixed(2)} / ${quote.awaySelection} @${quote.awayOdds.toFixed(2)}]`;
 }
 
-export function formatLocalizedResearchCard(item: Pick<CachedUpcomingFixture, "leagueName" | "leagueTranslation" | "eventTime" | "homeTeam" | "homeTeamTranslation" | "awayTeam" | "awayTeamTranslation" | "homeWin" | "draw" | "awayWin" | "compactMarkets" | "topScorelines" | "handicapQuote">): string {
+export function formatLocalizedResearchCard(item: Pick<CachedUpcomingFixture, "leagueName" | "leagueTranslation" | "eventTime" | "homeTeam" | "homeTeamTranslation" | "awayTeam" | "awayTeamTranslation" | "homeWin" | "draw" | "awayWin" | "compactMarkets" | "topScorelines" | "handicapQuote"> & { researchSource?: string | null }): string {
   const percent = (value: number) => Number.isFinite(value) && value >= 0 && value <= 1 ? `${(value * 100).toFixed(1)}%` : "資料不足";
   const total = item.compactMarkets.find(row => row.market === "入球大細 2.5");
   const over = total && (/^大(?:\s|$)/.test(total.selection) || /^over\b/i.test(total.selection)) ? total.probability : total ? 1 - total.probability : null;
@@ -194,6 +194,9 @@ export function formatLocalizedResearchCard(item: Pick<CachedUpcomingFixture, "l
     `⚽️ ${home}  vs  ${away}`,
     "---",
     "📊 【資料來源】Dixon-Coles 模型 + HDA 賠率融合",
+    item.researchSource?.includes("聯賽平均") || item.researchSource === "league-average"
+      ? "🚨 【數據警告】目前僅使用聯賽平均，缺少兩隊獨立歷史攻防；不建議參考讓球盤。"
+      : null,
     `🛡️ 【雙重機率】1X: ${percent(item.homeWin + item.draw)} | X2: ${percent(item.draw + item.awayWin)}`,
     displayHandicapQuote(item.handicapQuote),
     `🎯 【模型勝率預測】主勝 ${percent(item.homeWin)} | 和局 ${percent(item.draw)} | 客勝 ${percent(item.awayWin)}`,
@@ -640,7 +643,13 @@ export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedT
 
 export function formatLiveTeamResearch(research: LiveTeamResearch): string {
   const source = research.sourceMode === "team-history" ? "隊伍歷史攻防" : "聯賽平均";
-  return [formatFixtureDisplay(research.homeTeam, research.awayTeam), `📊 【資料來源】${source}`, research.calibrationLabel ? `⚙️ 【校準】${research.calibrationLabel}` : null, formatCompactTable(research.compactMarkets, research.topScorelines, research.outcomes)].filter(Boolean).join("\n");
+  return [
+    formatFixtureDisplay(research.homeTeam, research.awayTeam),
+    `📊 【資料來源】${source}`,
+    research.sourceMode === "league-average" ? "🚨 【數據警告】僅使用聯賽平均，缺少兩隊獨立歷史攻防；不建議參考讓球盤。" : null,
+    research.calibrationLabel ? `⚙️ 【校準】${research.calibrationLabel}` : null,
+    formatCompactTable(research.compactMarkets, research.topScorelines, research.outcomes),
+  ].filter(Boolean).join("\n");
 }
 
 function findUpcomingTeamFixture(fixtures: CachedUpcomingFixture[], requestedTeam: string, now = new Date()): CachedUpcomingFixture | null {
@@ -1124,7 +1133,11 @@ function formatCandidate(candidate: Candidate): string {
 export function rankDailyPicks<T extends Pick<Candidate, "prediction">>(candidates: T[]): T[] {
   const riskScore = (level: PredictionResult["lean"]["risk_level"]) => level === "low" ? 2 : level === "medium" ? 1 : 0;
   return candidates
-    .filter(candidate => candidate.prediction.lean.risk_level !== "high" && candidate.prediction.diagnostics.dc_available && candidate.prediction.diagnostics.dc_history_match_count >= 20)
+    .filter(candidate => candidate.prediction.lean.risk_level !== "high"
+      && candidate.prediction.diagnostics.dc_available
+      && candidate.prediction.diagnostics.dc_history_match_count >= 20
+      && (candidate.prediction.diagnostics.home_history_matches_used ?? 0) >= 2
+      && (candidate.prediction.diagnostics.away_history_matches_used ?? 0) >= 2)
     .sort((left, right) => (
       right.prediction.lean.probability - left.prediction.lean.probability
       || riskScore(right.prediction.lean.risk_level) - riskScore(left.prediction.lean.risk_level)
@@ -1139,6 +1152,9 @@ export function selectDailyDigestPicks<T extends Pick<Candidate, "prediction">>(
   const strictSet = new Set(strict);
   const fallback = candidates
     .filter(candidate => !strictSet.has(candidate))
+    .filter(candidate => (candidate.prediction.diagnostics.home_history_matches_used ?? 0) >= 2
+      && (candidate.prediction.diagnostics.away_history_matches_used ?? 0) >= 2
+      && candidate.prediction.diagnostics.dc_history_match_count >= 20)
     .sort((left, right) => (
       right.prediction.lean.probability - left.prediction.lean.probability
       || right.prediction.diagnostics.dc_history_match_count - left.prediction.diagnostics.dc_history_match_count
@@ -1245,6 +1261,11 @@ function accuracy(rows: Array<{ outcome: string }>): string {
   return `${(units / resolved.length * 100 + 50).toFixed(1)}%`;
 }
 
+/** A settlement digest is an event report, not a heartbeat. Do not resend it when nothing new settled. */
+export function shouldSendSettlementDigest(settled: number): boolean {
+  return Number.isInteger(settled) && settled > 0;
+}
+
 export async function runSettlementDigest(): Promise<{ digestId: number; settled: number }> {
   await verifyApiFootballReadiness();
   const db = await getDb();
@@ -1255,9 +1276,20 @@ export async function runSettlementDigest(): Promise<{ digestId: number; settled
     const details = await fixtureDetails(row.apiFixtureId);
     if (!details || !["FT", "AET", "PEN"].includes(details.status) || details.homeGoals === null || details.awayGoals === null) continue;
     const outcome = settlementForScores(row.marketName, row.selection, details.homeGoals, details.awayGoals);
-    await db.update(researchSettlements).set({ homeGoals: details.homeGoals, awayGoals: details.awayGoals, outcome, settledAt: new Date(), sourcePayload: { status: details.status } }).where(eq(researchSettlements.id, row.id));
-    settled += 1;
+    // The callback can be retried or run concurrently. Only the first worker that
+    // still sees `pending` owns this settlement and may trigger a digest.
+    const updateResult = await db.update(researchSettlements)
+      .set({ homeGoals: details.homeGoals, awayGoals: details.awayGoals, outcome, settledAt: new Date(), sourcePayload: { status: details.status } })
+      .where(and(eq(researchSettlements.id, row.id), eq(researchSettlements.outcome, "pending")));
+    const affectedRows = Number((updateResult as unknown as Array<{ affectedRows?: number }>)[0]?.affectedRows ?? 0);
+    if (affectedRows === 1) settled += 1;
   }
+
+  // A successful Telegram send followed by a transient DB/HTTP error may cause
+  // Heartbeat to retry the callback. Since the rows are already settled, this
+  // guard makes the retry a safe no-op instead of sending the same report again.
+  if (!shouldSendSettlementDigest(settled)) return { digestId: 0, settled: 0 };
+
   const [lastSevenDays, lastThirtyDays] = [new Date(Date.now() - 7 * 24 * 60 * 60_000), new Date(Date.now() - 30 * 24 * 60 * 60_000)];
   const [sevenRows, thirtyRows, allRows] = await Promise.all([
     db.select({ outcome: researchSettlements.outcome }).from(researchSettlements).where(gte(researchSettlements.settledAt, lastSevenDays)),

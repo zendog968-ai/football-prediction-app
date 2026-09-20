@@ -233,6 +233,9 @@ def build_pre_match_features(
 
     diagnostics = {
         "historical_matches_used": len(usable),
+        "home_history_matches_used": len(overall_history[home_team]),
+        "away_history_matches_used": len(overall_history[away_team]),
+        "league_history_matches_used": len(usable),
         "latest_historical_match": usable["match_datetime"].max().isoformat(sep=" "),
         "dc_history_match_count": int(features.get("dc_fit_match_count", 0)) if dc_model else 0,
         "dc_available": bool(dc_model is not None),

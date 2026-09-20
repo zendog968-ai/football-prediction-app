@@ -171,15 +171,36 @@ async function researchForFixture(fixture: ApiFixture): Promise<LiveTeamResearch
   const season = fixture.league?.season;
   if (!Number.isInteger(homeId) || !Number.isInteger(awayId) || !Number.isInteger(leagueId) || !Number.isInteger(season)) return null;
   const resolvedSeason = Number(season);
-  const historySeason = leagueId === 40 && resolvedSeason > 0 ? resolvedSeason - 1 : resolvedSeason;
-  const [rawHomeHistory, rawAwayHistory, rawLeagueHistory] = await Promise.all([
-    leagueId === 40 ? apiFootball<ApiFixture>(`/fixtures?team=${homeId}&league=${leagueId}&season=${historySeason}&timezone=UTC`) : apiFootball<ApiFixture>(`/fixtures?team=${homeId}&last=10&timezone=UTC`),
-    leagueId === 40 ? apiFootball<ApiFixture>(`/fixtures?team=${awayId}&league=${leagueId}&season=${historySeason}&timezone=UTC`) : apiFootball<ApiFixture>(`/fixtures?team=${awayId}&last=10&timezone=UTC`),
-    leagueId === 40 ? apiFootball<ApiFixture>(`/fixtures?league=${leagueId}&season=${historySeason}&timezone=UTC`) : apiFootball<ApiFixture>(`/fixtures?league=${leagueId}&season=${historySeason}&last=40&timezone=UTC`),
+  if (leagueId !== 40) {
+    const [homeHistory, awayHistory, leagueHistory] = await Promise.all([
+      apiFootball<ApiFixture>(`/fixtures?team=${homeId}&last=10&timezone=UTC`),
+      apiFootball<ApiFixture>(`/fixtures?team=${awayId}&last=10&timezone=UTC`),
+      apiFootball<ApiFixture>(`/fixtures?league=${leagueId}&season=${resolvedSeason}&last=40&timezone=UTC`),
+    ]);
+    return deriveLivePoissonResearch(fixture, homeHistory, awayHistory, leagueHistory);
+  }
+
+  // Newly relegated/promoted Championship teams can have no rows in the
+  // previous Championship season. Prefer the current season and fall back
+  // independently per team to the previous season only when needed.
+  const previousSeason = resolvedSeason > 0 ? resolvedSeason - 1 : resolvedSeason;
+  const [currentHome, currentAway, currentLeague] = await Promise.all([
+    apiFootball<ApiFixture>(`/fixtures?team=${homeId}&league=${leagueId}&season=${resolvedSeason}&timezone=UTC`),
+    apiFootball<ApiFixture>(`/fixtures?team=${awayId}&league=${leagueId}&season=${resolvedSeason}&timezone=UTC`),
+    apiFootball<ApiFixture>(`/fixtures?league=${leagueId}&season=${resolvedSeason}&timezone=UTC`),
   ]);
-  const homeHistory = leagueId === 40 ? rawHomeHistory.slice(-10) : rawHomeHistory;
-  const awayHistory = leagueId === 40 ? rawAwayHistory.slice(-10) : rawAwayHistory;
-  const leagueHistory = leagueId === 40 ? rawLeagueHistory.slice(-40) : rawLeagueHistory;
+  const needsPrevious = (rows: ApiFixture[]) => rows.filter(row => FINISHED.has(row.fixture?.status?.short ?? "")).length < 2;
+  if (!needsPrevious(currentHome) && !needsPrevious(currentAway) && !needsPrevious(currentLeague)) {
+    return deriveLivePoissonResearch(fixture, currentHome.slice(-10), currentAway.slice(-10), currentLeague.slice(-40));
+  }
+  const [previousHome, previousAway, previousLeague] = await Promise.all([
+    needsPrevious(currentHome) ? apiFootball<ApiFixture>(`/fixtures?team=${homeId}&league=${leagueId}&season=${previousSeason}&timezone=UTC`) : Promise.resolve([]),
+    needsPrevious(currentAway) ? apiFootball<ApiFixture>(`/fixtures?team=${awayId}&league=${leagueId}&season=${previousSeason}&timezone=UTC`) : Promise.resolve([]),
+    needsPrevious(currentLeague) ? apiFootball<ApiFixture>(`/fixtures?league=${leagueId}&season=${previousSeason}&timezone=UTC`) : Promise.resolve([]),
+  ]);
+  const homeHistory = (needsPrevious(currentHome) ? previousHome : currentHome).slice(-10);
+  const awayHistory = (needsPrevious(currentAway) ? previousAway : currentAway).slice(-10);
+  const leagueHistory = (needsPrevious(currentLeague) ? previousLeague : currentLeague).slice(-40);
   return deriveLivePoissonResearch(fixture, homeHistory, awayHistory, leagueHistory);
 }
 

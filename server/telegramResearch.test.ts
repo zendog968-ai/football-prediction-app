@@ -1,10 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatHktKickoff, formatLiveTeamResearch, formatLocalizedResearchCard, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatHktKickoff, formatLiveTeamResearch, formatLocalizedResearchCard, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, shouldSendSettlementDigest, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("研究型盤口結算", () => {
+  it("沒有新結算時不應建立或發送重複的賽後統計摘要", () => {
+    expect(shouldSendSettlementDigest(0)).toBe(false);
+    expect(shouldSendSettlementDigest(-1)).toBe(false);
+    expect(shouldSendSettlementDigest(1)).toBe(true);
+  });
+
   it("正確結算全盤亞洲讓球與大小球，不把走盤算作勝或負", () => {
     expect(settlementForScores("Asian Handicap", "Home -0.5", 2, 1)).toBe("win");
     expect(settlementForScores("Asian Handicap", "Away +0", 1, 1)).toBe("push");
@@ -220,7 +226,26 @@ describe("Telegram系統指令", () => {
     } as const;
     expect(formatLiveTeamResearch({ ...base, sourceMode: "team-history" })).toContain("【資料來源】隊伍歷史攻防");
     expect(formatLiveTeamResearch({ ...base, sourceMode: "league-average" })).toContain("【資料來源】聯賽平均");
+    expect(formatLiveTeamResearch({ ...base, sourceMode: "league-average" })).toContain("不建議參考讓球盤");
     expect(formatLiveTeamResearch({ ...base, sourceMode: "team-history", calibrationLabel: "英冠正式聯賽樣本＋聯賽平均及主場優勢校準" })).toContain("【校準】英冠正式聯賽樣本");
+  });
+
+  it("快取研究卡標示聯賽平均時強制顯示數據警告", () => {
+    const card = formatLocalizedResearchCard({
+      leagueName: "Championship",
+      eventTime: "2026-08-15T20:00:00Z",
+      homeTeam: "Wolverhampton Wanderers",
+      awayTeam: "West Bromwich Albion",
+      homeWin: 0.2,
+      draw: 0.25,
+      awayWin: 0.55,
+      compactMarkets: [{ market: "入球大細 2.5", selection: "Over 2.5", probability: 0.5 }],
+      topScorelines: [{ score: "0-1", probability: 0.2 }, { score: "1-1", probability: 0.15 }, { score: "1-0", probability: 0.1 }],
+      handicapQuote: null,
+      researchSource: "聯賽平均",
+    });
+    expect(card).toContain("🚨 【數據警告】");
+    expect(card).toContain("不建議參考讓球盤");
   });
 
   it("以Telegram一般HTML文字包裝對齊研究內容並轉義特殊字元", () => {
@@ -240,16 +265,22 @@ describe("Telegram系統指令", () => {
   });
 
   it("每日精選只保留最多三場完整模型、非高風險候選並按機率排序", () => {
-    const candidate = (probability: number, risk: "low" | "medium" | "high", samples = 30) => ({ prediction: { lean: { probability, risk_level: risk }, diagnostics: { dc_available: true, dc_history_match_count: samples } } }) as never;
+    const candidate = (probability: number, risk: "low" | "medium" | "high", samples = 30, teamSamples = 5) => ({ prediction: { lean: { probability, risk_level: risk }, diagnostics: { dc_available: true, dc_history_match_count: samples, home_history_matches_used: teamSamples, away_history_matches_used: teamSamples } } }) as never;
     const selected = rankDailyPicks([candidate(0.72, "medium"), candidate(0.81, "low"), candidate(0.64, "low"), candidate(0.6, "high"), candidate(0.85, "low", 19)]);
     expect(selected).toHaveLength(3);
     expect(selected.map(item => item.prediction.lean.probability)).toEqual([0.81, 0.72, 0.64]);
   });
 
-  it("每日摘要在嚴格候選不足三場時，以可用候選依機率補足至最多三場", () => {
-    const candidate = (probability: number, risk: "low" | "medium" | "high", samples: number, available: boolean) => ({ prediction: { lean: { probability, risk_level: risk }, diagnostics: { dc_available: available, dc_history_match_count: samples } } }) as never;
+  it("每日摘要在嚴格候選不足三場時，不以低樣本候選補滿清單", () => {
+    const candidate = (probability: number, risk: "low" | "medium" | "high", samples: number, available: boolean) => ({ prediction: { lean: { probability, risk_level: risk }, diagnostics: { dc_available: available, dc_history_match_count: samples, home_history_matches_used: 5, away_history_matches_used: 5 } } }) as never;
     const candidates = [candidate(0.62, "low", 25, true), candidate(0.59, "high", 6, true), candidate(0.55, "medium", 4, false), candidate(0.49, "high", 2, false)];
-    expect(selectDailyDigestPicks(candidates).map(item => item.prediction.lean.probability)).toEqual([0.62, 0.59, 0.55]);
+    expect(selectDailyDigestPicks(candidates).map(item => item.prediction.lean.probability)).toEqual([0.62]);
+  });
+
+  it("每日摘要折疊缺少主客隊獨立樣本的候選", () => {
+    const candidate = (probability: number, teamSamples: number) => ({ prediction: { lean: { probability, risk_level: "medium" }, diagnostics: { dc_available: true, dc_history_match_count: 40, home_history_matches_used: teamSamples, away_history_matches_used: teamSamples } } }) as never;
+    expect(rankDailyPicks([candidate(0.91, 1), candidate(0.72, 2)])).toHaveLength(1);
+    expect(rankDailyPicks([candidate(0.91, 1), candidate(0.72, 2)])[0]?.prediction.lean.probability).toBe(0.72);
   });
 
   it("只要有未來24小時fixture就列出，部分模型與盤口會以基礎分析而非暫無賽事呈現", () => {

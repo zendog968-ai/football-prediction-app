@@ -45,6 +45,9 @@ class PoissonPrediction:
     research_lean: str
     evidence_stars: int
     data_warning: str | None
+    home_sample_matches: int
+    away_sample_matches: int
+    league_sample_matches: int | None
 
     def to_row(self) -> dict[str, Any]:
         row = asdict(self)
@@ -157,4 +160,7 @@ def predict_fixture(fixture: dict[str, Any], home_history: list[dict[str, Any]],
         research_lean=lean,
         evidence_stars=evidence_stars,
         data_warning=" ".join(warnings),
+        home_sample_matches=home.matches,
+        away_sample_matches=away.matches,
+        league_sample_matches=calibration.matches if calibration else None,
     )

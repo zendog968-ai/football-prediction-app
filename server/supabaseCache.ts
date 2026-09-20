@@ -32,6 +32,9 @@ export type CachedUpcomingFixture = {
   predictedScore: string | null;
   recommendation: string | null;
   researchSource?: string | null;
+  homeSampleMatches?: number | null;
+  awaySampleMatches?: number | null;
+  leagueSampleMatches?: number | null;
   confidence: number;
   predictionUpdatedAt: string | null;
   hasPrediction: boolean;
@@ -170,6 +173,11 @@ function parseResearchMetadata(value: unknown) {
   } catch {
     return { recommendation: recommendation.slice(0, markerIndex) || null, metadata: null as Record<string, unknown> | null };
   }
+}
+
+function normalizeSampleCount(value: unknown): number | null {
+  const number = typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" ? Number(value) : NaN;
+  return Number.isInteger(number) && number >= 0 ? number : null;
 }
 
 function normalizeScorelines(value: unknown): ScorelineProbability[] {
@@ -381,6 +389,9 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
         predictedScore: typeof prediction?.predicted_score === "string" ? prediction.predicted_score : null,
         recommendation,
         researchSource,
+        homeSampleMatches: normalizeSampleCount(metadata?.home_sample_matches),
+        awaySampleMatches: normalizeSampleCount(metadata?.away_sample_matches),
+        leagueSampleMatches: normalizeSampleCount(metadata?.league_sample_matches),
         confidence: Math.max(0, Math.min(5, Number(prediction?.confidence) || 0)),
         predictionUpdatedAt: typeof prediction?.updated_at === "string" ? prediction.updated_at : null,
         hasPrediction: !!prediction && homeWin !== null && draw !== null && awayWin !== null,
