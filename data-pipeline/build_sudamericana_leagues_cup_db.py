@@ -188,6 +188,33 @@ def validate(connection: sqlite3.Connection) -> None:
         raise RuntimeError(f"盃賽xG欄位應保持NULL：{rows}")
 
 
+def filter_existing_records(connection: sqlite3.Connection, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Skip exact rows already present in the immutable release snapshot."""
+    existing = {
+        tuple(row)
+        for row in connection.execute(
+            """SELECT league_code, season, match_date, home_team, away_team,
+                      home_goals, away_goals
+               FROM matches WHERE league_code IN ('SUD', 'LCUP')"""
+        )
+    }
+    seen = set(existing)
+    filtered: list[dict[str, Any]] = []
+    for record in records:
+        key = (
+            record["league_code"], record["season"], record["match_date"],
+            record["home_team"], record["away_team"], record["home_goals"], record["away_goals"],
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        filtered.append(record)
+    skipped = len(records) - len(filtered)
+    if skipped:
+        print(f"已從 Release 快照或本次來源跳過完全重複盃賽：{skipped:,} 場")
+    return filtered
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-database", type=Path, required=True)
@@ -209,7 +236,7 @@ def main() -> None:
     ]
     with sqlite3.connect(args.output) as connection:
         connection.execute("DELETE FROM team_stats")
-        insert_matches(connection, records)
+        insert_matches(connection, filter_existing_records(connection, records))
         compute_team_stats(connection)
         validate(connection)
         connection.commit()
