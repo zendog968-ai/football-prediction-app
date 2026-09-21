@@ -32,18 +32,21 @@ def representative_teams(database: Path, league_code: str) -> tuple[str, str]:
         ).fetchone()
         if not season:
             raise RuntimeError(f"{league_code}: missing matches")
-        rows = connection.execute(
+        row = connection.execute(
             """
-            SELECT team FROM (
-              SELECT home_team AS team FROM matches WHERE league_code = ? AND season = ?
-              UNION ALL SELECT away_team AS team FROM matches WHERE league_code = ? AND season = ?
-            ) GROUP BY team ORDER BY COUNT(*) DESC, team LIMIT 2
+            SELECT home_team, away_team
+            FROM matches
+            WHERE league_code = ? AND season = ?
+            ORDER BY match_date DESC, match_id DESC
+            LIMIT 1
             """,
-            (league_code, season[0], league_code, season[0]),
-        ).fetchall()
-    if len(rows) != 2:
-        raise RuntimeError(f"{league_code}: insufficient representative teams")
-    return str(rows[0][0]), str(rows[1][0])
+            (league_code, season[0]),
+        ).fetchone()
+    if not row or not row[0] or not row[1] or row[0] == row[1]:
+        raise RuntimeError(f"{league_code}: insufficient representative fixture")
+    # Use a real historical pairing from the same league/season so the CLI
+    # resolver cannot receive two teams from different competition snapshots.
+    return str(row[0]), str(row[1])
 
 
 def smoke_predictions(database: Path, model: Path, output_dir: Path) -> None:
