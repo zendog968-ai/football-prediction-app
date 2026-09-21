@@ -2,14 +2,29 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
 
 class TelegramNotificationError(RuntimeError):
     pass
+
+
+def format_kickoff_hkt(value: str | None) -> str:
+    """Format an ISO-8601 kickoff instant in Hong Kong time for Telegram."""
+    if not value:
+        return "資料不足"
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=ZoneInfo("UTC"))
+        return parsed.astimezone(ZoneInfo("Asia/Hong_Kong")).strftime("%Y-%m-%d %H:%M (HKT)")
+    except (TypeError, ValueError):
+        return "資料不足"
 
 
 def telegram_configured() -> bool:
@@ -45,6 +60,7 @@ def format_success(report: dict[str, Any]) -> str:
         for item in predictions:
             lines.append(
                 f"• {item['league']}｜{item['home_team']} vs {item['away_team']}｜"
+                f"開賽 {format_kickoff_hkt(item.get('kickoff_at'))}｜"
                 f"最可能比分 {item['score']}｜{item['lean']}｜證據 {'⭐' * item['stars']}"
             )
     else:

@@ -13,6 +13,7 @@ from pathlib import Path
 PIPELINE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(PIPELINE_DIR))
 from daily_update import SOURCE_LABEL, SourceResult, ensure_sync_schema, evaluate_quality_gate, reconcile  # noqa: E402
+from run_daily_refresh import representative_teams  # noqa: E402
 
 
 def build_database() -> sqlite3.Connection:
@@ -35,6 +36,25 @@ def build_database() -> sqlite3.Connection:
 
 
 class DailyResultSyncTests(unittest.TestCase):
+    def test_representative_teams_uses_a_real_latest_fixture_pair(self) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".db") as handle:
+            database = Path(handle.name)
+        try:
+            with sqlite3.connect(database) as connection:
+                connection.execute(
+                    "CREATE TABLE matches (season TEXT, league_code TEXT, match_date TEXT, match_id TEXT, home_team TEXT, away_team TEXT)"
+                )
+                connection.executemany(
+                    "INSERT INTO matches VALUES (?, ?, ?, ?, ?, ?)",
+                    [
+                        ("2026", "SUD", "2026-08-01", "old", "Older Home", "Older Away"),
+                        ("2026", "SUD", "2026-09-01", "latest", "Cienciano del Cusco", "Vasco da Gama"),
+                    ],
+                )
+            self.assertEqual(representative_teams(database, "SUD"), ("Cienciano del Cusco", "Vasco da Gama"))
+        finally:
+            database.unlink(missing_ok=True)
+
     def test_matching_completed_result_is_confirmed_and_audited(self) -> None:
         with build_database() as connection:
             connection.execute(

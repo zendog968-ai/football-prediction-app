@@ -165,6 +165,7 @@ def run() -> dict[str, Any]:
             "league": fixture_row.get("league_name") or "Unknown league",
             "home_team": fixture_row["home_team"],
             "away_team": fixture_row["away_team"],
+            "kickoff_at": fixture_row["kickoff_at"],
             "score": prediction.most_likely_score,
             "lean": prediction.research_lean,
             "stars": prediction.evidence_stars,
