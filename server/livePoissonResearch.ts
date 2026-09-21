@@ -18,6 +18,7 @@ type ApiTeam = { team?: { id?: number; name?: string } };
 export type LiveTeamResearch = {
   homeTeam: string;
   awayTeam: string;
+  eventTime?: string;
   outcomes: { homeWin: number; draw: number; awayWin: number };
   compactMarkets: CompactMarketRow[];
   topScorelines: ScorelineProbability[];
@@ -149,6 +150,7 @@ export function deriveLivePoissonResearch(fixture: ApiFixture, homeHistory: ApiF
   return {
     homeTeam,
     awayTeam,
+    eventTime: fixture.fixture?.date,
     outcomes,
     compactMarkets: [outcome, ...mainstreamTotals(homeMean, awayMean), ...modelHandicapRows(homeMean, awayMean, outcomes)].filter((row): row is CompactMarketRow => row !== null),
     topScorelines: topScorelines(homeMean, awayMean),
