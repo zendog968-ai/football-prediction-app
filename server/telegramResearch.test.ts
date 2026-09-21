@@ -96,8 +96,8 @@ describe("Telegram系統指令", () => {
       handicapQuote: { source: "HKJC", homeSelection: "Home -1", homeOdds: 1.91, awaySelection: "Away +1", awayOdds: 1.87, capturedAt: "2026-08-15T10:00:00Z" },
     }], new Date("2026-08-15T00:00:00Z"));
     expect(message).toContain("🏆 【聯賽】美職聯 (MLS)");
-    expect(message).toContain("📅 【時間】2026-08-16 04:00 (HKT)");
-    expect(message).toContain("⚽️ 示例主隊 (Example Home)  vs  示例客隊 (Example Away)");
+    expect(message).toContain("⏰ 賽事時間：2026-08-16 04:00 (HKT)");
+    expect(message).toContain("⚽️ 【示例主隊 (Example Home)】 vs 【示例客隊 (Example Away)】");
     expect(message).toContain("【雙重機率】1X: 83.0% | X2: 38.0%");
     expect(message).toContain("【實時讓球盤】HKJC [Home -1 @1.91 / Away +1 @1.87]");
     expect(message).toContain("【模型勝率預測】主勝 62.0% | 和局 21.0% | 客勝 17.0%");
@@ -122,7 +122,7 @@ describe("Telegram系統指令", () => {
       handicapQuote: { source: "API-Football Asian Handicap", homeSelection: "Home -0.5", homeOdds: 1.9, awaySelection: "Away +0.5", awayOdds: 1.94, capturedAt: null },
     });
     expect(card).toContain("示例聯賽 (Sample League)");
-    expect(card).toContain("主隊 (Home FC)  vs  客隊 (Away FC)");
+    expect(card).toContain("⚽️ 【主隊 (Home FC)】 vs 【客隊 (Away FC)】");
     expect(card).toContain("API-Football Asian Handicap [Home -0.5 @1.90 / Away +0.5 @1.94]");
   });
 
@@ -137,13 +137,29 @@ describe("Telegram系統指令", () => {
     const incomplete = { ...base, fixtureId: 201, homeWin: Number.NaN, topScorelines: [] };
     const text = formatCachedUpcoming([incomplete, base], new Date("2026-08-15T00:00:00Z"));
     expect(text).not.toContain("暫無可驗證");
-    expect(text).toContain("⚽️ Example Home  vs  Example Away");
+    expect(text).toContain("⚽️ 【Example Home】 vs 【Example Away】");
   });
 
   it("在Telegram標題以繁體中文加英文原名顯示已知球隊，未知隊名保留原文", () => {
     expect(formatFixtureDisplay("Jeju United FC", "FC Anyang")).toBe("濟州SK (Jeju United FC) vs 安養FC (FC Anyang)");
     expect(formatFixtureDisplay("Shenyang Urban", "Sichuan Jiuniu")).toBe("瀋陽城市 (Shenyang Urban) vs 四川九牛 (Sichuan Jiuniu)");
     expect(formatFixtureDisplay("Unknown FC", "FC Tokyo")).toBe("Unknown FC vs FC東京 (FC Tokyo)");
+  });
+  it("live fallback 強制顯示墨超中文隊名與 HKT 開賽時間", () => {
+    const card = formatLiveTeamResearch({
+      homeTeam: "CF Pachuca",
+      awayTeam: "Club Tijuana",
+      eventTime: "2026-09-20T03:15:00Z",
+      outcomes: { homeWin: 0.45, draw: 0.3, awayWin: 0.25 },
+      compactMarkets: [
+        { market: "入球大細 2.5", selection: "大 2.5", probability: 0.56 },
+        { market: "讓球盤 (Handicap)", selection: "主隊 -0.5", probability: 0.45 },
+      ],
+      topScorelines: [{ score: "1-0", probability: 0.16 }, { score: "1-1", probability: 0.14 }, { score: "2-1", probability: 0.11 }],
+      sourceMode: "team-history",
+    });
+    expect(card).toContain("⚽️ 【帕丘卡 (CF Pachuca)】 vs 【提華納 (Club Tijuana)】");
+    expect(card).toContain("⏰ 賽事時間：2026-09-20 11:15 (HKT)");
   });
 
   it("解析/team並以中文別名找到下一場已同步賽事，缺少賽事時回覆明確警示", () => {
@@ -158,7 +174,7 @@ describe("Telegram系統指令", () => {
       compactMarkets: [{ market: "主客和 (1X2)", selection: "主勝", probability: 0.61 }],
       topScorelines: [{ score: "2-1", probability: 0.12 }, { score: "1-0", probability: 0.11 }, { score: "2-0", probability: 0.1 }],
     }] as never;
-    expect(formatTeamResearch(fixtures, "曼聯", new Date("2026-08-15T00:00:00Z"))).toContain("⚽️ 曼聯 (Manchester United)  vs  Example Away");
+    expect(formatTeamResearch(fixtures, "曼聯", new Date("2026-08-15T00:00:00Z"))).toContain("⚽️ 【曼聯 (Manchester United)】 vs 【Example Away】");
     expect(formatTeamResearch(fixtures, "不存在的隊", new Date("2026-08-15T00:00:00Z"))).toBe("⚠️ 暫未找到 不存在的隊 的近期賽事資料，請確認隊名或嘗試其他熱門隊伍。");
   });
 

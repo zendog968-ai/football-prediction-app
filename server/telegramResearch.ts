@@ -3,7 +3,7 @@ import type { Request, Response } from "express";
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { parse as parseCookie } from "cookie";
 import { COOKIE_NAME } from "@shared/const";
-import { formatFixtureDisplay, formatTranslatedTeamDisplay } from "@shared/teamDisplay";
+import { formatFixtureDisplay, formatTeamDisplay, formatTranslatedTeamDisplay } from "@shared/teamDisplay";
 import { formatLeagueDisplay } from "@shared/leagueDisplay";
 import {
   oddsSnapshots,
@@ -189,9 +189,9 @@ export function formatLocalizedResearchCard(item: Pick<CachedUpcomingFixture, "l
   const away = formatTranslatedTeamDisplay(item.awayTeam, item.awayTeamTranslation ?? undefined);
   return [
     `🏆 【聯賽】${formatLeagueDisplay(item.leagueName, undefined, item.leagueTranslation ?? undefined)}`,
-    `📅 【時間】${formatHktKickoff(item.eventTime)}`,
+    `⏰ 賽事時間：${formatHktKickoff(item.eventTime)}`,
     "---",
-    `⚽️ ${home}  vs  ${away}`,
+    `⚽️ 【${home}】 vs 【${away}】`,
     "---",
     "📊 【資料來源】Dixon-Coles 模型 + HDA 賠率融合",
     item.researchSource?.includes("聯賽平均") || item.researchSource === "league-average"
@@ -229,7 +229,7 @@ export function toTelegramHtml(text: string): string {
   const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const headings = [
     "🏆 【聯賽】",
-    "📅 【時間】",
+    "⏰ 賽事時間：",
     "📊 【資料來源】",
     "🛡️ 【雙重機率】",
     "⚖️ 【實時讓球盤】",
@@ -643,8 +643,11 @@ export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedT
 
 export function formatLiveTeamResearch(research: LiveTeamResearch): string {
   const source = research.sourceMode === "team-history" ? "隊伍歷史攻防" : "聯賽平均";
+  const home = formatTeamDisplay(research.homeTeam);
+  const away = formatTeamDisplay(research.awayTeam);
   return [
-    formatFixtureDisplay(research.homeTeam, research.awayTeam),
+    `⚽️ 【${home}】 vs 【${away}】`,
+    `⏰ 賽事時間：${research.eventTime ? formatHktKickoff(research.eventTime) : "資料不足"}`,
     `📊 【資料來源】${source}`,
     research.sourceMode === "league-average" ? "🚨 【數據警告】僅使用聯賽平均，缺少兩隊獨立歷史攻防；不建議參考讓球盤。" : null,
     research.calibrationLabel ? `⚙️ 【校準】${research.calibrationLabel}` : null,
