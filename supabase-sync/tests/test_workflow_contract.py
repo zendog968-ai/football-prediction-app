@@ -10,6 +10,8 @@ def test_hourly_workflow_has_dry_run_retry_and_telegram_secret_contract() -> Non
     assert "sleep $((attempt * 20))" in workflow
     assert "secrets.TELEGRAM_BOT_TOKEN" in workflow
     assert "secrets.TELEGRAM_CHAT_ID" in workflow
+    assert "secrets.SUPABASE_URL" in workflow
+    assert "secrets.SUPABASE_SECRET_KEY" in workflow
     assert "--kind success" in workflow
     assert "--kind failure" in workflow
     assert "sb_secret_" not in workflow
