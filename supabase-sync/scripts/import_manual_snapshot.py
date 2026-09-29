@@ -46,9 +46,11 @@ def find_fixture(url: str, headers: dict[str, str], fixture: dict[str, Any]) -> 
     end = start + timedelta(days=1)
     home_team = str(fixture["home_team"]).replace("*", "")
     away_team = str(fixture["away_team"]).replace("*", "")
+    league_name = "Liga MX" if "墨西哥" in str(fixture.get("league", "")) else str(fixture.get("league", ""))
     rows = rest_get(url, headers, "fixtures", {
         "home_team": f"ilike.*{home_team}*",
         "away_team": f"ilike.*{away_team}*",
+        "league_name": f"ilike.*{league_name}*" if league_name else "not.is.null",
         "event_time": f"gte.{start.isoformat().replace('+00:00', 'Z')}",
         "select": "*",
         "limit": "50",
@@ -64,8 +66,18 @@ def find_fixture(url: str, headers: dict[str, str], fixture: dict[str, Any]) -> 
         except (KeyError, TypeError, ValueError):
             continue
     if len(candidates) != 1:
-        ids = [row.get("fixture_id") for row in candidates]
-        raise ImportError(f"Expected exactly one fixture match, found {len(candidates)}: {ids}")
+        details = [
+            {
+                "fixture_id": row.get("fixture_id"),
+                "league_name": row.get("league_name"),
+                "event_time": row.get("event_time"),
+                "status": row.get("status"),
+                "home_team": row.get("home_team"),
+                "away_team": row.get("away_team"),
+            }
+            for row in candidates
+        ]
+        raise ImportError(f"Expected exactly one fixture match, found {len(candidates)}: {json.dumps(details, ensure_ascii=False)}")
     return candidates[0]
 
 
