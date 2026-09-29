@@ -2,6 +2,8 @@
   "fixture": {
     "home_team": "Atlante",
     "away_team": "Monterrey",
+    "api_home_team": "Atlante FC",
+    "api_away_team": "Monterrey",
     "match_date_hkt": "2026-09-26",
     "league": "墨西哥超級聯賽",
     "halftime_score": "1-1",
