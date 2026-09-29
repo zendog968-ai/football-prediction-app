@@ -44,12 +44,12 @@ def find_fixture(url: str, headers: dict[str, str], fixture: dict[str, Any]) -> 
     date = datetime.fromisoformat(fixture["match_date_hkt"]).date()
     start = datetime(date.year, date.month, date.day, tzinfo=UTC) - timedelta(hours=8)
     end = start + timedelta(days=1)
-    home_team = str(fixture["home_team"]).replace("*", "")
-    away_team = str(fixture["away_team"]).replace("*", "")
+    home_team = str(fixture.get("api_home_team") or fixture["home_team"]).replace("*", "")
+    away_team = str(fixture.get("api_away_team") or fixture["away_team"]).replace("*", "")
     league_name = "Liga MX" if "墨西哥" in str(fixture.get("league", "")) else str(fixture.get("league", ""))
     rows = rest_get(url, headers, "fixtures", {
-        "home_team": f"ilike.*{home_team}*",
-        "away_team": f"ilike.*{away_team}*",
+        "home_team": f"eq.{home_team}" if fixture.get("api_home_team") else f"ilike.*{home_team}*",
+        "away_team": f"eq.{away_team}" if fixture.get("api_away_team") else f"ilike.*{away_team}*",
         "league_name": f"ilike.*{league_name}*" if league_name else "not.is.null",
         "event_time": f"gte.{start.isoformat().replace('+00:00', 'Z')}",
         "select": "*",
