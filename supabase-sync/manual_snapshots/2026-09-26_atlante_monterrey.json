@@ -1,0 +1,36 @@
+{
+  "fixture": {
+    "home_team": "Atlante",
+    "away_team": "Monterrey",
+    "match_date_hkt": "2026-09-26",
+    "league": "墨西哥超級聯賽",
+    "halftime_score": "1-1",
+    "halftime_status": "HT",
+    "corner_note": "截圖頂部顯示 3 (1:2)，疑似總角球 3、主隊 1、客隊 2；未作為正式模型輸入。"
+  },
+  "source": {
+    "kind": "manual_screenshot",
+    "description": "香港投注站即場賠率截圖",
+    "captured_at_hkt": "2026-09-26T09:54:00+08:00",
+    "captured_at_hkt_end": "2026-09-26T09:55:00+08:00",
+    "source_files": ["1000351010.jpg", "1000351012.jpg", "1000351014.jpg"]
+  },
+  "markets": [
+    {"market_type": "1X2", "selection": "1X2", "home_odds": 2.94, "draw_odds": 2.36, "away_odds": 2.72},
+    {"market_type": "NEXT_GOAL", "selection": "第3球", "home_odds": 2.34, "draw_odds": 3.55, "away_odds": 2.31},
+    {"market_type": "AH_RESULT", "selection": "主+1/和+1/客-1", "home_odds": 1.31, "draw_odds": 3.95, "away_odds": 8.00},
+    {"market_type": "AH_RESULT", "selection": "主-1/和-1/客+1", "home_odds": 8.25, "draw_odds": 3.95, "away_odds": 1.30},
+    {"market_type": "AH_LEVEL", "selection": "平手 0", "home_odds": 1.87, "draw_odds": null, "away_odds": 1.85},
+    {"market_type": "TOTALS", "selection": "3.5", "home_odds": 2.19, "draw_odds": null, "away_odds": 1.60},
+    {"market_type": "TOTALS", "selection": "3/3.5", "home_odds": 1.84, "draw_odds": null, "away_odds": 1.86},
+    {"market_type": "TOTALS", "selection": "4.5", "home_odds": 4.75, "draw_odds": null, "away_odds": 1.13},
+    {"market_type": "CORRECT_SCORE", "selection": "1-1", "home_odds": 3.55, "draw_odds": null, "away_odds": null},
+    {"market_type": "CORRECT_SCORE", "selection": "2-1", "home_odds": 4.45, "draw_odds": null, "away_odds": null},
+    {"market_type": "CORRECT_SCORE", "selection": "1-2", "home_odds": 4.20, "draw_odds": null, "away_odds": null},
+    {"market_type": "CORRECT_SCORE", "selection": "2-2", "home_odds": 5.00, "draw_odds": null, "away_odds": null},
+    {"market_type": "CORRECT_SCORE", "selection": "3-1", "home_odds": 11.50, "draw_odds": null, "away_odds": null},
+    {"market_type": "CORRECT_SCORE", "selection": "1-3", "home_odds": 11.00, "draw_odds": null, "away_odds": null},
+    {"market_type": "CORRECT_SCORE", "selection": "3-2", "home_odds": 16.00, "draw_odds": null, "away_odds": null},
+    {"market_type": "CORRECT_SCORE", "selection": "2-3", "home_odds": 15.50, "draw_odds": null, "away_odds": null}
+  ]
+}
