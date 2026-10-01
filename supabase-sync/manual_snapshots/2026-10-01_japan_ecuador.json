@@ -1,0 +1,27 @@
+{
+  "fixture": {
+    "home_team": "日本",
+    "away_team": "厄瓜多爾",
+    "api_home_team": "Japan",
+    "api_away_team": "Ecuador",
+    "match_date_hkt": "2026-10-01",
+    "league": "",
+    "live_score": "0-0",
+    "match_state_note": "截圖顯示 LIVE、比分 0-0；畫面未顯示比賽分鐘或半場狀態。"
+  },
+  "source": {
+    "kind": "manual_screenshot",
+    "description": "香港投注站即場賠率截圖",
+    "captured_at_hkt": "2026-10-01T18:53:00+08:00",
+    "captured_at_hkt_end": "2026-10-01T18:53:00+08:00",
+    "source_files": ["1000353425.jpg", "1000353427.jpg"]
+  },
+  "markets": [
+    {"market_type": "1X2", "selection": "全場 1X2", "home_odds": 1.83, "draw_odds": 2.68, "away_odds": 4.65},
+    {"market_type": "HALF_TIME_1X2", "selection": "半場 1X2", "home_odds": 4.90, "draw_odds": 1.20, "away_odds": 10.00},
+    {"market_type": "NEXT_GOAL", "selection": "第1球", "home_odds": 1.64, "draw_odds": 4.90, "away_odds": 3.05},
+    {"market_type": "AH_RESULT", "selection": "主-1/和-1/客+1", "home_odds": 3.85, "draw_odds": 3.10, "away_odds": 1.78},
+    {"market_type": "AH_RESULT", "selection": "主-2/和-2/客+2", "home_odds": 10.50, "draw_odds": 5.20, "away_odds": 1.17},
+    {"market_type": "AH_LEVEL", "selection": "主 0/-0.5；客 0/+0.5", "home_odds": 1.62, "draw_odds": null, "away_odds": 2.18}
+  ]
+}
