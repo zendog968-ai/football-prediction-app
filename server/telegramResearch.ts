@@ -1272,11 +1272,30 @@ export function settlementForScores(marketName: string, selection: string, homeG
   return "void";
 }
 
-function accuracy(rows: Array<{ outcome: string }>): string {
-  const resolved = rows.filter(row => !["pending", "void", "push"].includes(row.outcome));
+type SettlementRow = { outcome: string };
+
+function resolvedRows(rows: SettlementRow[]): SettlementRow[] {
+  return rows.filter(row => ["win", "loss", "half_win", "half_loss"].includes(row.outcome));
+}
+
+/** Settlement performance: preserves partial Asian-line settlement value. */
+export function settlementScore(rows: SettlementRow[]): string {
+  const resolved = resolvedRows(rows);
   if (!resolved.length) return "資料不足";
   const units = resolved.reduce((total, row) => total + (row.outcome === "win" ? 1 : row.outcome === "half_win" ? 0.5 : row.outcome === "half_loss" ? -0.5 : -1), 0);
   return `${(units / resolved.length * 100 + 50).toFixed(1)}%`;
+}
+
+/** Accuracy: win and half_win are directionally correct; push/void/pending are excluded. */
+export function modelAccuracy(rows: SettlementRow[]): string {
+  const resolved = resolvedRows(rows);
+  if (!resolved.length) return "資料不足";
+  const correct = resolved.filter(row => row.outcome === "win" || row.outcome === "half_win").length;
+  return `${(correct / resolved.length * 100).toFixed(1)}%`;
+}
+
+function metricSampleCount(rows: SettlementRow[]): string {
+  return String(resolvedRows(rows).length);
 }
 
 /** A settlement digest is an event report, not a heartbeat. Do not resend it when nothing new settled. */
@@ -1314,7 +1333,7 @@ export async function runSettlementDigest(): Promise<{ digestId: number; settled
     db.select({ outcome: researchSettlements.outcome }).from(researchSettlements).where(gte(researchSettlements.settledAt, lastThirtyDays)),
     db.select({ outcome: researchSettlements.outcome }).from(researchSettlements),
   ]);
-  const content = `Aurelia Football｜賽後研究統計\n\n近7日：${accuracy(sevenRows)}｜近30日：${accuracy(thirtyRows)}｜累積：${accuracy(allRows)}。\n\n只計入具備已驗證盤口線與最終賽果的資料；走盤與無法辨識的盤口不納入命中率。\n\n此訊息只供模型效能與戰術研究，並非投注或資金建議。`;
+  const content = `Aurelia Football｜賽後研究統計\n\n近7日：結算得分 ${settlementScore(sevenRows)}｜模型預測準確率 (Accuracy) ${modelAccuracy(sevenRows)}（有效樣本 ${metricSampleCount(sevenRows)}）\n近30日：結算得分 ${settlementScore(thirtyRows)}｜模型預測準確率 (Accuracy) ${modelAccuracy(thirtyRows)}（有效樣本 ${metricSampleCount(thirtyRows)}）\n累積：結算得分 ${settlementScore(allRows)}｜模型預測準確率 (Accuracy) ${modelAccuracy(allRows)}（有效樣本 ${metricSampleCount(allRows)}）\n\n結算得分按全贏、半贏、半輸及全輸計算；Accuracy 將 win／half_win 視為方向正確。push、void 及尚未結算資料不納入。\n\n此訊息只供模型效能與戰術研究，並非投注或資金建議。`;
   const inserted = await db.insert(researchDigests).values({ window: "settlement", asOf: new Date(), content, signalCount: sevenRows.length });
   const digestId = Number(inserted[0].insertId);
   await deliverDigest(digestId, content);
