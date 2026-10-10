@@ -645,13 +645,28 @@ export function formatLiveTeamResearch(research: LiveTeamResearch): string {
   const source = research.sourceMode === "team-history" ? "隊伍歷史攻防" : "聯賽平均";
   const home = formatTeamDisplay(research.homeTeam);
   const away = formatTeamDisplay(research.awayTeam);
+  const percent = (value: number) => Number.isFinite(value) && value >= 0 && value <= 1 ? `${(value * 100).toFixed(1)}%` : "資料不足";
+  const total = research.compactMarkets.find(row => row.market === "入球大細 2.5");
+  const over = total && /^大(?:\s|$)/.test(total.selection) ? total.probability : total ? 1 - total.probability : null;
+  const under = total && over !== null ? 1 - over : null;
+  const handicap = research.compactMarkets.find(row => row.market === "讓球盤 (Handicap)");
   return [
-    `⚽️ 【${home}】 vs 【${away}】`,
+    `🏆 【聯賽】${research.leagueName || "資料不足"}`,
     `⏰ 賽事時間：${research.eventTime ? formatHktKickoff(research.eventTime) : "資料不足"}`,
+    "---",
+    `⚽️ 【${home}】 vs 【${away}】`,
+    "---",
     `📊 【資料來源】${source}`,
     research.sourceMode === "league-average" ? "🚨 【數據警告】僅使用聯賽平均，缺少兩隊獨立歷史攻防；不建議參考讓球盤。" : null,
     research.calibrationLabel ? `⚙️ 【校準】${research.calibrationLabel}` : null,
-    formatCompactTable(research.compactMarkets, research.topScorelines, research.outcomes),
+    `🛡️ 【雙重機率】1X: ${percent(research.outcomes.homeWin + research.outcomes.draw)} | X2: ${percent(research.outcomes.draw + research.outcomes.awayWin)}`,
+    "⚖️ 【實時讓球盤】資料不足（live fallback 沒有已驗證的實時盤口）",
+    `🎯 【模型勝率預測】主勝 ${percent(research.outcomes.homeWin)} | 和局 ${percent(research.outcomes.draw)} | 客勝 ${percent(research.outcomes.awayWin)}`,
+    `🔥 【大小球】${over === null || under === null ? "資料不足" : `大 2.5 (${percent(over)}) | 小 2.5 (${percent(under)})`}`,
+    handicap ? `📐 【模型讓球參考】${handicap.selection} 贏盤 (${percent(handicap.probability)})` : "📐 【模型讓球參考】資料不足",
+    "---",
+    "💡 【最高波膽 Top 3】",
+    ...[0, 1, 2].map(index => `${index + 1}. ${research.topScorelines[index] ? `${research.topScorelines[index]!.score} —— ${percent(research.topScorelines[index]!.probability)}` : "資料不足"}`),
   ].filter(Boolean).join("\n");
 }
 
