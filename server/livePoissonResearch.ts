@@ -16,6 +16,7 @@ type ApiPayload<T> = { response?: T[]; errors?: Record<string, unknown> | unknow
 type ApiTeam = { team?: { id?: number; name?: string } };
 
 export type LiveTeamResearch = {
+  leagueName?: string;
   homeTeam: string;
   awayTeam: string;
   eventTime?: string;
@@ -148,6 +149,7 @@ export function deriveLivePoissonResearch(fixture: ApiFixture, homeHistory: ApiF
   if (!outcomes) return null;
   const outcome = highestOutcome(outcomes.homeWin, outcomes.draw, outcomes.awayWin);
   return {
+    leagueName: fixture.league?.name?.trim() || undefined,
     homeTeam,
     awayTeam,
     eventTime: fixture.fixture?.date,

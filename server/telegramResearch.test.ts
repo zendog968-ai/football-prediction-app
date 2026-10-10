@@ -147,6 +147,7 @@ describe("Telegram系統指令", () => {
   });
   it("live fallback 強制顯示墨超中文隊名與 HKT 開賽時間", () => {
     const card = formatLiveTeamResearch({
+      leagueName: "Liga MX",
       homeTeam: "CF Pachuca",
       awayTeam: "Club Tijuana",
       eventTime: "2026-09-20T03:15:00Z",
@@ -158,8 +159,14 @@ describe("Telegram系統指令", () => {
       topScorelines: [{ score: "1-0", probability: 0.16 }, { score: "1-1", probability: 0.14 }, { score: "2-1", probability: 0.11 }],
       sourceMode: "team-history",
     });
+    expect(card).toContain("🏆 【聯賽】Liga MX");
     expect(card).toContain("⚽️ 【帕丘卡 (CF Pachuca)】 vs 【提華納 (Club Tijuana)】");
     expect(card).toContain("⏰ 賽事時間：2026-09-20 11:15 (HKT)");
+    expect(card).toContain("🛡️ 【雙重機率】1X: 75.0% | X2: 55.0%");
+    expect(card).toContain("⚖️ 【實時讓球盤】資料不足");
+    expect(card).toContain("🎯 【模型勝率預測】主勝 45.0% | 和局 30.0% | 客勝 25.0%");
+    expect(card).toContain("🔥 【大小球】大 2.5 (56.0%) | 小 2.5 (44.0%)");
+    expect(card).toContain("💡 【最高波膽 Top 3】");
   });
 
   it("解析/team並以中文別名找到下一場已同步賽事，缺少賽事時回覆明確警示", () => {
