@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatHktKickoff, formatLiveTeamResearch, formatLocalizedResearchCard, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, shouldSendSettlementDigest, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatHktKickoff, formatLiveTeamResearch, formatLocalizedResearchCard, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, modelAccuracy, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, settlementScore, shouldSendSettlementDigest, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -26,6 +26,15 @@ describe("研究型盤口結算", () => {
   it("拒絕未記錄完整格式的市場資料，避免杜撰結算", () => {
     expect(settlementForScores("Asian Handicap", "Home to win", 2, 1)).toBe("void");
     expect(settlementForScores("Unknown", "Over 2.5", 3, 0)).toBe("void");
+  });
+
+  it("分開計算結算得分與模型預測準確率，並排除走盤及無法結算資料", () => {
+    const rows = [{ outcome: "win" }, { outcome: "half_win" }, { outcome: "loss" }, { outcome: "half_loss" }, { outcome: "push" }, { outcome: "void" }, { outcome: "pending" }];
+    expect(settlementScore(rows)).toBe("50.0%");
+    expect(modelAccuracy(rows)).toBe("50.0%");
+    expect(modelAccuracy([{ outcome: "win" }, { outcome: "half_win" }, { outcome: "loss" }])).toBe("66.7%");
+    expect(settlementScore([{ outcome: "push" }, { outcome: "void" }])).toBe("資料不足");
+    expect(modelAccuracy([{ outcome: "push" }, { outcome: "void" }])).toBe("資料不足");
   });
 });
 
