@@ -1272,7 +1272,7 @@ export function settlementForScores(marketName: string, selection: string, homeG
   return "void";
 }
 
-type SettlementRow = { outcome: string };
+export type SettlementRow = { outcome: string; marketName?: string | null; selection?: string | null };
 
 function resolvedRows(rows: SettlementRow[]): SettlementRow[] {
   return rows.filter(row => ["win", "loss", "half_win", "half_loss"].includes(row.outcome));
@@ -1283,7 +1283,9 @@ export function settlementScore(rows: SettlementRow[]): string {
   const resolved = resolvedRows(rows);
   if (!resolved.length) return "資料不足";
   const units = resolved.reduce((total, row) => total + (row.outcome === "win" ? 1 : row.outcome === "half_win" ? 0.5 : row.outcome === "half_loss" ? -0.5 : -1), 0);
-  return `${(units / resolved.length * 100 + 50).toFixed(1)}%`;
+  // Map full loss → 0%, half loss → 25%, push-excluded neutral → 50%,
+  // half win → 75%, and full win → 100%.
+  return `${(units / resolved.length * 50 + 50).toFixed(1)}%`;
 }
 
 /** Accuracy: win and half_win are directionally correct; push/void/pending are excluded. */
@@ -1296,6 +1298,39 @@ export function modelAccuracy(rows: SettlementRow[]): string {
 
 function metricSampleCount(rows: SettlementRow[]): string {
   return String(resolvedRows(rows).length);
+}
+
+function marketGroup(row: SettlementRow): string | null {
+  if (row.marketName === "Asian Handicap") {
+    const line = row.selection?.match(/^(?:Home|Away)\s+([+-]?\d+(?:\.\d+)?)$/i)?.[1];
+    return line ? `讓球 ${Number(line) >= 0 ? "+" : ""}${Number(line)}` : "亞洲讓球";
+  }
+  if (row.marketName === "Goals Over/Under") {
+    const total = row.selection?.match(/^(?:Over|Under)\s+(\d+(?:\.\d+)?)$/i)?.[1];
+    return total ? `大小球 ${Number(total)}` : "大小球";
+  }
+  return row.marketName || "其他市場";
+}
+
+export function formatSettlementBreakdown(rows: SettlementRow[]): string {
+  const groups = new Map<string, SettlementRow[]>();
+  for (const row of rows) {
+    const group = marketGroup(row);
+    if (!group) continue;
+    const bucket = groups.get(group) || [];
+    bucket.push(row);
+    groups.set(group, bucket);
+  }
+  if (!groups.size) return "分項：資料不足";
+  const order = (label: string): number => label.startsWith("讓球") ? 0 : label.startsWith("大小球") ? 1 : 2;
+  return Array.from(groups.entries())
+    .sort(([left], [right]) => order(left) - order(right) || left.localeCompare(right, "en"))
+    .map(([label, bucket]) => `• ${label}：結算得分 ${settlementScore(bucket)}｜Accuracy ${modelAccuracy(bucket)}｜n=${metricSampleCount(bucket)}`)
+    .join("\n");
+}
+
+function formatWindow(label: string, rows: SettlementRow[]): string {
+  return `${label}：結算得分 ${settlementScore(rows)}｜模型預測準確率 (Accuracy) ${modelAccuracy(rows)}｜有效樣本 ${metricSampleCount(rows)}\n${formatSettlementBreakdown(rows)}`;
 }
 
 /** A settlement digest is an event report, not a heartbeat. Do not resend it when nothing new settled. */
@@ -1328,12 +1363,13 @@ export async function runSettlementDigest(): Promise<{ digestId: number; settled
   if (!shouldSendSettlementDigest(settled)) return { digestId: 0, settled: 0 };
 
   const [lastSevenDays, lastThirtyDays] = [new Date(Date.now() - 7 * 24 * 60 * 60_000), new Date(Date.now() - 30 * 24 * 60 * 60_000)];
+  const settlementFields = { outcome: researchSettlements.outcome, marketName: researchSettlements.marketName, selection: researchSettlements.selection };
   const [sevenRows, thirtyRows, allRows] = await Promise.all([
-    db.select({ outcome: researchSettlements.outcome }).from(researchSettlements).where(gte(researchSettlements.settledAt, lastSevenDays)),
-    db.select({ outcome: researchSettlements.outcome }).from(researchSettlements).where(gte(researchSettlements.settledAt, lastThirtyDays)),
-    db.select({ outcome: researchSettlements.outcome }).from(researchSettlements),
+    db.select(settlementFields).from(researchSettlements).where(gte(researchSettlements.settledAt, lastSevenDays)),
+    db.select(settlementFields).from(researchSettlements).where(gte(researchSettlements.settledAt, lastThirtyDays)),
+    db.select(settlementFields).from(researchSettlements),
   ]);
-  const content = `Aurelia Football｜賽後研究統計\n\n近7日：結算得分 ${settlementScore(sevenRows)}｜模型預測準確率 (Accuracy) ${modelAccuracy(sevenRows)}（有效樣本 ${metricSampleCount(sevenRows)}）\n近30日：結算得分 ${settlementScore(thirtyRows)}｜模型預測準確率 (Accuracy) ${modelAccuracy(thirtyRows)}（有效樣本 ${metricSampleCount(thirtyRows)}）\n累積：結算得分 ${settlementScore(allRows)}｜模型預測準確率 (Accuracy) ${modelAccuracy(allRows)}（有效樣本 ${metricSampleCount(allRows)}）\n\n結算得分按全贏、半贏、半輸及全輸計算；Accuracy 將 win／half_win 視為方向正確。push、void 及尚未結算資料不納入。\n\n此訊息只供模型效能與戰術研究，並非投注或資金建議。`;
+  const content = `Aurelia Football｜賽後研究統計\n\n${formatWindow("近7日", sevenRows)}\n\n${formatWindow("近30日", thirtyRows)}\n\n${formatWindow("累積", allRows)}\n\n結算得分按全贏、半贏、半輸及全輸計算；Accuracy 將 win／half_win 視為方向正確。push、void 及尚未結算資料不納入。\n分項是已結算實績，不代表原始模型概率；現有結算資料未保存原始概率時，不會事後補造勝率。\n\n此訊息只供模型效能與戰術研究，並非投注或資金建議。`;
   const inserted = await db.insert(researchDigests).values({ window: "settlement", asOf: new Date(), content, signalCount: sevenRows.length });
   const digestId = Number(inserted[0].insertId);
   await deliverDigest(digestId, content);

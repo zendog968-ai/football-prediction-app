@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
-import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatHktKickoff, formatLiveTeamResearch, formatLocalizedResearchCard, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, modelAccuracy, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, settlementScore, shouldSendSettlementDigest, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
+import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatHktKickoff, formatLiveTeamResearch, formatLocalizedResearchCard, formatSettlementBreakdown, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, modelAccuracy, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, settlementScore, shouldSendSettlementDigest, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -35,6 +35,17 @@ describe("研究型盤口結算", () => {
     expect(modelAccuracy([{ outcome: "win" }, { outcome: "half_win" }, { outcome: "loss" }])).toBe("66.7%");
     expect(settlementScore([{ outcome: "push" }, { outcome: "void" }])).toBe("資料不足");
     expect(modelAccuracy([{ outcome: "push" }, { outcome: "void" }])).toBe("資料不足");
+  });
+
+  it("按不同讓球線及大小球線分組顯示結算得分、Accuracy及樣本數", () => {
+    const breakdown = formatSettlementBreakdown([
+      { marketName: "Asian Handicap", selection: "Home -0.5", outcome: "win" },
+      { marketName: "Asian Handicap", selection: "Away +0.25", outcome: "half_win" },
+      { marketName: "Goals Over/Under", selection: "Over 2.5", outcome: "loss" },
+    ]);
+    expect(breakdown).toContain("讓球 -0.5：結算得分 100.0%｜Accuracy 100.0%｜n=1");
+    expect(breakdown).toContain("讓球 +0.25：結算得分 75.0%｜Accuracy 100.0%｜n=1");
+    expect(breakdown).toContain("大小球 2.5：結算得分 0.0%｜Accuracy 0.0%｜n=1");
   });
 });
 
