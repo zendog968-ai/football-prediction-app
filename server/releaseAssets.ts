@@ -7,6 +7,7 @@ type PipelineManifest = {
   generated_at: string;
   release_tag: string;
   assets: { database: string; model: string; performance: string };
+  validated_leagues: string[];
 };
 
 export type ReleaseAssets = {
@@ -15,6 +16,7 @@ export type ReleaseAssets = {
   model: string;
   performance: string;
   generatedAt: string | null;
+  validatedLeagues: string[];
 };
 
 let cachedAssets: ReleaseAssets | null = null;
@@ -31,7 +33,9 @@ function isValidManifest(value: unknown): value is PipelineManifest {
     typeof manifest.generated_at === "string" &&
     typeof manifest.release_tag === "string" && /^data-[A-Za-z0-9._-]+$/.test(manifest.release_tag) &&
     !!manifest.assets && isSafeAssetName(manifest.assets.database) &&
-    isSafeAssetName(manifest.assets.model) && isSafeAssetName(manifest.assets.performance);
+    isSafeAssetName(manifest.assets.model) && isSafeAssetName(manifest.assets.performance) &&
+    Array.isArray(manifest.validated_leagues) && manifest.validated_leagues.length > 0 &&
+    manifest.validated_leagues.every(league => typeof league === "string" && /^[A-Z0-9]+$/.test(league));
 }
 
 function fallbackAssets(origin: string): ReleaseAssets {
@@ -41,6 +45,7 @@ function fallbackAssets(origin: string): ReleaseAssets {
     model: `${origin}/manus-storage/soccer_predict_model_expanded_0dc66f04.pkl`,
     performance: `${origin}/manus-storage/model_performance_filters_expanded_8d3a1806.json`,
     generatedAt: null,
+    validatedLeagues: ["BRA1", "EPL", "LL", "BL", "SA", "L1", "MLS", "J1", "FIN1", "KOR1", "POR1", "MEX1", "AUS1", "UEL", "SUD", "LCUP"],
   };
 }
 
@@ -68,6 +73,7 @@ export async function getReleaseAssets(origin: string): Promise<ReleaseAssets> {
       model: `${baseUrl}/${manifest.assets.model}`,
       performance: `${baseUrl}/${manifest.assets.performance}`,
       generatedAt: manifest.generated_at,
+      validatedLeagues: manifest.validated_leagues,
     };
   } catch {
     if (cachedAssets && isPublishedRelease(cachedAssets)) {

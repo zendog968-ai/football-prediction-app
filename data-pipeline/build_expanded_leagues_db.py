@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""擴充既有 football_data.db，納入七個新增聯賽的五季公開賽果。
+"""擴充既有 football_data.db，納入八個新增聯賽的五季公開賽果。
 
 來源：schochastics/football-data 的 games.parquet（ODC-BY）。
 來源僅提供主客隊、日期和完賽比分；xG與事件欄位一律保留為NULL。
@@ -28,6 +28,7 @@ TARGETS = {
     "portugal": ("POR1", "Primeira Liga", "split"),
     "mexico": ("MEX1", "Liga MX", "mexico"),
     "australia": ("AUS1", "A-League Men", "split"),
+    "netherlands": ("NED1", "Eredivisie", "split"),
 }
 
 
@@ -102,10 +103,10 @@ def validate(connection: sqlite3.Connection) -> None:
     rows = connection.execute(
         """SELECT league_code, COUNT(*), COUNT(DISTINCT season),
                   SUM(CASE WHEN home_xg IS NOT NULL OR away_xg IS NOT NULL THEN 1 ELSE 0 END)
-           FROM matches WHERE league_code IN ('MLS','J1','FIN1','KOR1','POR1','MEX1','AUS1')
+           FROM matches WHERE league_code IN ('MLS','J1','FIN1','KOR1','POR1','MEX1','AUS1','NED1')
            GROUP BY league_code ORDER BY league_code"""
     ).fetchall()
-    if len(rows) != 7 or any(row[1] == 0 or row[2] < 5 or row[3] != 0 for row in rows):
+    if len(rows) != 8 or any(row[1] == 0 or row[2] < 5 or row[3] != 0 for row in rows):
         raise RuntimeError(f"新增聯賽資料驗證失敗：{rows}")
     print("\n驗證完成：所有新增聯賽均含至少五個賽季，且xG欄位保持NULL。")
     for row in rows:
@@ -142,7 +143,7 @@ def filter_existing_records(connection: sqlite3.Connection, records: list[dict[s
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="建立含七個新增聯賽的擴充足球資料庫")
+    parser = argparse.ArgumentParser(description="建立含八個新增聯賽的擴充足球資料庫")
     parser.add_argument("--base-database", default="football_data.db")
     parser.add_argument("--open-results", default="open_football_games.parquet")
     parser.add_argument("--output", default="football_data_expanded.db")

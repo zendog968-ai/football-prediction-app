@@ -12,6 +12,8 @@ from pathlib import Path
 
 PIPELINE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(PIPELINE_DIR))
+from build_expanded_leagues_db import TARGETS  # noqa: E402
+from create_release_manifest import VALIDATED_LEAGUES  # noqa: E402
 from daily_update import SOURCE_LABEL, SourceResult, ensure_sync_schema, evaluate_quality_gate, reconcile  # noqa: E402
 from run_daily_refresh import representative_teams  # noqa: E402
 
@@ -36,6 +38,10 @@ def build_database() -> sqlite3.Connection:
 
 
 class DailyResultSyncTests(unittest.TestCase):
+    def test_eredivisie_source_and_release_scope_stay_aligned(self) -> None:
+        self.assertEqual(TARGETS["netherlands"], ("NED1", "Eredivisie", "split"))
+        self.assertIn("NED1", VALIDATED_LEAGUES)
+
     def test_representative_teams_uses_a_real_latest_fixture_pair(self) -> None:
         with tempfile.NamedTemporaryFile(suffix=".db") as handle:
             database = Path(handle.name)
