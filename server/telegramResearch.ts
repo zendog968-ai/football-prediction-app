@@ -1,3 +1,4 @@
+import { buildTelegramWebhookUrl, formatTelegramRuntimeHeader } from "./telegramWebhookConfig";
 import { predictionIsFresh } from "./predictionFreshness";
 import { timingSafeEqual } from "node:crypto";
 import type { Request, Response } from "express";
@@ -256,7 +257,11 @@ export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = ne
   return upcoming.map((item, index) => `${index + 1}. ${formatLocalizedResearchCard(item)}`).join("\n\n");
 }
 
-async function telegramUpcoming(): Promise<string> {
+export async function telegramUpcoming(): Promise<string> {
+  return `${formatTelegramRuntimeHeader(ENV.telegramRuntimeLabel)}\n\n${await telegramUpcomingContent()}`;
+}
+
+async function telegramUpcomingContent(): Promise<string> {
   const cached = await getSupabaseUpcomingCache();
   const now = Date.now();
   const hasCachedUpcoming = cached.available && cached.fixtures.some(item => {
@@ -1386,6 +1391,10 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     res.status(403).json({ error: "invalid webhook secret" });
     return;
   }
+  if (!req.body || !Number.isSafeInteger(req.body.update_id) || req.body.update_id < 0) {
+    res.status(400).json({ error: "invalid Telegram update" });
+    return;
+  }
   const update = req.body as {
     message?: { chat?: { id?: number | string }; from?: { first_name?: string; username?: string }; text?: string };
     callback_query?: { id?: string; data?: string; message?: { chat?: { id?: number | string } } };
@@ -1447,11 +1456,11 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
 export async function configureTelegramWebhook(request: Request): Promise<{ webhookUrl: string }> {
   if (!ENV.isProduction) throw new Error("請先發布網站，才能設定可公開存取的Telegram webhook。");
   const token = requireSecret(ENV.telegramBotToken, "Telegram Bot Token");
-  const webhookUrl = `${originFromRequest(request)}/api/integrations/telegram/webhook`;
+  const webhookUrl = buildTelegramWebhookUrl(originFromRequest(request), ENV.appBasePath, ENV.telegramWebhookUrl);
   const response = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ url: webhookUrl, secret_token: requireSecret(ENV.telegramWebhookSecret, "Telegram Webhook Secret"), allowed_updates: ["message", "callback_query"] }),
+    body: JSON.stringify({ url: webhookUrl, secret_token: requireSecret(ENV.telegramWebhookSecret, "Telegram Webhook Secret"), allowed_updates: ["message", "callback_query"], drop_pending_updates: false, max_connections: 4 }),
   });
   if (!response.ok) throw new Error(`Telegram webhook設定失敗（${response.status}）。`);
   const payload = await response.json() as { ok?: boolean };
