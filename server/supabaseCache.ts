@@ -1,3 +1,4 @@
+import { predictionIsFresh, snapshotIsFresh } from "./predictionFreshness";
 import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
 import { ENV } from "./_core/env";
 
@@ -63,16 +64,19 @@ const CACHE_MS = 30_000;
 let cache: { expiresAt: number; payload: SupabaseUpcomingCache } | null = null;
 
 function normalizeProbability(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : null;
 }
 
 function normalizeExpectedGoals(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 6 ? parsed : null;
 }
 
 function normalizeOdds(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 1 ? parsed : null;
 }
@@ -260,8 +264,31 @@ async function queryOptionalTranslationRows(table: string): Promise<Array<Record
   }
 }
 
+export function safeCacheProjection(payload: SupabaseUpcomingCache, now = Date.now()): SupabaseUpcomingCache {
+  return { ...payload, fixtures: payload.fixtures.map(row => {
+    const fresh = row.hasPrediction && predictionIsFresh(row.predictionUpdatedAt, row.eventTime, now);
+    const quote = row.handicapQuote;
+    const odds = row.odds;
+    return {
+      ...row,
+      homeWin: fresh ? row.homeWin : Number.NaN,
+      draw: fresh ? row.draw : Number.NaN,
+      awayWin: fresh ? row.awayWin : Number.NaN,
+      predictedScore: fresh ? row.predictedScore : null,
+      recommendation: fresh ? row.recommendation : null,
+      researchSource: fresh ? row.researchSource : "預測過期或不完整；不顯示百分比",
+      confidence: fresh ? row.confidence : 0,
+      hasPrediction: fresh,
+      compactMarkets: fresh ? row.compactMarkets.filter(m => !(m.market.startsWith("亞洲讓球") || m.market === "讓球盤 (Handicap)") || Boolean(quote && snapshotIsFresh(quote.capturedAt, now))) : [],
+      topScorelines: fresh ? row.topScorelines : [],
+      handicapQuote: quote && snapshotIsFresh(quote.capturedAt, now) ? quote : null,
+      odds: odds && snapshotIsFresh(odds.capturedAt, now) ? odds : null,
+    };
+  }) };
+}
+
 export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseUpcomingCache> {
-  if (!force && cache && cache.expiresAt > Date.now()) return cache.payload;
+  if (!force && cache && cache.expiresAt > Date.now()) return safeCacheProjection(cache.payload);
   const loadedAt = new Date().toISOString();
   try {
     const now = encodeURIComponent(new Date().toISOString());
@@ -270,7 +297,7 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
     if (ids.length === 0) {
       const payload: SupabaseUpcomingCache = { source: "Supabase cache", loadedAt, available: true, fixtures: [], lastSyncAt: null };
       cache = { expiresAt: Date.now() + CACHE_MS, payload };
-      return payload;
+      return safeCacheProjection(payload);
     }
     const [predictions, oddsSnapshots, teamTranslationRows, leagueTranslationRows] = await Promise.all([
       queryFixtureRelatedRows("ai_predictions?select=fixture_id,home_win_prob,draw_prob,away_win_prob,predicted_score,recommendation,confidence,updated_at", ids),
@@ -338,11 +365,9 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       const expectedAwayGoals = normalizeExpectedGoals(metadata?.expected_away_goals ?? metadata?.a) ?? null;
       const storedScorelines = normalizeScorelines(metadata?.top_scorelines);
       const sourceCode = typeof metadata?.s === "string" ? metadata.s : null;
-      const researchSource = typeof metadata?.research_source === "string"
-        ? metadata.research_source
-        : sourceCode === "英冠校準"
-          ? "英冠正式聯賽樣本＋聯賽平均及主場優勢校準"
-          : sourceCode === "隊史" ? "隊伍歷史攻防" : null;
+      const researchSource = sourceCode === "Q4"
+        ? "poisson-v4-shrink10-research（未校準；無市場融合）"
+        : "舊版研究來源未校準／未核實；不宣稱市場融合";
       const handicap = handicapByFixture.get(fixtureId);
       const handicap025 = handicap025ByFixture.get(fixtureId);
       const handicap075 = handicap075ByFixture.get(fixtureId);
@@ -394,7 +419,7 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
         leagueSampleMatches: normalizeSampleCount(metadata?.league_sample_matches),
         confidence: Math.max(0, Math.min(5, Number(prediction?.confidence) || 0)),
         predictionUpdatedAt: typeof prediction?.updated_at === "string" ? prediction.updated_at : null,
-        hasPrediction: !!prediction && homeWin !== null && draw !== null && awayWin !== null,
+        hasPrediction: fixture.status === "NS" && !!prediction && predictionIsFresh(prediction.updated_at, eventTime) && homeWin !== null && draw !== null && awayWin !== null && Math.abs(homeWin + draw + awayWin - 1) < 0.001,
         compactMarkets,
         topScorelines: storedScorelines.length === 3 ? storedScorelines : topScorelines(expectedHomeGoals, expectedAwayGoals),
         odds: oddsByFixture.get(fixtureId) ?? null,
@@ -414,11 +439,11 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       lastSyncAt,
     };
     cache = { expiresAt: Date.now() + CACHE_MS, payload };
-    return payload;
+    return safeCacheProjection(payload);
   } catch (error) {
     const payload: SupabaseUpcomingCache = { source: "Supabase cache", loadedAt, available: false, reason: error instanceof Error ? error.message : "unknown cache failure", fixtures: [] };
     cache = { expiresAt: Date.now() + 10_000, payload };
-    return payload;
+    return safeCacheProjection(payload);
   }
 }
 

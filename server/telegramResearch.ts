@@ -1,3 +1,4 @@
+import { predictionIsFresh } from "./predictionFreshness";
 import { timingSafeEqual } from "node:crypto";
 import type { Request, Response } from "express";
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
@@ -147,11 +148,11 @@ export function probabilityBars(values: { homeWin: number; draw: number; awayWin
 
 type OutcomeSnapshot = { homeWin: number; draw: number; awayWin: number };
 
-function hasCompleteCachedResearch(item: CachedUpcomingFixture): boolean {
+function hasCompleteCachedResearch(item: CachedUpcomingFixture, now = Date.now()): boolean {
   const outcomes = [item.homeWin, item.draw, item.awayWin];
   const totals = item.compactMarkets.find(row => row.market === "入球大細 2.5");
   const quote = item.handicapQuote;
-  return outcomes.every(value => Number.isFinite(value) && value >= 0 && value <= 1)
+  return item.hasPrediction && predictionIsFresh(item.predictionUpdatedAt, item.eventTime, now) && outcomes.every(value => Number.isFinite(value) && value >= 0 && value <= 1)
     && Boolean(totals && Number.isFinite(totals.probability))
     && Boolean(quote && Number.isFinite(quote.homeOdds) && Number.isFinite(quote.awayOdds))
     && item.topScorelines.length >= 3
@@ -193,7 +194,8 @@ export function formatLocalizedResearchCard(item: Pick<CachedUpcomingFixture, "l
     "---",
     `⚽️ 【${home}】 vs 【${away}】`,
     "---",
-    "📊 【資料來源】Dixon-Coles 模型 + HDA 賠率融合",
+    `📊 【資料來源】${item.researchSource || "來源未核實（不宣稱已校準或市場融合）"}`,
+    "⚠️ 研究百分比不是歷史命中率；資料不足時不應作高信心選擇。",
     item.researchSource?.includes("聯賽平均") || item.researchSource === "league-average"
       ? "🚨 【數據警告】目前僅使用聯賽平均，缺少兩隊獨立歷史攻防；不建議參考讓球盤。"
       : null,
@@ -248,7 +250,7 @@ export function formatCachedUpcoming(fixtures: CachedUpcomingFixture[], now = ne
   const end = start + 24 * 60 * 60_000;
   const upcoming = fixtures.filter(item => {
     const kickoff = new Date(item.eventTime).getTime();
-    return Number.isFinite(kickoff) && kickoff >= start && kickoff <= end && hasCompleteCachedResearch(item);
+    return Number.isFinite(kickoff) && kickoff >= start && kickoff <= end && hasCompleteCachedResearch(item, now.getTime());
   }).slice(0, 3);
   if (!upcoming.length) return "";
   return upcoming.map((item, index) => `${index + 1}. ${formatLocalizedResearchCard(item)}`).join("\n\n");
@@ -630,7 +632,7 @@ export function isKnownTeamAlias(value: string): boolean {
 export function formatTeamResearch(fixtures: CachedUpcomingFixture[], requestedTeam: string, now = new Date()): string {
   const query = normalizedTeamQuery(requestedTeam);
   const match = fixtures
-    .filter(item => new Date(item.eventTime).getTime() >= now.getTime())
+    .filter(item => new Date(item.eventTime).getTime() >= now.getTime() && item.hasPrediction && predictionIsFresh(item.predictionUpdatedAt, item.eventTime, now.getTime()))
     .filter(item => {
       const home = normalizeTeam(item.homeTeam);
       const away = normalizeTeam(item.awayTeam);
@@ -657,8 +659,9 @@ export function formatLiveTeamResearch(research: LiveTeamResearch): string {
     `⚽️ 【${home}】 vs 【${away}】`,
     "---",
     `📊 【資料來源】${source}`,
+    "⚠️ 未校準研究；不足5/5/20場有效樣本會停止預測；不是保證命中率。",
     research.sourceMode === "league-average" ? "🚨 【數據警告】僅使用聯賽平均，缺少兩隊獨立歷史攻防；不建議參考讓球盤。" : null,
-    research.calibrationLabel ? `⚙️ 【校準】${research.calibrationLabel}` : null,
+    research.calibrationLabel ? `⚙️ 【模型版本／限制】${research.calibrationLabel}` : null,
     `🛡️ 【雙重機率】1X: ${percent(research.outcomes.homeWin + research.outcomes.draw)} | X2: ${percent(research.outcomes.draw + research.outcomes.awayWin)}`,
     "⚖️ 【實時讓球盤】資料不足（live fallback 沒有已驗證的實時盤口）",
     `🎯 【模型勝率預測】主勝 ${percent(research.outcomes.homeWin)} | 和局 ${percent(research.outcomes.draw)} | 客勝 ${percent(research.outcomes.awayWin)}`,

@@ -1,3 +1,4 @@
+import { estimateQualityGoals } from "./qualityPoisson";
 import { ENV } from "./_core/env";
 import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, outcomeProbabilities, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
 
@@ -25,6 +26,8 @@ export type LiveTeamResearch = {
   topScorelines: ScorelineProbability[];
   sourceMode: "team-history" | "league-average";
   calibrationLabel?: string;
+  modelVersion?: string;
+  quality?: ReturnType<typeof estimateQualityGoals>;
 };
 
 export function hasCompleteLiveResearch(research: LiveTeamResearch): boolean {
@@ -110,7 +113,7 @@ function leagueAverage(history: ApiFixture[]): number | null {
 
 function modelHandicapRows(homeMean: number, awayMean: number, outcomes: { homeWin: number; awayWin: number }): CompactMarketRow[] {
   const side = outcomes.homeWin >= outcomes.awayWin ? "Home" : "Away";
-  const sign = side === "Home" ? "-" : "+";
+  const sign = "-"; // Symmetric favourite reference, never a market quote.
   const lineFor = (line: string) => `${side} ${sign}${line}`;
   return [
     ["讓球盤 (Handicap)", lineFor("0.5")],
@@ -133,18 +136,10 @@ export function deriveLivePoissonResearch(fixture: ApiFixture, homeHistory: ApiF
   const resolvedHomeId = typeof homeId === "number" ? homeId : null;
   const resolvedAwayId = typeof awayId === "number" ? awayId : null;
   if (resolvedHomeId === null || resolvedAwayId === null || !Number.isInteger(resolvedHomeId) || !Number.isInteger(resolvedAwayId) || !homeTeam || !awayTeam) return null;
-  const baseline = leagueAverage(leagueHistory);
-  if (baseline === null) return null;
-  const home = teamGoals(homeHistory, resolvedHomeId);
-  const away = teamGoals(awayHistory, resolvedAwayId);
-  const homeFor = home.matches >= 2 ? home.goalsFor / home.matches : baseline;
-  const homeAgainst = home.matches >= 2 ? home.goalsAgainst / home.matches : baseline;
-  const awayFor = away.matches >= 2 ? away.goalsFor / away.matches : baseline;
-  const awayAgainst = away.matches >= 2 ? away.goalsAgainst / away.matches : baseline;
+  const quality = estimateQualityGoals(fixture, homeHistory, awayHistory, leagueHistory);
+  if (!quality) return null;
+  const { homeMean, awayMean } = quality;
   const championshipCalibration = fixture.league?.id === 40;
-  const homeAdvantage = championshipCalibration ? 1.08 : 1.08;
-  const homeMean = clampMean(baseline * (homeFor / baseline) * (awayAgainst / baseline) * homeAdvantage);
-  const awayMean = clampMean(baseline * (awayFor / baseline) * (homeAgainst / baseline));
   const outcomes = outcomeProbabilities(homeMean, awayMean);
   if (!outcomes) return null;
   const outcome = highestOutcome(outcomes.homeWin, outcomes.draw, outcomes.awayWin);
@@ -156,8 +151,10 @@ export function deriveLivePoissonResearch(fixture: ApiFixture, homeHistory: ApiF
     outcomes,
     compactMarkets: [outcome, ...mainstreamTotals(homeMean, awayMean), ...modelHandicapRows(homeMean, awayMean, outcomes)].filter((row): row is CompactMarketRow => row !== null),
     topScorelines: topScorelines(homeMean, awayMean),
-    sourceMode: home.matches >= 2 && away.matches >= 2 ? "team-history" : "league-average",
-    calibrationLabel: championshipCalibration ? "英冠正式聯賽樣本＋聯賽平均及主場優勢校準" : undefined,
+    sourceMode: "team-history",
+    modelVersion: quality.modelVersion,
+    quality,
+    calibrationLabel: `${quality.modelVersion}；未校準研究；樣本 ${quality.homeMatches}/${quality.awayMatches}/${quality.leagueMatches}；10場先驗收縮；無市場融合`,
   };
 }
 
@@ -174,37 +171,11 @@ async function researchForFixture(fixture: ApiFixture): Promise<LiveTeamResearch
   const leagueId = fixture.league?.id;
   const season = fixture.league?.season;
   if (!Number.isInteger(homeId) || !Number.isInteger(awayId) || !Number.isInteger(leagueId) || !Number.isInteger(season)) return null;
-  const resolvedSeason = Number(season);
-  if (leagueId !== 40) {
-    const [homeHistory, awayHistory, leagueHistory] = await Promise.all([
-      apiFootball<ApiFixture>(`/fixtures?team=${homeId}&last=10&timezone=UTC`),
-      apiFootball<ApiFixture>(`/fixtures?team=${awayId}&last=10&timezone=UTC`),
-      apiFootball<ApiFixture>(`/fixtures?league=${leagueId}&season=${resolvedSeason}&last=40&timezone=UTC`),
-    ]);
-    return deriveLivePoissonResearch(fixture, homeHistory, awayHistory, leagueHistory);
-  }
-
-  // Newly relegated/promoted Championship teams can have no rows in the
-  // previous Championship season. Prefer the current season and fall back
-  // independently per team to the previous season only when needed.
-  const previousSeason = resolvedSeason > 0 ? resolvedSeason - 1 : resolvedSeason;
-  const [currentHome, currentAway, currentLeague] = await Promise.all([
-    apiFootball<ApiFixture>(`/fixtures?team=${homeId}&league=${leagueId}&season=${resolvedSeason}&timezone=UTC`),
-    apiFootball<ApiFixture>(`/fixtures?team=${awayId}&league=${leagueId}&season=${resolvedSeason}&timezone=UTC`),
-    apiFootball<ApiFixture>(`/fixtures?league=${leagueId}&season=${resolvedSeason}&timezone=UTC`),
+  const [homeHistory, awayHistory, leagueHistory] = await Promise.all([
+    apiFootball<ApiFixture>(`/fixtures?team=${homeId}&league=${leagueId}&season=${season}&last=10&timezone=UTC`),
+    apiFootball<ApiFixture>(`/fixtures?team=${awayId}&league=${leagueId}&season=${season}&last=10&timezone=UTC`),
+    apiFootball<ApiFixture>(`/fixtures?league=${leagueId}&season=${season}&last=200&timezone=UTC`),
   ]);
-  const needsPrevious = (rows: ApiFixture[]) => rows.filter(row => FINISHED.has(row.fixture?.status?.short ?? "")).length < 2;
-  if (!needsPrevious(currentHome) && !needsPrevious(currentAway) && !needsPrevious(currentLeague)) {
-    return deriveLivePoissonResearch(fixture, currentHome.slice(-10), currentAway.slice(-10), currentLeague.slice(-40));
-  }
-  const [previousHome, previousAway, previousLeague] = await Promise.all([
-    needsPrevious(currentHome) ? apiFootball<ApiFixture>(`/fixtures?team=${homeId}&league=${leagueId}&season=${previousSeason}&timezone=UTC`) : Promise.resolve([]),
-    needsPrevious(currentAway) ? apiFootball<ApiFixture>(`/fixtures?team=${awayId}&league=${leagueId}&season=${previousSeason}&timezone=UTC`) : Promise.resolve([]),
-    needsPrevious(currentLeague) ? apiFootball<ApiFixture>(`/fixtures?league=${leagueId}&season=${previousSeason}&timezone=UTC`) : Promise.resolve([]),
-  ]);
-  const homeHistory = (needsPrevious(currentHome) ? previousHome : currentHome).slice(-10);
-  const awayHistory = (needsPrevious(currentAway) ? previousAway : currentAway).slice(-10);
-  const leagueHistory = (needsPrevious(currentLeague) ? previousLeague : currentLeague).slice(-40);
   return deriveLivePoissonResearch(fixture, homeHistory, awayHistory, leagueHistory);
 }
 
@@ -221,7 +192,7 @@ export async function fetchLiveTeamResearch(teamName: string): Promise<LiveTeamR
 
 export async function fetchLiveUpcomingResearch(limit = 3): Promise<LiveTeamResearch[]> {
   const fixtures = await apiFootball<ApiFixture>("/fixtures?next=30&timezone=UTC");
-  const candidates = fixtures.filter(row => POPULAR_LEAGUE_IDS.has(row.league?.id ?? -1));
+  const candidates = fixtures.filter(row => POPULAR_LEAGUE_IDS.has(row.league?.id ?? -1) && row.fixture?.status?.short === "NS" && Date.parse(row.fixture?.date ?? "") > Date.now());
   const results: LiveTeamResearch[] = [];
   for (const candidate of candidates.slice(0, Math.max(limit * 5, 15))) {
     const research = await researchForFixture(candidate).catch(() => null);

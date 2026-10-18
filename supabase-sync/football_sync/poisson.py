@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
+from football_sync.quality import estimate_goals
 
 FINISHED_STATUSES = {"FT", "AET", "PEN"}
 MIN_BASIC_HISTORY = 2
@@ -108,18 +109,15 @@ def poisson_probability(k: int, mean: float) -> float:
 def predict_fixture(fixture: dict[str, Any], home_history: list[dict[str, Any]], away_history: list[dict[str, Any]], generated_at: datetime, league_history: list[dict[str, Any]] | None = None) -> PoissonPrediction:
     league_id = fixture.get("league_id")
     season = fixture.get("season")
-    if not isinstance(league_id, int) or not isinstance(season, int):
+    if type(league_id) is not int or type(season) is not int or league_id <= 0 or season <= 0:
         raise InsufficientHistory("fixture is missing a verified competition or season")
-    home = team_metrics(home_history, fixture["home_team_id"], league_id=league_id, season=season)
-    away = team_metrics(away_history, fixture["away_team_id"], league_id=league_id, season=season)
+    try:
+        quality = estimate_goals(fixture, home_history, away_history, league_history or [], generated_at)
+    except (ValueError, KeyError) as exc:
+        raise InsufficientHistory(str(exc)) from exc
     championship = league_id == 40
-    calibration = league_metrics(league_history or [], league_id=league_id, season=season) if championship else None
-    baseline = max(0.75, ((calibration.home_goals + calibration.away_goals) / 2) if calibration else (home.goals_for + home.goals_against + away.goals_for + away.goals_against) / 4)
-    home_advantage = (calibration.home_goals / baseline) if calibration else 1.08
-    away_adjustment = (calibration.away_goals / baseline) if calibration else 1.0
-    home_lambda = min(4.5, max(0.2, baseline * (home.goals_for / baseline) * (away.goals_against / baseline) * home_advantage))
-    away_lambda = min(4.5, max(0.2, baseline * (away.goals_for / baseline) * (home.goals_against / baseline) * away_adjustment))
-    grid = {(h, a): poisson_probability(h, home_lambda) * poisson_probability(a, away_lambda) for h in range(0, 9) for a in range(0, 9)}
+    home_lambda, away_lambda = quality["home_mean"], quality["away_mean"]
+    grid = {(h, a): poisson_probability(h, home_lambda) * poisson_probability(a, away_lambda) for h in range(0, 25) for a in range(0, 25)}
     normalizer = sum(grid.values())
     grid = {score: probability / normalizer for score, probability in grid.items()}
     home_win = sum(probability for (h, a), probability in grid.items() if h > a)
@@ -131,22 +129,18 @@ def predict_fixture(fixture: dict[str, Any], home_history: list[dict[str, Any]],
     btts = sum(probability for (h, a), probability in grid.items() if h > 0 and a > 0)
     labels = [("主隊傾向", home_win), ("和局傾向", draw), ("客隊傾向", away_win)]
     lean, top_probability = max(labels, key=lambda value: value[1])
-    sample = min(home.matches, away.matches)
+    sample = min(quality["home_matches"], quality["away_matches"])
     # This model is a compact research baseline, not a calibrated market-probability
     # model.  Data availability must never be presented as predictive confidence.
     evidence_stars = 2 if sample >= 6 else 1
-    warnings = ["勝平負、大小球與BTTS均為未校準Poisson研究值；不可解讀為公平賠率、EV或命中率。"]
-    if sample < 3:
-        warnings.append("基礎Poisson僅使用每隊至少兩場同聯賽同賽季完場資料；輸出僅作低證據研究參考。")
-    elif sample < 6:
-        warnings.append("同聯賽賽季近況樣本偏少；輸出僅作低證據研究參考。")
-    elif sample < 10:
-        warnings.append("同聯賽賽季近況少於10場；未納入完整主客場、xG、陣容或市場校準。")
+    warnings = ["未校準Poisson研究值；採用同聯賽同賽季、賽前時間截點及10場先驗收縮。百分比不是已驗證命中率；未作市場融合。"]
+    if sample < 6:
+        warnings.append("有效樣本僅5場；即使收縮後仍屬低證據，禁止當作高信心命中率。")
     if championship:
         warnings.append("英冠研究僅採用API-Football同聯賽正式賽資料，已排除友誼賽；聯賽平均與主場優勢為基礎校準，並非已驗證的完整校準模型。")
     return PoissonPrediction(
         api_fixture_id=fixture["api_fixture_id"],
-        model_version=("poisson-v3-championship-basic-research" if sample < 3 else "poisson-v3-championship-research") if championship else ("poisson-v2-basic-league-research" if sample < 3 else "poisson-v2-league-research"),
+        model_version=quality["model_version"],
         generated_at=generated_at.isoformat(),
         home_win_probability=round(home_win, 6),
         draw_probability=round(draw, 6),
@@ -160,7 +154,7 @@ def predict_fixture(fixture: dict[str, Any], home_history: list[dict[str, Any]],
         research_lean=lean,
         evidence_stars=evidence_stars,
         data_warning=" ".join(warnings),
-        home_sample_matches=home.matches,
-        away_sample_matches=away.matches,
-        league_sample_matches=calibration.matches if calibration else None,
+        home_sample_matches=quality["home_matches"],
+        away_sample_matches=quality["away_matches"],
+        league_sample_matches=quality["league_matches"],
     )
