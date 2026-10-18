@@ -419,7 +419,7 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
         leagueSampleMatches: normalizeSampleCount(metadata?.league_sample_matches),
         confidence: Math.max(0, Math.min(5, Number(prediction?.confidence) || 0)),
         predictionUpdatedAt: typeof prediction?.updated_at === "string" ? prediction.updated_at : null,
-        hasPrediction: fixture.status === "NS" && !!prediction && predictionIsFresh(prediction.updated_at, eventTime) && homeWin !== null && draw !== null && awayWin !== null && Math.abs(homeWin + draw + awayWin - 1) < 0.001,
+        hasPrediction: sourceCode === "Q4" && fixture.status === "NS" && !!prediction && predictionIsFresh(prediction.updated_at, eventTime) && homeWin !== null && draw !== null && awayWin !== null && Math.abs(homeWin + draw + awayWin - 1) < 0.001,
         compactMarkets,
         topScorelines: storedScorelines.length === 3 ? storedScorelines : topScorelines(expectedHomeGoals, expectedAwayGoals),
         odds: oddsByFixture.get(fixtureId) ?? null,

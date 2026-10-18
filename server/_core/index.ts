@@ -42,7 +42,8 @@ async function startServer() {
   // External Telegram updates are authenticated with Telegram's webhook secret.
   app.post("/api/integrations/telegram/webhook", (req, res) => {
     void handleTelegramWebhook(req, res).catch(error => {
-      res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+      console.error("Telegram webhook processing failed", error instanceof Error ? error.name : "unknown");
+      res.status(500).json({ error: "webhook processing failed" });
     });
   });
   // Heartbeat callbacks authenticate their cron identity inside the handler.
