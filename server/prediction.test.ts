@@ -82,6 +82,13 @@ describe("prediction scope guard", () => {
     )).not.toThrow();
   });
 
+  it("permits a validated Eredivisie pair", () => {
+    expect(() => validateInferenceScope(
+      { leagueCode: "NED1", homeTeam: "Ajax", awayTeam: "PSV Eindhoven" },
+      ["Ajax", "PSV Eindhoven", "Feyenoord"],
+    )).not.toThrow();
+  });
+
   it("rejects a cup or cross-league team before Python inference", () => {
     expect(() => validateInferenceScope(
       { leagueCode: "MLS", homeTeam: "Los Angeles FC", awayTeam: "Queretaro" },

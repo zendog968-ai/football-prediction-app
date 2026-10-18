@@ -29,6 +29,7 @@ describe("release asset fallback", () => {
             model: "soccer_predict_model.pkl",
             performance: "model_performance_filters.json",
           },
+          validated_leagues: ["EPL", "NED1"],
         }),
       })
       .mockRejectedValueOnce(new Error("pointer unavailable"));
@@ -39,6 +40,7 @@ describe("release asset fallback", () => {
     const retained = await getReleaseAssets(origin);
 
     expect(verified.version).toBe("data-20260813T224404Z-86a3231");
+    expect(verified.validatedLeagues).toEqual(["EPL", "NED1"]);
     expect(retained).toEqual(verified);
   });
 
@@ -49,5 +51,6 @@ describe("release asset fallback", () => {
 
     expect(assets.version).toBe("managed-fallback-v2-odds");
     expect(assets.database).toContain(`${origin}/manus-storage/`);
+    expect(assets.validatedLeagues).not.toContain("NED1");
   });
 });
