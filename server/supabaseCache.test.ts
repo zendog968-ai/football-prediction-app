@@ -16,7 +16,7 @@ describe("英冠Supabase研究卡快取", () => {
       json: async () => {
         const url = String(input);
         if (url.includes("fixtures?")) return [{ fixture_id: 1563085, league_name: "Championship", event_time: "2026-08-15T14:00:00Z", home_team: "Bristol City", away_team: "Millwall", status: "NS", updated_at: "2026-08-15T10:00:00Z" }];
-        if (url.includes("ai_predictions?")) return [{ fixture_id: 1563085, home_win_prob: 0.23, draw_prob: 0.32, away_win_prob: 0.45, predicted_score: "0-1", recommendation: "\n[AURELIA_META]{\"h\":0.7183,\"a\":1.1175,\"s\":\"Q4\"}", confidence: 2, updated_at: "2026-08-15T10:00:00Z" }];
+        if (url.includes("ai_predictions?")) return [{ fixture_id: 1563085, home_win_prob: 0.23, draw_prob: 0.32, away_win_prob: 0.45, predicted_score: "0-1", recommendation: "\n[AURELIA_META]{\"q4\":[0.7183,1.1175,10,10,105]}", confidence: 2, updated_at: "2026-08-15T10:00:00Z" }];
         return [];
       },
     }));
@@ -28,6 +28,13 @@ describe("英冠Supabase研究卡快取", () => {
     expect(card?.compactMarkets.some(item => item.market === "讓球盤 (Handicap)")).toBe(false);
     expect(card?.handicapQuote).toBeNull();
     expect(card?.topScorelines).toHaveLength(3);
+    expect(card?.homeSampleMatches).toBe(10);
+    expect(card?.awaySampleMatches).toBe(10);
+    expect(card?.leagueSampleMatches).toBe(105);
+    expect(card?.hasPrediction).toBe(true);
+    expect(card?.awayWin).toBe(.45);
+    expect(card?.calibrationStatus).toBe("uncalibrated");
+    expect(card?.confidence).toBe(0);
   });
 });
 

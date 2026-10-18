@@ -1,4 +1,6 @@
 import { estimateQualityGoals } from "./qualityPoisson";
+import { RESEARCH_MODEL_VERSION } from "./qualityPoisson";
+import { hasSufficientResearchSamples } from "./researchPolicy";
 import { ENV } from "./_core/env";
 import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, outcomeProbabilities, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
 import { ADDITIONAL_LIVE_RESEARCH_LEAGUES, leagueSeasonFixturesPath, selectLiveUpcomingFixtures } from "./liveResearchData";
@@ -34,7 +36,11 @@ export function hasCompleteLiveResearch(research: LiveTeamResearch): boolean {
   const outcomes = [research.outcomes.homeWin, research.outcomes.draw, research.outcomes.awayWin];
   const totals = research.compactMarkets.find(item => item.market === "入球大細 2.5");
   const handicap = research.compactMarkets.find(item => item.market === "讓球盤 (Handicap)");
-  return outcomes.every(value => Number.isFinite(value) && value >= 0 && value <= 1)
+  return research.modelVersion === RESEARCH_MODEL_VERSION
+    && hasSufficientResearchSamples(research.quality?.homeMatches, research.quality?.awayMatches, research.quality?.leagueMatches)
+    && research.sourceMode === "team-history"
+    && outcomes.every(value => Number.isFinite(value) && value >= 0 && value <= 1)
+    && Math.abs(outcomes.reduce((sum, value) => sum + value, 0) - 1) < 0.001
     && Boolean(totals && Number.isFinite(totals.probability))
     && Boolean(handicap && Number.isFinite(handicap.probability))
     && research.topScorelines.length >= 3

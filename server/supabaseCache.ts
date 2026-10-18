@@ -1,4 +1,5 @@
 import { predictionIsFresh, snapshotIsFresh } from "./predictionFreshness";
+import { hasSufficientResearchSamples, RESEARCH_POLICY } from "./researchPolicy";
 import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
 import { ENV } from "./_core/env";
 
@@ -36,6 +37,9 @@ export type CachedUpcomingFixture = {
   homeSampleMatches?: number | null;
   awaySampleMatches?: number | null;
   leagueSampleMatches?: number | null;
+  calibrationStatus?: "uncalibrated";
+  highConfidenceEnabled?: false;
+  bettingAdviceEnabled?: false;
   confidence: number;
   predictionUpdatedAt: string | null;
   hasPrediction: boolean;
@@ -170,9 +174,21 @@ function parseResearchMetadata(value: unknown) {
   const markerIndex = recommendation.indexOf(marker);
   if (markerIndex < 0) return { recommendation: recommendation || null, metadata: null as Record<string, unknown> | null };
   try {
+    const parsed = JSON.parse(recommendation.slice(markerIndex + marker.length)) as Record<string, unknown>;
+    const tuple = parsed?.q4;
+    const metadata: Record<string, unknown> = Array.isArray(tuple) && tuple.length === 5
+      && tuple.slice(0, 2).every(value => typeof value === "number" && Number.isFinite(value) && value >= 0.2 && value <= 4.5)
+      && tuple.slice(2).every(value => typeof value === "number" && Number.isSafeInteger(value) && value >= 0)
+      ? { s: "Q4", c: "u", h: tuple[0], a: tuple[1], home_sample_matches: tuple[2], away_sample_matches: tuple[3], league_sample_matches: tuple[4] }
+      : parsed;
+    if (metadata && Array.isArray(metadata.n) && metadata.n.length === 3) {
+      metadata.home_sample_matches = metadata.home_sample_matches ?? metadata.n[0];
+      metadata.away_sample_matches = metadata.away_sample_matches ?? metadata.n[1];
+      metadata.league_sample_matches = metadata.league_sample_matches ?? metadata.n[2];
+    }
     return {
       recommendation: recommendation.slice(0, markerIndex) || null,
-      metadata: JSON.parse(recommendation.slice(markerIndex + marker.length)) as Record<string, unknown>,
+      metadata,
     };
   } catch {
     return { recommendation: recommendation.slice(0, markerIndex) || null, metadata: null as Record<string, unknown> | null };
@@ -266,7 +282,8 @@ async function queryOptionalTranslationRows(table: string): Promise<Array<Record
 
 export function safeCacheProjection(payload: SupabaseUpcomingCache, now = Date.now()): SupabaseUpcomingCache {
   return { ...payload, fixtures: payload.fixtures.map(row => {
-    const fresh = row.hasPrediction && predictionIsFresh(row.predictionUpdatedAt, row.eventTime, now);
+    const fresh = row.hasPrediction && predictionIsFresh(row.predictionUpdatedAt, row.eventTime, now)
+      && hasSufficientResearchSamples(row.homeSampleMatches, row.awaySampleMatches, row.leagueSampleMatches);
     const quote = row.handicapQuote;
     const odds = row.odds;
     return {
@@ -275,9 +292,12 @@ export function safeCacheProjection(payload: SupabaseUpcomingCache, now = Date.n
       draw: fresh ? row.draw : Number.NaN,
       awayWin: fresh ? row.awayWin : Number.NaN,
       predictedScore: fresh ? row.predictedScore : null,
-      recommendation: fresh ? row.recommendation : null,
+      recommendation: null, // Never surface free-text betting signals from stored legacy rows.
       researchSource: fresh ? row.researchSource : "預測過期或不完整；不顯示百分比",
-      confidence: fresh ? row.confidence : 0,
+      calibrationStatus: RESEARCH_POLICY.calibrationStatus,
+      highConfidenceEnabled: false as const,
+      bettingAdviceEnabled: false as const,
+      confidence: 0, // The legacy star field is not calibrated confidence.
       hasPrediction: fresh,
       compactMarkets: fresh ? row.compactMarkets.filter(m => !(m.market.startsWith("亞洲讓球") || m.market === "讓球盤 (Handicap)") || Boolean(quote && snapshotIsFresh(quote.capturedAt, now))) : [],
       topScorelines: fresh ? row.topScorelines : [],

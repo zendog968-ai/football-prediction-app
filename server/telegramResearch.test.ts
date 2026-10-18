@@ -99,6 +99,9 @@ describe("Telegram系統指令", () => {
       confidence: 4,
       predictionUpdatedAt: "2026-08-14T23:00:00Z",
       hasPrediction: true,
+      homeSampleMatches: 10,
+      awaySampleMatches: 10,
+      leagueSampleMatches: 105,
       compactMarkets: [
         { market: "主客和 (1X2)", selection: "主勝", probability: 0.62 },
         { market: "入球大細 1.5", selection: "大 1.5", probability: 0.78 },
@@ -124,6 +127,9 @@ describe("Telegram系統指令", () => {
     expect(message).toContain("【大小球】大 2.5 (56.0%) | 小 2.5 (44.0%)");
     expect(message).toContain("💡 【最高波膽 Top 3】");
     expect(message).toContain("1. 2-1 —— 12.0%");
+    expect(message).toContain("高信心篩選停用");
+    expect(message).toContain("投注建議與EV停用");
+    expect(message).toContain("主隊 10 場｜客隊 10 場｜聯賽 105 場");
   });
 
   it("嚴格使用香港時區並在翻譯表只有台灣繁中時安全回退", () => {
@@ -146,10 +152,11 @@ describe("Telegram系統指令", () => {
     expect(card).toContain("API-Football Asian Handicap [Home -0.5 @1.90 / Away +0.5 @1.94]");
   });
 
-  it("/upcoming跳過缺少勝率、2.5大小球、讓球或Top 3波膽的已同步賽事", () => {
+  it("/upcoming跳過缺少機率或有效樣本的賽事，但不要求市場盤口才准許研究", () => {
     const base = {
       hasPrediction: true, predictionUpdatedAt: "2026-08-14T23:00:00Z",
       fixtureId: 202, leagueName: "MLS", eventTime: "2026-08-15T20:00:00Z", homeTeam: "Example Home", awayTeam: "Example Away",
+      homeSampleMatches: 10, awaySampleMatches: 10, leagueSampleMatches: 105,
       homeWin: 0.6, draw: 0.22, awayWin: 0.18,
       compactMarkets: [{ market: "入球大細 2.5", selection: "大 2.5", probability: 0.55 }],
       handicapQuote: { source: "API-Football Asian Handicap", homeSelection: "Home -0.5", homeOdds: 1.9, awaySelection: "Away +0.5", awayOdds: 1.92, capturedAt: null },
@@ -159,6 +166,11 @@ describe("Telegram系統指令", () => {
     const text = formatCachedUpcoming([incomplete, base], new Date("2026-08-15T00:00:00Z"));
     expect(text).not.toContain("暫無可驗證");
     expect(text).toContain("⚽️ 【Example Home】 vs 【Example Away】");
+    const noQuote = formatCachedUpcoming([{ ...base, handicapQuote: null }], new Date("2026-08-15T00:00:00Z"));
+    expect(noQuote).toContain("主勝 60.0%");
+    expect(noQuote).toContain("沒有完整主客兩邊實際盤口");
+    expect(formatCachedUpcoming([{ ...base, homeSampleMatches: null }], new Date("2026-08-15T00:00:00Z"))).toBe("");
+    expect(formatCachedUpcoming([{ ...base, homeSampleMatches: 4 }], new Date("2026-08-15T00:00:00Z"))).toBe("");
   });
 
   it("在Telegram標題以繁體中文加英文原名顯示已知球隊，未知隊名保留原文", () => {
@@ -310,11 +322,11 @@ describe("Telegram系統指令", () => {
     expect(candidates.map(item => item.fixtureId)).toEqual([1, 2, 3]);
   });
 
-  it("每日精選只保留最多三場完整模型、非高風險候選並按機率排序", () => {
+  it("每日研究最多三場，按样本品質排序，不按機率或舊風險標籤選高信心", () => {
     const candidate = (probability: number, risk: "low" | "medium" | "high", samples = 30, teamSamples = 5) => ({ prediction: { lean: { probability, risk_level: risk }, diagnostics: { dc_available: true, dc_history_match_count: samples, home_history_matches_used: teamSamples, away_history_matches_used: teamSamples } } }) as never;
-    const selected = rankDailyPicks([candidate(0.72, "medium"), candidate(0.81, "low"), candidate(0.64, "low"), candidate(0.6, "high"), candidate(0.85, "low", 19)]);
+    const selected = rankDailyPicks([candidate(0.91, "low", 30, 5), candidate(0.51, "high", 105, 10), candidate(0.42, "medium", 80, 8), candidate(0.6, "low", 19, 10)]);
     expect(selected).toHaveLength(3);
-    expect(selected.map(item => item.prediction.lean.probability)).toEqual([0.81, 0.72, 0.64]);
+    expect(selected.map(item => item.prediction.lean.probability)).toEqual([0.51, 0.42, 0.91]);
   });
 
   it("每日摘要在嚴格候選不足三場時，不以低樣本候選補滿清單", () => {
@@ -325,8 +337,16 @@ describe("Telegram系統指令", () => {
 
   it("每日摘要折疊缺少主客隊獨立樣本的候選", () => {
     const candidate = (probability: number, teamSamples: number) => ({ prediction: { lean: { probability, risk_level: "medium" }, diagnostics: { dc_available: true, dc_history_match_count: 40, home_history_matches_used: teamSamples, away_history_matches_used: teamSamples } } }) as never;
-    expect(rankDailyPicks([candidate(0.91, 1), candidate(0.72, 2)])).toHaveLength(1);
-    expect(rankDailyPicks([candidate(0.91, 1), candidate(0.72, 2)])[0]?.prediction.lean.probability).toBe(0.72);
+    expect(rankDailyPicks([candidate(0.91, 1), candidate(0.81, 4), candidate(0.72, 5)])).toHaveLength(1);
+    expect(rankDailyPicks([candidate(0.91, 1), candidate(0.81, 4), candidate(0.72, 5)])[0]?.prediction.lean.probability).toBe(0.72);
+  });
+
+  it("相同品質按開賽時間而不是概率排序", () => {
+    const candidates = [0.91, 0.41].map((probability, index) => ({
+      kickoffAt: new Date(index === 0 ? "2026-10-20T10:00:00Z" : "2026-10-20T09:00:00Z"),
+      prediction: { lean: { probability, risk_level: "low" }, diagnostics: { dc_available: true, dc_history_match_count: 105, home_history_matches_used: 10, away_history_matches_used: 10 } },
+    })) as never;
+    expect(rankDailyPicks(candidates).map(item => item.prediction.lean.probability)).toEqual([0.41, 0.91]);
   });
 
   it("只要有未來24小時fixture就列出，部分模型與盤口會以基礎分析而非暫無賽事呈現", () => {

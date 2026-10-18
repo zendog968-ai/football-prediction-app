@@ -9,6 +9,9 @@ from football_sync.quality import estimate_goals
 
 FINISHED_STATUSES = {"FT", "AET", "PEN"}
 MIN_BASIC_HISTORY = 2
+RESEARCH_MODE = "poisson_research"
+CALIBRATION_STATUS = "uncalibrated"
+RESEARCH_SOURCE = "API-Football FT; same league/season; pre-kickoff cutoff; shrinkage prior=10"
 
 
 class InsufficientHistory(ValueError):
@@ -49,6 +52,9 @@ class PoissonPrediction:
     home_sample_matches: int
     away_sample_matches: int
     league_sample_matches: int | None
+    research_mode: str
+    calibration_status: str
+    research_source: str
 
     def to_row(self) -> dict[str, Any]:
         row = asdict(self)
@@ -115,7 +121,6 @@ def predict_fixture(fixture: dict[str, Any], home_history: list[dict[str, Any]],
         quality = estimate_goals(fixture, home_history, away_history, league_history or [], generated_at)
     except (ValueError, KeyError) as exc:
         raise InsufficientHistory(str(exc)) from exc
-    championship = league_id == 40
     home_lambda, away_lambda = quality["home_mean"], quality["away_mean"]
     grid = {(h, a): poisson_probability(h, home_lambda) * poisson_probability(a, away_lambda) for h in range(0, 25) for a in range(0, 25)}
     normalizer = sum(grid.values())
@@ -129,15 +134,14 @@ def predict_fixture(fixture: dict[str, Any], home_history: list[dict[str, Any]],
     btts = sum(probability for (h, a), probability in grid.items() if h > 0 and a > 0)
     labels = [("主隊傾向", home_win), ("和局傾向", draw), ("客隊傾向", away_win)]
     lean, top_probability = max(labels, key=lambda value: value[1])
-    sample = min(quality["home_matches"], quality["away_matches"])
-    # This model is a compact research baseline, not a calibrated market-probability
-    # model.  Data availability must never be presented as predictive confidence.
-    evidence_stars = 2 if sample >= 6 else 1
-    warnings = ["未校準Poisson研究值；採用同聯賽同賽季、賽前時間截點及10場先驗收縮。百分比不是已驗證命中率；未作市場融合。"]
-    if sample < 6:
-        warnings.append("有效樣本僅5場；即使收縮後仍屬低證據，禁止當作高信心命中率。")
-    if championship:
-        warnings.append("英冠研究僅採用API-Football同聯賽正式賽資料，已排除友誼賽；聯賽平均與主場優勢為基礎校準，並非已驗證的完整校準模型。")
+    # `confidence` is a required legacy destination column.  Keep its only valid
+    # neutral value rather than turn sample availability into a high-confidence
+    # filter or claim.  Exact sample counts travel as separate research metadata.
+    evidence_stars = 1
+    warnings = [
+        "未校準Poisson研究值：不是校準機率，未進行前瞻驗證；不可解讀為賠率、EV、投注或高信心建議。",
+        "來源：API-Football；僅同聯賽同賽季FT完場資料，以開賽前時間截點過濾，並採10場先驗收縮。",
+    ]
     return PoissonPrediction(
         api_fixture_id=fixture["api_fixture_id"],
         model_version=quality["model_version"],
@@ -157,4 +161,7 @@ def predict_fixture(fixture: dict[str, Any], home_history: list[dict[str, Any]],
         home_sample_matches=quality["home_matches"],
         away_sample_matches=quality["away_matches"],
         league_sample_matches=quality["league_matches"],
+        research_mode=RESEARCH_MODE,
+        calibration_status=CALIBRATION_STATUS,
+        research_source=RESEARCH_SOURCE,
     )

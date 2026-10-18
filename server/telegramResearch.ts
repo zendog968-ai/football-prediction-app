@@ -1,5 +1,6 @@
 import { buildTelegramWebhookUrl, formatTelegramRuntimeHeader } from "./telegramWebhookConfig";
 import { predictionIsFresh } from "./predictionFreshness";
+import { formatResearchSamples, hasSufficientResearchSamples, RESEARCH_POLICY_NOTICE } from "./researchPolicy";
 import { timingSafeEqual } from "node:crypto";
 import type { Request, Response } from "express";
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
@@ -152,10 +153,10 @@ type OutcomeSnapshot = { homeWin: number; draw: number; awayWin: number };
 function hasCompleteCachedResearch(item: CachedUpcomingFixture, now = Date.now()): boolean {
   const outcomes = [item.homeWin, item.draw, item.awayWin];
   const totals = item.compactMarkets.find(row => row.market === "入球大細 2.5");
-  const quote = item.handicapQuote;
   return item.hasPrediction && predictionIsFresh(item.predictionUpdatedAt, item.eventTime, now) && outcomes.every(value => Number.isFinite(value) && value >= 0 && value <= 1)
+    && Math.abs(item.homeWin + item.draw + item.awayWin - 1) < 0.001
+    && hasSufficientResearchSamples(item.homeSampleMatches, item.awaySampleMatches, item.leagueSampleMatches)
     && Boolean(totals && Number.isFinite(totals.probability))
-    && Boolean(quote && Number.isFinite(quote.homeOdds) && Number.isFinite(quote.awayOdds))
     && item.topScorelines.length >= 3
     && item.topScorelines.slice(0, 3).every(scoreline => Boolean(scoreline.score) && Number.isFinite(scoreline.probability));
 }
@@ -182,7 +183,7 @@ function displayHandicapQuote(quote: CachedHandicapQuote | null | undefined): st
   return `⚖️ 【實時讓球盤】${source} [${quote.homeSelection} @${quote.homeOdds.toFixed(2)} / ${quote.awaySelection} @${quote.awayOdds.toFixed(2)}]`;
 }
 
-export function formatLocalizedResearchCard(item: Pick<CachedUpcomingFixture, "leagueName" | "leagueTranslation" | "eventTime" | "homeTeam" | "homeTeamTranslation" | "awayTeam" | "awayTeamTranslation" | "homeWin" | "draw" | "awayWin" | "compactMarkets" | "topScorelines" | "handicapQuote"> & { researchSource?: string | null }): string {
+export function formatLocalizedResearchCard(item: Pick<CachedUpcomingFixture, "leagueName" | "leagueTranslation" | "eventTime" | "homeTeam" | "homeTeamTranslation" | "awayTeam" | "awayTeamTranslation" | "homeWin" | "draw" | "awayWin" | "compactMarkets" | "topScorelines" | "handicapQuote"> & Partial<Pick<CachedUpcomingFixture, "researchSource" | "homeSampleMatches" | "awaySampleMatches" | "leagueSampleMatches">>): string {
   const percent = (value: number) => Number.isFinite(value) && value >= 0 && value <= 1 ? `${(value * 100).toFixed(1)}%` : "資料不足";
   const total = item.compactMarkets.find(row => row.market === "入球大細 2.5");
   const over = total && (/^大(?:\s|$)/.test(total.selection) || /^over\b/i.test(total.selection)) ? total.probability : total ? 1 - total.probability : null;
@@ -196,7 +197,8 @@ export function formatLocalizedResearchCard(item: Pick<CachedUpcomingFixture, "l
     `⚽️ 【${home}】 vs 【${away}】`,
     "---",
     `📊 【資料來源】${item.researchSource || "來源未核實（不宣稱已校準或市場融合）"}`,
-    "⚠️ 研究百分比不是歷史命中率；資料不足時不應作高信心選擇。",
+    RESEARCH_POLICY_NOTICE,
+    formatResearchSamples(item.homeSampleMatches, item.awaySampleMatches, item.leagueSampleMatches),
     item.researchSource?.includes("聯賽平均") || item.researchSource === "league-average"
       ? "🚨 【數據警告】目前僅使用聯賽平均，缺少兩隊獨立歷史攻防；不建議參考讓球盤。"
       : null,
@@ -664,7 +666,8 @@ export function formatLiveTeamResearch(research: LiveTeamResearch): string {
     `⚽️ 【${home}】 vs 【${away}】`,
     "---",
     `📊 【資料來源】${source}`,
-    "⚠️ 未校準研究；不足5/5/20場有效樣本會停止預測；不是保證命中率。",
+    RESEARCH_POLICY_NOTICE,
+    formatResearchSamples(research.quality?.homeMatches, research.quality?.awayMatches, research.quality?.leagueMatches),
     research.sourceMode === "league-average" ? "🚨 【數據警告】僅使用聯賽平均，缺少兩隊獨立歷史攻防；不建議參考讓球盤。" : null,
     research.calibrationLabel ? `⚙️ 【模型版本／限制】${research.calibrationLabel}` : null,
     `🛡️ 【雙重機率】1X: ${percent(research.outcomes.homeWin + research.outcomes.draw)} | X2: ${percent(research.outcomes.draw + research.outcomes.awayWin)}`,
@@ -1150,42 +1153,36 @@ function formatCandidate(candidate: Candidate): string {
     homeWin: candidate.prediction.probabilities.home_win,
     draw: candidate.prediction.probabilities.draw,
     awayWin: candidate.prediction.probabilities.away_win,
+    researchSource: "歷史特徵模型；本次營運僅作未校準研究，不沿用其他版本的校準宣稱",
+    homeSampleMatches: candidate.prediction.diagnostics.home_history_matches_used ?? null,
+    awaySampleMatches: candidate.prediction.diagnostics.away_history_matches_used ?? null,
+    leagueSampleMatches: candidate.prediction.diagnostics.dc_history_match_count,
     compactMarkets: rows,
     topScorelines: topScorelines(homeMean, awayMean),
     handicapQuote: candidate.handicapQuote ?? null,
   });
 }
 
-export function rankDailyPicks<T extends Pick<Candidate, "prediction">>(candidates: T[]): T[] {
-  const riskScore = (level: PredictionResult["lean"]["risk_level"]) => level === "low" ? 2 : level === "medium" ? 1 : 0;
+export function rankDailyPicks<T extends Pick<Candidate, "prediction"> & Partial<Pick<Candidate, "kickoffAt">>>(candidates: T[]): T[] {
+  // Select by data quality only. Neither lean probability nor risk labels are
+  // calibrated confidence evidence; the high-confidence selector is suspended.
+  const kickoff = (candidate: T) => candidate.kickoffAt instanceof Date && Number.isFinite(candidate.kickoffAt.getTime()) ? candidate.kickoffAt.getTime() : Number.MAX_SAFE_INTEGER;
   return candidates
-    .filter(candidate => candidate.prediction.lean.risk_level !== "high"
-      && candidate.prediction.diagnostics.dc_available
-      && candidate.prediction.diagnostics.dc_history_match_count >= 20
-      && (candidate.prediction.diagnostics.home_history_matches_used ?? 0) >= 2
-      && (candidate.prediction.diagnostics.away_history_matches_used ?? 0) >= 2)
+    .filter(candidate => candidate.prediction.diagnostics.dc_available
+      && hasSufficientResearchSamples(candidate.prediction.diagnostics.home_history_matches_used,
+        candidate.prediction.diagnostics.away_history_matches_used,
+        candidate.prediction.diagnostics.dc_history_match_count))
     .sort((left, right) => (
-      right.prediction.lean.probability - left.prediction.lean.probability
-      || riskScore(right.prediction.lean.risk_level) - riskScore(left.prediction.lean.risk_level)
+      Math.min(right.prediction.diagnostics.home_history_matches_used!, right.prediction.diagnostics.away_history_matches_used!)
+      - Math.min(left.prediction.diagnostics.home_history_matches_used!, left.prediction.diagnostics.away_history_matches_used!)
       || right.prediction.diagnostics.dc_history_match_count - left.prediction.diagnostics.dc_history_match_count
+      || kickoff(left) - kickoff(right)
     ))
     .slice(0, 3);
 }
 
-export function selectDailyDigestPicks<T extends Pick<Candidate, "prediction">>(candidates: T[]): T[] {
-  const strict = rankDailyPicks(candidates);
-  if (strict.length >= 3) return strict;
-  const strictSet = new Set(strict);
-  const fallback = candidates
-    .filter(candidate => !strictSet.has(candidate))
-    .filter(candidate => (candidate.prediction.diagnostics.home_history_matches_used ?? 0) >= 2
-      && (candidate.prediction.diagnostics.away_history_matches_used ?? 0) >= 2
-      && candidate.prediction.diagnostics.dc_history_match_count >= 20)
-    .sort((left, right) => (
-      right.prediction.lean.probability - left.prediction.lean.probability
-      || right.prediction.diagnostics.dc_history_match_count - left.prediction.diagnostics.dc_history_match_count
-    ));
-  return [...strict, ...fallback].slice(0, 3);
+export function selectDailyDigestPicks<T extends Pick<Candidate, "prediction"> & Partial<Pick<Candidate, "kickoffAt">>>(candidates: T[]): T[] {
+  return rankDailyPicks(candidates);
 }
 
 function hktDateKey(value: Date): string {
@@ -1233,7 +1230,7 @@ export async function runResearchDigest(request: Request, window: "day" | "eveni
     : liveFallback.length > 0
       ? liveFallback.map((research, index) => `${index + 1}. ${formatLiveTeamResearch(research)}`).join("\n\n")
       : "今日暫無可驗證未來賽事。";
-  const content = researchSection;
+  const content = `【營運模式】僅供研究；按樣本品質與開賽時間選取，不按機率標示高信心。\n${RESEARCH_POLICY_NOTICE}\n\n${researchSection}`;
   const signalCount = selected.length || liveFallback.length;
   const inserted = await db.insert(researchDigests).values({ window, asOf: now, content, signalCount });
   const digestId = Number(inserted[0].insertId);

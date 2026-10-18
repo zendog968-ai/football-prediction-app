@@ -168,11 +168,17 @@ def run() -> dict[str, Any]:
             "kickoff_at": fixture_row["kickoff_at"],
             "score": prediction.most_likely_score,
             "lean": prediction.research_lean,
-            "stars": prediction.evidence_stars,
+            "research_mode": prediction.research_mode,
+            "calibration_status": prediction.calibration_status,
+            "home_sample_matches": prediction.home_sample_matches,
+            "away_sample_matches": prediction.away_sample_matches,
+            "league_sample_matches": prediction.league_sample_matches,
+            "research_source": prediction.research_source,
+            "data_warning": prediction.data_warning,
         })
 
     LOGGER.info("Sync complete: %s", counts)
-    report = {"generated_at": now.isoformat(), "dry_run": args.dry_run, "coverage": args.coverage, "research_skipped": False, "counts": counts, "predictions": sorted(summaries, key=lambda item: item["stars"], reverse=True)}
+    report = {"generated_at": now.isoformat(), "dry_run": args.dry_run, "coverage": args.coverage, "research_skipped": False, "counts": counts, "predictions": summaries}
     if args.report_out:
         with open(args.report_out, "w", encoding="utf-8") as handle:
             json.dump(report, handle, ensure_ascii=False, indent=2)

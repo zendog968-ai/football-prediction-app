@@ -1,3 +1,5 @@
+import json
+
 from football_sync.supabase_store import fixture_to_existing_schema, odds_to_existing_schema, prediction_to_existing_schema
 
 
@@ -61,3 +63,28 @@ def test_prediction_mapping_retains_research_label() -> None:
     assert '"s":"LEGACY"' in mapped["recommendation"]
     assert len(mapped["recommendation"]) <= 50
     assert mapped["confidence"] == 3
+
+
+def test_v4_metadata_compacts_verified_samples_without_truncating_json() -> None:
+    mapped = prediction_to_existing_schema({
+        "api_fixture_id": 10,
+        "home_win_probability": 0.5,
+        "draw_probability": 0.25,
+        "away_win_probability": 0.25,
+        "most_likely_score": "1-0",
+        "evidence_stars": 1,
+        "model_version": "poisson-v4-shrink10-research",
+        "generated_at": "2026-08-14T00:00:00+00:00",
+        "expected_home_goals": 1.1234,
+        "expected_away_goals": 1.2345,
+        "home_sample_matches": 5,
+        "away_sample_matches": 6,
+        "league_sample_matches": 20,
+        "calibration_status": "uncalibrated",
+        "research_source": "API-Football FT; same league/season; pre-kickoff cutoff; shrinkage prior=10",
+        "data_warning": "未校準；未作前瞻驗證；不可作投注建議。",
+    })
+    marker = "\n[AURELIA_META]"
+    assert mapped["recommendation"].startswith(marker)
+    assert json.loads(mapped["recommendation"][len(marker):]) == {"q4": [1.1234, 1.2345, 5, 6, 20]}
+    assert len(mapped["recommendation"]) <= 50

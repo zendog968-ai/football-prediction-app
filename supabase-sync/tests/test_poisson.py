@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+import json
 import pytest
 from football_sync.poisson import InsufficientHistory, predict_fixture
 from football_sync.quality import estimate_goals, verified_history
@@ -13,11 +14,20 @@ def test_normalization_version_and_grid_consistency():
     p=predict_fixture(FIXTURE,history(1,5),history(2,5),NOW,history(5,20))
     assert p.home_win_probability+p.draw_probability+p.away_win_probability == pytest.approx(1,abs=2e-6)
     assert p.model_version == 'poisson-v4-shrink10-research'
+    assert p.research_mode == 'poisson_research'
+    assert p.calibration_status == 'uncalibrated'
+    assert 'API-Football' in p.research_source
     assert '未校準' in p.data_warning
+    assert '前瞻驗證' in p.data_warning
+    assert '不可解讀為賠率、EV、投注或高信心建議' in p.data_warning
+    assert p.evidence_stars == 1
     assert len(p.top_scorelines)==3
     assert p.home_sample_matches==5 and p.away_sample_matches==5 and p.league_sample_matches==20
     row=prediction_to_existing_schema(p.to_row())
-    assert 'Q4' in row['recommendation'] and len(row['recommendation'])<=50
+    packed=json.loads(row['recommendation'].split('[AURELIA_META]')[1])['q4']
+    assert packed[:2] == [round(p.expected_home_goals,4),round(p.expected_away_goals,4)]
+    assert packed[2:] == [5,5,20]
+    assert len(row['recommendation'])<=50
 
 def test_fixed_formula_matches_typescript():
     q=estimate_goals(FIXTURE,history(1,5),history(2,5),history(5,20),NOW)

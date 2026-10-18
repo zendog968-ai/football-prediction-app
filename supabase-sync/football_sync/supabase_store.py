@@ -7,6 +7,11 @@ from supabase import Client, create_client
 
 from football_sync.config import Settings
 
+RECOMMENDATION_METADATA_PREFIX = "\n[AURELIA_META]"
+# The deployed legacy table is varchar(50), despite newer environments sometimes
+# allowing a longer recommendation value.  Do not rely on the larger capacity.
+RECOMMENDATION_METADATA_MAX_LENGTH = 50
+
 
 def _selection_key(value: str) -> str:
     return value.strip().lower()
@@ -71,12 +76,41 @@ def odds_to_existing_schema(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def prediction_to_existing_schema(row: dict[str, Any]) -> dict[str, Any]:
-    # Compact versioned metadata fits the existing varchar(50) column.  No DB
-    # migration and no stale historical row overwrite is needed.
+    """Map a prediction without turning legacy recommendation text into advice.
+
+    Q4 metadata is deliberately compact because the deployed column is varchar(50):
+    ``q4`` is a versioned uncalibrated-research tuple containing
+    [expected_home_goals, expected_away_goals, home_samples, away_samples, league_samples]. The
+    verbose, unambiguous counterparts remain on the prediction row
+    (``calibration_status``, ``research_source`` and ``data_warning``) for reports
+    and formatters; no JSON is truncated to fit this legacy field.
+    """
     version = str(row.get("model_version", ""))
-    source = "Q4" if version == "poisson-v4-shrink10-research" else "LEGACY"
-    metadata = json.dumps({"h": round(float(row.get("expected_home_goals") or 0), 3), "a": round(float(row.get("expected_away_goals") or 0), 3), "s": source}, ensure_ascii=False, separators=(",", ":"))
-    if len("\n[AURELIA_META]" + metadata) > 50:
+    if version == "poisson-v4-shrink10-research":
+        samples = [
+            row.get("home_sample_matches"),
+            row.get("away_sample_matches"),
+            row.get("league_sample_matches"),
+        ]
+        if any(type(value) is not int or value < 0 for value in samples):
+            raise ValueError("v4 research metadata requires verified home, away, and league sample counts")
+        means = [row.get("expected_home_goals"), row.get("expected_away_goals")]
+        if any(type(value) not in (int, float) or not 0.2 <= value <= 4.5 for value in means):
+            raise ValueError("v4 research metadata requires verified expected goals")
+        # q4 can never mean calibrated. Preserve the goal grid inputs as well as
+        # sample provenance; dropping means would make cached totals/scores vanish.
+        metadata_value: dict[str, Any] = {"q4": [round(value, 4) for value in means] + samples}
+    else:
+        # Preserve legacy row compatibility rather than asserting calibration for
+        # an old output whose provenance cannot be recovered here.
+        metadata_value = {
+            "h": round(float(row.get("expected_home_goals") or 0), 3),
+            "a": round(float(row.get("expected_away_goals") or 0), 3),
+            "s": "LEGACY",
+        }
+    metadata = json.dumps(metadata_value, ensure_ascii=False, separators=(",", ":"))
+    recommendation = f"{RECOMMENDATION_METADATA_PREFIX}{metadata}"
+    if len(recommendation) > RECOMMENDATION_METADATA_MAX_LENGTH:
         raise ValueError("prediction metadata exceeds existing schema contract")
     return {
         "fixture_id": row["api_fixture_id"],
@@ -84,7 +118,7 @@ def prediction_to_existing_schema(row: dict[str, Any]) -> dict[str, Any]:
         "draw_prob": row["draw_probability"],
         "away_win_prob": row["away_win_probability"],
         "predicted_score": row["most_likely_score"],
-        "recommendation": f"\n[AURELIA_META]{metadata}",
+        "recommendation": recommendation,
         "confidence": row["evidence_stars"],
         "updated_at": row["generated_at"],
     }

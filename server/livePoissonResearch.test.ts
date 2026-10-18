@@ -29,6 +29,13 @@ describe("verified live research v4", () => {
   it("rejects incomplete research cards", () => {
     expect(hasCompleteLiveResearch({ outcomes: { homeWin: .5, draw: .25, awayWin: .25 }, compactMarkets: [], topScorelines: [] } as never)).toBe(false);
   });
+  it("does not accept extreme percentages or stale version labels instead of sample provenance", () => {
+    const result = deriveLivePoissonResearch(upcoming, history(1), history(2), history(3, 20))!;
+    expect(hasCompleteLiveResearch({ ...result, quality: null })).toBe(false);
+    expect(hasCompleteLiveResearch({ ...result, modelVersion: "poisson-v2-league-research" })).toBe(false);
+    expect(hasCompleteLiveResearch({ ...result, quality: { ...result.quality!, homeMatches: 4 }, outcomes: { homeWin: .99, draw: .005, awayWin: .005 } })).toBe(false);
+    expect(hasCompleteLiveResearch({ ...result, sourceMode: "league-average" })).toBe(false);
+  });
   it("retrieves own-competition histories and current-season baseline", async () => {
     const fetchMock = vi.fn(async (input: string) => ({ ok: true, json: async () => {
       if (input.includes("/teams?search=")) return { response: [{ team: { id: 1, name: "Vissel Kobe" } }] };
