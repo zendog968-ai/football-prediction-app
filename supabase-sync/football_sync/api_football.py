@@ -74,12 +74,12 @@ class ApiFootballClient:
     def league_recent_fixtures(self, league_id: int, season: int, limit: int = 200) -> list[dict[str, Any]]:
         """Return completed history from a verified league and season for calibration."""
         rows = self._get("fixtures", league=league_id, season=season, timezone="UTC")
-        return rows[-limit:]
+        return sorted([r for r in rows if r.get("fixture", {}).get("status", {}).get("short") == "FT"], key=lambda r: r.get("fixture", {}).get("date", ""))[-limit:]
 
     def team_league_season_fixtures(self, team_id: int, league_id: int, season: int, limit: int) -> list[dict[str, Any]]:
         """Fetch a team's verified official league season, excluding team-wide friendlies and cups."""
         rows = self._get("fixtures", team=team_id, league=league_id, season=season, timezone="UTC")
-        return rows[-limit:]
+        return sorted([r for r in rows if r.get("fixture", {}).get("status", {}).get("short") == "FT"], key=lambda r: r.get("fixture", {}).get("date", ""))[-limit:]
 
 
 def normalize_fixture(raw: dict[str, Any], captured_at: datetime) -> dict[str, Any]:

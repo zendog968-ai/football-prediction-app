@@ -97,7 +97,7 @@ describe("Telegram系統指令", () => {
       predictedScore: "2-1",
       recommendation: "研究傾向：主勝",
       confidence: 4,
-      predictionUpdatedAt: "2026-08-15T10:00:00Z",
+      predictionUpdatedAt: "2026-08-14T23:00:00Z",
       hasPrediction: true,
       compactMarkets: [
         { market: "主客和 (1X2)", selection: "主勝", probability: 0.62 },
@@ -148,6 +148,7 @@ describe("Telegram系統指令", () => {
 
   it("/upcoming跳過缺少勝率、2.5大小球、讓球或Top 3波膽的已同步賽事", () => {
     const base = {
+      hasPrediction: true, predictionUpdatedAt: "2026-08-14T23:00:00Z",
       fixtureId: 202, leagueName: "MLS", eventTime: "2026-08-15T20:00:00Z", homeTeam: "Example Home", awayTeam: "Example Away",
       homeWin: 0.6, draw: 0.22, awayWin: 0.18,
       compactMarkets: [{ market: "入球大細 2.5", selection: "大 2.5", probability: 0.55 }],
@@ -193,6 +194,7 @@ describe("Telegram系統指令", () => {
     expect(parseTeamRequest("/team 曼聯")).toBe("曼聯");
     expect(parseTeamRequest("/team")).toBeNull();
     const fixtures = [{
+      hasPrediction: true, predictionUpdatedAt: "2026-08-14T23:00:00Z",
       fixtureId: 999,
       leagueName: "EPL",
       eventTime: "2026-08-16T12:00:00Z",
@@ -207,6 +209,7 @@ describe("Telegram系統指令", () => {
 
   it("支援主要聯賽的常用繁體中文隊名別名，不將無關簡稱模糊命中", () => {
     const fixture = (homeTeam: string) => [{
+      hasPrediction: true, predictionUpdatedAt: "2026-08-14T23:00:00Z",
       fixtureId: 1000,
       leagueName: "coverage",
       eventTime: "2026-08-16T12:00:00Z",
@@ -270,7 +273,7 @@ describe("Telegram系統指令", () => {
     expect(formatLiveTeamResearch({ ...base, sourceMode: "team-history" })).toContain("【資料來源】隊伍歷史攻防");
     expect(formatLiveTeamResearch({ ...base, sourceMode: "league-average" })).toContain("【資料來源】聯賽平均");
     expect(formatLiveTeamResearch({ ...base, sourceMode: "league-average" })).toContain("不建議參考讓球盤");
-    expect(formatLiveTeamResearch({ ...base, sourceMode: "team-history", calibrationLabel: "英冠正式聯賽樣本＋聯賽平均及主場優勢校準" })).toContain("【校準】英冠正式聯賽樣本");
+    expect(formatLiveTeamResearch({ ...base, sourceMode: "team-history", calibrationLabel: "poisson-v4-shrink10-research；未校準研究" })).toContain("【模型版本／限制】poisson-v4-shrink10-research");
   });
 
   it("快取研究卡標示聯賽平均時強制顯示數據警告", () => {

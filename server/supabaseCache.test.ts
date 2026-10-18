@@ -1,10 +1,13 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetSupabaseUpcomingCacheForTests, getSupabaseUpcomingCache } from "./supabaseCache";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   __resetSupabaseUpcomingCacheForTests();
 });
+
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-08-15T10:00:00Z")); });
 
 describe("英冠Supabase研究卡快取", () => {
   it("保留大於1的預期入球，並重建大細球與Top 3波膽", async () => {
@@ -20,7 +23,7 @@ describe("英冠Supabase研究卡快取", () => {
     vi.stubGlobal("fetch", fetchMock);
     const cache = await getSupabaseUpcomingCache(true);
     const card = cache.fixtures[0];
-    expect(card?.researchSource).toContain("英冠正式聯賽樣本");
+    expect(card?.researchSource).toContain("未校準");
     expect(card?.compactMarkets.some(item => item.market === "入球大細 2.5")).toBe(true);
     expect(card?.compactMarkets.some(item => item.market === "讓球盤 (Handicap)")).toBe(false);
     expect(card?.handicapQuote).toBeNull();
@@ -31,6 +34,7 @@ describe("英冠Supabase研究卡快取", () => {
 
 describe("Supabase繁中翻譯與讓球盤資料契約", () => {
   it("以 team_translations、league_translations 的香港繁中優先，並保存同一快照的完整雙邊讓球水位", async () => {
+    vi.setSystemTime(new Date("2026-08-18T10:00:00Z"));
     const fetchMock = vi.fn(async (input: URL | string) => ({
       ok: true,
       json: async () => {
@@ -66,6 +70,7 @@ describe("Supabase繁中翻譯與讓球盤資料契約", () => {
   });
 
   it("配對同步器分開儲存的主客亞洲盤水位", async () => {
+    vi.setSystemTime(new Date("2026-09-19T10:00:00Z"));
     const fetchMock = vi.fn(async (input: URL | string) => ({
       ok: true,
       json: async () => {

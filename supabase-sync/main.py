@@ -137,7 +137,7 @@ def run() -> dict[str, Any]:
             counts["prediction_skipped"] += 1
             continue
         try:
-            history_season = season - 1 if league_id == 40 and season > 0 else season
+            history_season = season
             history_loader = client.team_league_season_fixtures if league_id == 40 else client.team_recent_fixtures
             home_history = history_loader(
                 fixture_row["home_team_id"],
@@ -151,7 +151,7 @@ def run() -> dict[str, Any]:
                 league_id=league_id,
                 season=history_season,
             )
-            league_history = client.league_recent_fixtures(league_id, history_season) if league_id == 40 else None
+            league_history = client.league_recent_fixtures(league_id, history_season)
             prediction_fixture = {**fixture_row, "season": history_season}
             prediction = predict_fixture(prediction_fixture, home_history, away_history, generated_at=now, league_history=league_history)
         except InsufficientHistory as exc:

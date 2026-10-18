@@ -7,7 +7,8 @@ export type CompactMarketRow = {
   distribution?: { fullWin: number; halfWin: number; push: number; halfLoss: number; fullLoss: number };
 };
 
-const MAX_GOALS = 8;
+// At lambda<=4.5, omitted two-team tail beyond 24 is below 1e-10.
+const MAX_GOALS = 24;
 
 function poisson(goals: number, mean: number) {
   let factorial = 1;

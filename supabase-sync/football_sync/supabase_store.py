@@ -71,16 +71,13 @@ def odds_to_existing_schema(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def prediction_to_existing_schema(row: dict[str, Any]) -> dict[str, Any]:
-    championship = str(row.get("model_version", "")).startswith("poisson-v3-championship")
-    metadata_values = {
-        "h": row.get("expected_home_goals"),
-        "a": row.get("expected_away_goals"),
-        "s": "英冠校準" if championship else "隊史",
-        "home_sample_matches": row.get("home_sample_matches"),
-        "away_sample_matches": row.get("away_sample_matches"),
-        "league_sample_matches": row.get("league_sample_matches"),
-    }
-    metadata = json.dumps({key: value for key, value in metadata_values.items() if value is not None}, ensure_ascii=False, separators=(",", ":"))
+    # Compact versioned metadata fits the existing varchar(50) column.  No DB
+    # migration and no stale historical row overwrite is needed.
+    version = str(row.get("model_version", ""))
+    source = "Q4" if version == "poisson-v4-shrink10-research" else "LEGACY"
+    metadata = json.dumps({"h": round(float(row.get("expected_home_goals") or 0), 3), "a": round(float(row.get("expected_away_goals") or 0), 3), "s": source}, ensure_ascii=False, separators=(",", ":"))
+    if len("\n[AURELIA_META]" + metadata) > 50:
+        raise ValueError("prediction metadata exceeds existing schema contract")
     return {
         "fixture_id": row["api_fixture_id"],
         "home_win_prob": row["home_win_probability"],
