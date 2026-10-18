@@ -1,10 +1,10 @@
 import { estimateQualityGoals } from "./qualityPoisson";
 import { ENV } from "./_core/env";
 import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, outcomeProbabilities, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
+import { ADDITIONAL_LIVE_RESEARCH_LEAGUES, leagueSeasonFixturesPath, selectLiveUpcomingFixtures } from "./liveResearchData";
 
 const API_BASE = "https://v3.football.api-sports.io";
 const FINISHED = new Set(["FT", "AET", "PEN"]);
-const POPULAR_LEAGUE_IDS = new Set([2, 3, 11, 13, 39, 40, 48, 61, 71, 78, 94, 98, 135, 140, 169, 188, 253, 262, 292]);
 
 type ApiFixture = {
   fixture?: { id?: number; date?: string; status?: { short?: string } };
@@ -174,7 +174,7 @@ async function researchForFixture(fixture: ApiFixture): Promise<LiveTeamResearch
   const [homeHistory, awayHistory, leagueHistory] = await Promise.all([
     apiFootball<ApiFixture>(`/fixtures?team=${homeId}&league=${leagueId}&season=${season}&last=10&timezone=UTC`),
     apiFootball<ApiFixture>(`/fixtures?team=${awayId}&league=${leagueId}&season=${season}&last=10&timezone=UTC`),
-    apiFootball<ApiFixture>(`/fixtures?league=${leagueId}&season=${season}&last=200&timezone=UTC`),
+    apiFootball<ApiFixture>(leagueSeasonFixturesPath(leagueId!, season!)),
   ]);
   return deriveLivePoissonResearch(fixture, homeHistory, awayHistory, leagueHistory);
 }
@@ -192,7 +192,11 @@ export async function fetchLiveTeamResearch(teamName: string): Promise<LiveTeamR
 
 export async function fetchLiveUpcomingResearch(limit = 3): Promise<LiveTeamResearch[]> {
   const fixtures = await apiFootball<ApiFixture>("/fixtures?next=30&timezone=UTC");
-  const candidates = fixtures.filter(row => POPULAR_LEAGUE_IDS.has(row.league?.id ?? -1) && row.fixture?.status?.short === "NS" && Date.parse(row.fixture?.date ?? "") > Date.now());
+  // A global next=30 window can omit these leagues entirely. Supplement it
+  // with bounded per-league requests, then deduplicate and order by kickoff.
+  const additional = await Promise.all(ADDITIONAL_LIVE_RESEARCH_LEAGUES.map(({ id }) =>
+    apiFootball<ApiFixture>(`/fixtures?league=${id}&next=5&timezone=UTC`).catch(() => [])));
+  const candidates = selectLiveUpcomingFixtures(fixtures.concat(...additional));
   const results: LiveTeamResearch[] = [];
   for (const candidate of candidates.slice(0, Math.max(limit * 5, 15))) {
     const research = await researchForFixture(candidate).catch(() => null);

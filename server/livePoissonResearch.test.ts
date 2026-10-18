@@ -35,15 +35,43 @@ describe("verified live research v4", () => {
       if (input.includes("/fixtures?team=1&next=")) return { response: [upcoming] };
       if (input.includes("/fixtures?team=1&league=98&season=2026&last=10")) return { response: history(1) };
       if (input.includes("/fixtures?team=2&league=98&season=2026&last=10")) return { response: history(2) };
-      if (input.includes("/fixtures?league=98&season=2026&last=200")) return { response: history(3, 20) };
+      if (input.includes("last=200")) return { response: [], errors: { last: "Invalid last parameter" } };
+      if (input.includes("/fixtures?league=98&season=2026&timezone=UTC")) return { response: history(3, 20) };
       return { response: [] };
     } }));
     vi.stubGlobal("fetch", fetchMock);
     const r = await fetchLiveTeamResearch("Vissel Kobe"); expect(r?.modelVersion).toBe("poisson-v4-shrink10-research");
     expect(fetchMock.mock.calls.every(([p]) => !p.includes("/fixtures?team=2&last="))).toBe(true);
+    expect(fetchMock.mock.calls.every(([p]) => !p.includes("last=200"))).toBe(true);
   });
   it("excludes already-started matches in upcoming fallback", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ response: [{ ...upcoming, fixture: { ...upcoming.fixture, date: "2026-10-17T09:00:00Z" } }] }) })));
     expect(await fetchLiveUpcomingResearch(3)).toHaveLength(0);
+  });
+});
+
+describe("additional league upcoming source", () => {
+  it("retrieves NED1/NOR1/GER2 even when global next=30 has no fixtures", async () => {
+    const names: Record<number,string> = {88:"NED1",103:"NOR1",79:"GER2"};
+    const calls:string[]=[];
+    vi.stubGlobal("fetch", vi.fn(async(input:string) => {
+      calls.push(input);
+      const u=new URL(input); const league=Number(u.searchParams.get("league"));
+      let response:any[]=[];
+      if(u.pathname==="/fixtures" && u.searchParams.get("next")==="5" && names[league]){
+        response=[{...upcoming,fixture:{...upcoming.fixture,id:league*1000,date:`2026-10-19T${league===103?"10":league===88?"11":"12"}:00:00Z`},league:{id:league,season:2026,name:names[league]},teams:{home:{id:1,name:`${names[league]} home`},away:{id:2,name:`${names[league]} away`}}}];
+      } else if(u.pathname==="/fixtures" && u.searchParams.has("season") && names[league]){
+        const team=Number(u.searchParams.get("team"))||3;
+        response=history(team,team===3?20:5).map(r=>({...r,league:{id:league,season:2026}}));
+      }
+      if(u.searchParams.get("last")==="200") return {ok:true,json:async()=>({response:[],errors:{last:"Rejected"}})};
+      return {ok:true,json:async()=>({response})};
+    }));
+    const rows=await fetchLiveUpcomingResearch(3);
+    expect(rows).toHaveLength(3);
+    expect(rows.map(r=>r.homeTeam)).toEqual(["NOR1 home","NED1 home","GER2 home"]);
+    expect(rows.every(r=>hasCompleteLiveResearch(r)&&r.modelVersion==="poisson-v4-shrink10-research")).toBe(true);
+    expect(calls.filter(p=>p.includes("next=5"))).toHaveLength(3);
+    expect(calls.every(p=>!p.includes("last=200"))).toBe(true);
   });
 });
