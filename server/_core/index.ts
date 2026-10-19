@@ -11,6 +11,7 @@ import { serveStatic, setupVite } from "./vite";
 import { handleScheduledResearch, handleTelegramWebhook } from "../telegramResearch";
 import { handleScheduledAllLeagueSync } from "../allLeagueSync";
 import { registerAdminConfigRoutes } from "../adminConfig";
+import { registerDeploymentHealthRoute } from "../deploymentHealth";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -34,6 +35,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
+  registerDeploymentHealthRoute(app);
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
