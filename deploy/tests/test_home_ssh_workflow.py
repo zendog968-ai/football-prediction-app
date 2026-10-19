@@ -41,6 +41,15 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('pytest supabase-sync/tests deploy/tests', steps)
         self.assertIn('package_home_release.py', steps)
 
+    def test_pinned_installer_does_not_depend_on_old_corepack(self):
+        workflow = yaml.load((ROOT / '.github/workflows/deploy-home-ssh.yml').read_text(), Loader=yaml.BaseLoader)
+        steps = workflow['jobs']['validate']['steps']
+        installer = next(step for step in steps if step.get('name') == 'Install isolated pinned pnpm without Corepack')
+        self.assertIn('pnpm@10.4.1', installer['run'])
+        self.assertIn('GITHUB_PATH', installer['run'])
+        self.assertNotIn('corepack enable', str(steps))
+        self.assertNotIn('pnpm/action-setup', str(steps))
+
     def test_status_notification_is_separate_and_opt_in(self):
         workflow = yaml.load((ROOT / '.github/workflows/deploy-home-ssh.yml').read_text(), Loader=yaml.BaseLoader)
         step = next(step for step in workflow['jobs']['deploy']['steps'] if step.get('name', '').startswith('Send one deployment-status'))

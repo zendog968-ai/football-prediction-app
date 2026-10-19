@@ -39,10 +39,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - uses: pnpm/action-setup@v4
-        with:
-          version: "10.4.1"
-          run_install: false
+      - name: Install isolated pinned pnpm without Corepack
+        run: |
+          npm install --prefix "$RUNNER_TEMP/pinned-pnpm" --ignore-scripts --no-audit --no-fund pnpm@10.4.1
+          echo "$RUNNER_TEMP/pinned-pnpm/node_modules/.bin" >> "$GITHUB_PATH"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
