@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { safeCacheProjection, type SupabaseUpcomingCache } from "./supabaseCache";
 const now = Date.parse("2026-10-18T09:00:00Z");
-const payload: SupabaseUpcomingCache = { source: "Supabase cache", loadedAt: "2026-10-18T09:00:00Z", available: true, fixtures: [{ fixtureId: 1, leagueName: "J1", eventTime: "2026-10-18T10:00:00Z", homeTeam: "Home", awayTeam: "Away", homeWin: .6, draw: .2, awayWin: .2, predictedScore: "2-1", recommendation: "勝率60%", researchSource: "v4", confidence: 2, predictionUpdatedAt: "2026-10-18T08:00:00Z", hasPrediction: true, compactMarkets: [{ market: "主客和 (1X2)", selection: "主勝", probability: .6 }, { market: "讓球盤 (Handicap)", selection: "Home -0.5", probability: .6 }], topScorelines: [{ score: "2-1", probability: .12 }], odds: { home: 2, draw: 3, away: 4, capturedAt: "2026-10-18T08:00:00Z" }, handicapQuote: { source: "Book", homeSelection: "Home -0.5", homeOdds: 2, awaySelection: "Away +0.5", awayOdds: 2, capturedAt: "2026-10-18T08:00:00Z" } }] };
+const payload: SupabaseUpcomingCache = { source: "Supabase cache", loadedAt: "2026-10-18T09:00:00Z", available: true, fixtures: [{ fixtureId: 1, leagueName: "J1", eventTime: "2026-10-18T10:00:00Z", homeTeam: "Home", awayTeam: "Away", homeWin: .6, draw: .2, awayWin: .2, predictedScore: "2-1", recommendation: "高信心投注 +EV 20%", researchSource: "v4", homeSampleMatches: 10, awaySampleMatches: 10, leagueSampleMatches: 105, confidence: 5, predictionUpdatedAt: "2026-10-18T08:00:00Z", hasPrediction: true, compactMarkets: [{ market: "主客和 (1X2)", selection: "主勝", probability: .6 }, { market: "讓球盤 (Handicap)", selection: "Home -0.5", probability: .6 }], topScorelines: [{ score: "2-1", probability: .12 }], odds: { home: 2, draw: 3, away: 4, capturedAt: "2026-10-18T08:00:00Z" }, handicapQuote: { source: "Book", homeSelection: "Home -0.5", homeOdds: 2, awaySelection: "Away +0.5", awayOdds: 2, capturedAt: "2026-10-18T08:00:00Z" } }] };
 describe("cache public DTO time safety", () => {
   it("removes expired quotes even while model probabilities are fresh", () => {
     const row = safeCacheProjection(payload, now).fixtures[0]!;
@@ -19,5 +19,23 @@ describe("cache public DTO time safety", () => {
   it("clears old forecasts before kickoff and rejects unverified times", () => {
     const p = { ...payload, fixtures: [{ ...payload.fixtures[0]!, predictionUpdatedAt: "2026-10-18T06:00:00Z" }] };
     expect(safeCacheProjection(p, now).fixtures[0]!.hasPrediction).toBe(false);
+  });
+  it("keeps research percentages and samples but never surfaces stars or stored betting signals", () => {
+    const row = safeCacheProjection(payload, now).fixtures[0]!;
+    expect(row.homeWin).toBe(.6);
+    expect(row.homeSampleMatches).toBe(10);
+    expect(row.calibrationStatus).toBe("uncalibrated");
+    expect(row.highConfidenceEnabled).toBe(false);
+    expect(row.bettingAdviceEnabled).toBe(false);
+    expect(row.confidence).toBe(0);
+    expect(row.recommendation).toBeNull();
+    expect(JSON.stringify(row)).not.toContain("+EV");
+  });
+  it.each([null, 4, undefined])("does not display probabilities with insufficient or unknown home samples: %s", home => {
+    const p = { ...payload, fixtures: [{ ...payload.fixtures[0]!, homeSampleMatches: home }] };
+    const row = safeCacheProjection(p, now).fixtures[0]!;
+    expect(row.hasPrediction).toBe(false);
+    expect(Number.isNaN(row.homeWin)).toBe(true);
+    expect(row.topScorelines).toEqual([]);
   });
 });

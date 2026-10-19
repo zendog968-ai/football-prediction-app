@@ -114,6 +114,19 @@ def localized_team_name(source_name: str, translations: dict[str, str]) -> str:
     return translations.get(_canonical_team_name(source_name), source_name)
 
 
+def format_research_samples(item: dict[str, Any]) -> str:
+    """Render only verified counts; absent or invalid values remain explicitly unknown."""
+    def count(key: str) -> str:
+        value = item.get(key)
+        return str(value) if type(value) is int and value >= 0 else "未知"
+
+    return (
+        "有效樣本（主/客/聯賽）"
+        f"{count('home_sample_matches')}/{count('away_sample_matches')}/{count('league_sample_matches')}"
+        "；門檻 5/5/20"
+    )
+
+
 def format_success(report: dict[str, Any]) -> str:
     counts = report.get("counts", {})
     predictions = report.get("predictions", [])[:2]
@@ -126,18 +139,20 @@ def format_success(report: dict[str, Any]) -> str:
         f"同步：{counts.get('fixtures', 0)}場｜盤口：{counts.get('odds_snapshots', 0)}筆｜研究模型：{counts.get('ai_predictions', 0)}場",
     ]
     if predictions:
-        lines.append("當日模型訊號（僅供研究）：")
+        lines.append("當日Poisson研究輸出（未校準；僅供研究）：")
         for item in predictions:
             home_team = localized_team_name(str(item["home_team"]), translations)
             away_team = localized_team_name(str(item["away_team"]), translations)
+            calibration_status = str(item.get("calibration_status") or "未知")
             lines.append(
                 f"• {item['league']}｜{home_team} vs {away_team}｜"
                 f"開賽 {format_kickoff_hkt(item.get('kickoff_at'))}｜"
-                f"最可能比分 {item['score']}｜{item['lean']}｜證據 {'⭐' * item['stars']}"
+                f"最可能比分 {item['score']}｜{item['lean']}｜"
+                f"校準：{calibration_status}｜{format_research_samples(item)}"
             )
     else:
         lines.append("本輪沒有符合歷史樣本門檻的研究模型輸出。")
-    lines.append("研究用途：非投注、非資金建議；請留意資料時間與樣本限制。")
+    lines.append("研究用途：未校準、未作前瞻驗證；高信心篩選停用；投注建議與EV停用。非投注、非資金建議。")
     return "\n".join(lines)
 
 

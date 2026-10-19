@@ -112,7 +112,7 @@ vi.mock("@/lib/trpc", () => ({
             source: "Supabase cache",
             loadedAt: "2026-08-15T10:00:00Z",
             available: true,
-            fixtures: [{ fixtureId: 9001, leagueName: "MLS", eventTime: "2026-08-15T20:00:00Z", homeTeam: "Cache Home", awayTeam: "Cache Away", homeWin: 0.62, draw: 0.21, awayWin: 0.17, predictedScore: "2-1", recommendation: "研究傾向：主勝", confidence: 4, predictionUpdatedAt: "2026-08-15T10:00:00Z" }],
+            fixtures: [{ fixtureId: 9001, leagueName: "MLS", eventTime: "2026-08-15T20:00:00Z", homeTeam: "Cache Home", awayTeam: "Cache Away", homeWin: 0.62, draw: 0.21, awayWin: 0.17, predictedScore: "2-1", recommendation: null, calibrationStatus: "uncalibrated" as const, highConfidenceEnabled: false as const, bettingAdviceEnabled: false as const, confidence: 0, homeSampleMatches: 48, awaySampleMatches: 46, leagueSampleMatches: 1900, predictionUpdatedAt: "2026-08-15T10:00:00Z" }],
           },
           isLoading: false,
         }),
@@ -181,18 +181,30 @@ describe("Home prediction workflow", () => {
     expect(mutationSpy).toHaveBeenCalledWith({ leagueCode: "BRA1", homeTeam: "Palmeiras", awayTeam: "Flamengo RJ" });
     expect((await screen.findAllByText("44.6%")).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Palmeiras vs Flamengo RJ")).toBeTruthy();
-    expect(screen.getByTestId("lean-summary").textContent).toContain("主勝傾向 · Palmeiras");
-    expect(screen.getByTestId("lean-summary").textContent).toContain("高風險");
-    expect(screen.getByTestId("lean-summary").textContent).toContain("Dixon–Coles資料不足");
+    const disclaimer = screen.getByTestId("research-disclaimer");
+    expect(disclaimer.textContent).toContain("未校準研究模式");
+    expect(disclaimer.textContent).toContain("高信心篩選已停用");
+    expect(disclaimer.textContent).toContain("投注建議、投注EV與模型公平賠率已停用");
+    const researchLean = screen.getByTestId("research-lean");
+    expect(researchLean.textContent).toContain("主勝傾向 · Palmeiras");
+    expect(researchLean.textContent).toContain("賽前Elo方向偏向Palmeiras");
+    expect(researchLean.textContent).toContain("Dixon–Coles 特徵資料不足");
+    expect(screen.queryByText("高風險")).toBeNull();
     expect(JSON.parse(sessionStorage.getItem("aurelia-football-session-history") || "[]")).toHaveLength(1);
   });
 
-  it("優先顯示Supabase快取的未來24小時研究資料與機率色彩標示", () => {
+  it("以未校準研究模式呈現快取模型機率與真實樣本，不顯示信心星級或推薦", () => {
     render(<Home />);
-    expect(screen.getByTestId("supabase-cache-board").textContent).toContain("Supabase cache");
+    const cache = screen.getByTestId("supabase-cache-board");
+    expect(cache.textContent).toContain("Supabase cache");
     expect(screen.getByText("Cache Home vs Cache Away")).toBeTruthy();
-    expect(screen.getByTestId("supabase-cache-board").textContent).toContain("🟢 62.0%");
-    expect(screen.getByTestId("supabase-cache-board").textContent).toContain("⭐⭐⭐⭐");
+    expect(cache.textContent).toContain("🟢 62.0%");
+    expect(cache.textContent).toContain("歷史樣本：48 場 vs 46 場");
+    expect(cache.textContent).toContain("未校準");
+    expect(cache.textContent).toContain("高信心篩選停用");
+    expect(cache.textContent).toContain("投注建議停用");
+    expect(cache.textContent).not.toContain("⭐⭐⭐⭐");
+    expect(cache.textContent).not.toContain("研究傾向：主勝");
   });
 
   it("clears stored session history", async () => {
@@ -270,7 +282,7 @@ describe("Home prediction workflow", () => {
     expect((screen.getByLabelText("客隊") as HTMLInputElement).value).toBe("Ferencváros");
   });
 
-  it("shows both new cup boards and can load a calibrated Leagues Cup fixture into the prediction fields", async () => {
+  it("shows both new cup boards and can load a Leagues Cup research fixture into the prediction fields", async () => {
     const user = userEvent.setup();
     render(<Home />);
 
@@ -315,7 +327,7 @@ describe("Home prediction workflow", () => {
     expect(homeInput.value).toBe("");
   });
 
-  it("shows database update time and labels model odds as a non-probability fair threshold", async () => {
+  it("labels forecast probabilities as uncalibrated research without model fair odds", async () => {
     const user = userEvent.setup();
     render(<Home />);
 
@@ -330,12 +342,13 @@ describe("Home prediction workflow", () => {
     await user.click(screen.getByRole("button", { name: /開始分析這場對戰/ }));
 
     const disclaimer = await screen.findByTestId("research-disclaimer");
-    expect(disclaimer.textContent).toContain("模型公平門檻（十進制）= 1 ÷ 機率");
-    expect(disclaimer.textContent).toContain("並非機率、命中率或保證");
-    expect(disclaimer.textContent).toContain("大小球、BTTS與未涵蓋聯賽的研究數字不會被轉換為模型公平門檻或EV");
+    expect(disclaimer.textContent).toContain("未經校準驗證");
+    expect(disclaimer.textContent).toContain("高信心篩選已停用");
+    expect(disclaimer.textContent).toContain("投注建議、投注EV與模型公平賠率已停用");
+    expect(disclaimer.textContent).not.toContain("主勝 2.24");
   });
 
-  it("keeps Lean, risk reasoning and the research disclaimer available in a 375px viewport", async () => {
+  it("keeps uncalibrated research guardrails available in a 375px viewport", async () => {
     const originalWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 375 });
     window.dispatchEvent(new Event("resize"));
@@ -352,12 +365,12 @@ describe("Home prediction workflow", () => {
       await user.click(screen.getByRole("button", { name: /Flamengo RJ/ }));
       await user.click(screen.getByRole("button", { name: /開始分析這場對戰/ }));
 
-      const lean = await screen.findByTestId("lean-summary");
-      expect(lean.textContent).toContain("主勝傾向 · Palmeiras");
-      expect(lean.textContent).toContain("高風險");
-      expect(lean.textContent).toContain("Dixon–Coles資料不足");
-      expect((await screen.findByTestId("research-disclaimer")).textContent).toContain("模型公平門檻（十進制）= 1 ÷ 機率");
-      expect((await screen.findByTestId("research-disclaimer")).textContent).toContain("大小球、BTTS與未涵蓋聯賽的研究數字不會被轉換為模型公平門檻或EV");
+      const disclaimer = await screen.findByTestId("research-disclaimer");
+      expect(disclaimer.textContent).toContain("未校準研究模式");
+      expect(disclaimer.textContent).toContain("高信心篩選已停用");
+      expect(disclaimer.textContent).toContain("投注建議、投注EV與模型公平賠率已停用");
+      expect(screen.getByTestId("research-lean").textContent).toContain("主勝傾向 · Palmeiras");
+      expect(screen.queryByText("高風險")).toBeNull();
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
       window.dispatchEvent(new Event("resize"));
@@ -381,12 +394,13 @@ describe("Home prediction workflow", () => {
     const operations = screen.getByTestId("telegram-research-settings");
     expect(operations.textContent).toContain("研究通知與盤口監控");
     expect(operations.textContent).toContain("10:30、11:00及18:30");
-    expect(operations.textContent).toContain("並非投注或資金建議");
+    expect(operations.textContent).toContain("未校準研究資料");
+    expect(operations.textContent).toContain("高信心篩選、投注EV與投注或資金建議均已停用");
     expect(screen.getByRole("button", { name: "設定Webhook" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "啟用排程" })).toBeTruthy();
   });
 
-  it("calculates EV research statistics only after three valid decimal odds are supplied", async () => {
+  it("shows only market-implied probability after valid odds and explicitly withholds EV and fair-odds decisions", async () => {
     const user = userEvent.setup();
     render(<Home />);
 
@@ -399,13 +413,19 @@ describe("Home prediction workflow", () => {
     await user.click(screen.getByRole("button", { name: /Flamengo RJ/ }));
     await user.click(screen.getByRole("button", { name: /開始分析這場對戰/ }));
 
-    expect(await screen.findByTestId("odds-research-module")).toBeTruthy();
-    expect(screen.getByText(/請輸入三個大於 1.00/)).toBeTruthy();
+    const oddsModule = await screen.findByTestId("odds-research-module");
+    expect(oddsModule.textContent).toContain("EV計算、模型公平賠率、高信心篩選與投注建議均已停用");
+    expect(oddsModule.textContent).toContain("輸入任一個大於 1.00");
     await user.type(screen.getByLabelText("Palmeiras 主勝賠率"), "2.50");
     await user.type(screen.getByLabelText("和局賠率"), "3.50");
     await user.type(screen.getByLabelText("Flamengo RJ 客勝賠率"), "4.00");
 
-    expect((await screen.findAllByText("+EV 統計標記")).length).toBeGreaterThan(0);
-    expect(screen.getByText(/賠率與EV數據僅供模型效能驗證與統計學研究/)).toBeTruthy();
+    const comparison = await screen.findByTestId("market-probability-comparison");
+    expect(comparison.textContent).toContain("模型機率（未校準） 44.6%");
+    expect(comparison.textContent).toContain("市場隱含機率 40.0%");
+    expect(oddsModule.textContent).toContain("未計算或顯示投注EV、模型公平賠率、+EV旗幟、高信心篩選或投注建議");
+    expect(oddsModule.textContent).not.toContain("EV（研究）");
+    expect(oddsModule.textContent).not.toContain("+11.6%");
+    expect(oddsModule.textContent).not.toContain("模型賠率 2.24");
   });
 });

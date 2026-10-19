@@ -1,9 +1,10 @@
 import requests
 
-from football_sync.telegram import format_failure, format_kickoff_hkt, format_success
+from football_sync.telegram import format_failure, format_kickoff_hkt, format_success, format_research_samples
 
 
-def test_success_summary_is_research_only_and_caps_at_two_predictions() -> None:
+def test_success_summary_is_research_only_and_caps_at_two_predictions(monkeypatch) -> None:
+    monkeypatch.setattr("football_sync.telegram.load_team_translations", lambda names: {})
     report = {
         "counts": {"fixtures": 4, "odds_snapshots": 12, "ai_predictions": 3},
         "predictions": [
@@ -18,6 +19,20 @@ def test_success_summary_is_research_only_and_caps_at_two_predictions() -> None:
     assert "E vs F" not in message
     assert "2026-08-15 08:00 (HKT)" in message
     assert "非投注、非資金建議" in message
+    assert "高信心篩選停用" in message
+    assert "投注建議與EV停用" in message
+    assert "校準：未知" in message
+    assert "★★★★" not in message
+
+
+def test_research_samples_and_uncalibrated_status_are_explicit(monkeypatch) -> None:
+    monkeypatch.setattr("football_sync.telegram.load_team_translations", lambda names: {})
+    assert "10/8/105" in format_research_samples({"home_sample_matches": 10, "away_sample_matches": 8, "league_sample_matches": 105})
+    assert "未知/未知/未知" in format_research_samples({"home_sample_matches": None, "away_sample_matches": True, "league_sample_matches": -1})
+    message = format_success({"predictions": [{"league": "J1", "home_team": "Home", "away_team": "Away", "score": "1-1", "lean": "研究傾向", "calibration_status": "uncalibrated", "home_sample_matches": 10, "away_sample_matches": 8, "league_sample_matches": 105}]})
+    assert "校準：uncalibrated" in message
+    assert "有效樣本（主/客/聯賽）10/8/105" in message
+    assert "未作前瞻驗證" in message
 
 
 def test_kickoff_is_converted_to_hong_kong_time() -> None:

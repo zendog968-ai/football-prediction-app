@@ -9,4 +9,10 @@ describe("Telegram deployment routing", () => {
     expect(() => buildTelegramWebhookUrl("https://example.invalid", "/football/../admin")).toThrow();
   });
   it("identifies the active research engine without claiming calibration", () => { const text = formatTelegramRuntimeHeader("Home"); expect(text).toContain("【服務】Home"); expect(text).toContain("poisson-v4-shrink10-research"); expect(text).toContain("未校準"); });
+  it("declares suspended confidence and betting features even when model samples exist", () => {
+    const text = formatTelegramRuntimeHeader("Home");
+    expect(text).toContain("高信心篩選停用");
+    expect(text).toContain("投注建議與EV停用");
+    expect(text).not.toContain("前瞻折外校準模型");
+  });
 });
