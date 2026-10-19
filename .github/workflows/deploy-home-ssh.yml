@@ -1,0 +1,151 @@
+name: Deploy Aurelia Home via SSH
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/deploy-home-ssh.yml
+      - deploy/**
+      - server/deploymentHealth*
+      - server/_core/index.ts
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "preflight is read-only; deploy switches only the configured football service"
+        type: choice
+        options: [preflight, deploy]
+        default: preflight
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aurelia-home-ssh-${{ github.event_name == 'pull_request' && github.ref || 'production' }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VITE_APP_ID: ${{ vars.VITE_APP_ID }}
+      VITE_OAUTH_PORTAL_URL: ${{ vars.VITE_OAUTH_PORTAL_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "10.4.1"
+          run_install: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify required public frontend settings before a real deployment
+        if: ${{ github.ref == 'refs/heads/main' && ((github.event_name == 'push' && vars.HOME_SSH_DEPLOY_ENABLED == 'true') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy')) }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+          if not os.environ.get('VITE_APP_ID', '').strip():
+              raise SystemExit('VITE_APP_ID must be configured before deployment')
+          url = urlsplit(os.environ.get('VITE_OAUTH_PORTAL_URL', ''))
+          if url.scheme != 'https' or not url.hostname or url.username or url.password:
+              raise SystemExit('VITE_OAUTH_PORTAL_URL must be the verified HTTPS OAuth portal')
+          PY
+      - name: Install frozen Node and Python test dependencies
+        run: |
+          pnpm install --frozen-lockfile
+          python3 -m pip install -r supabase-sync/requirements.txt PyYAML==6.0.2
+      - name: Run complete tests and type checks
+        run: |
+          pnpm test
+          pnpm check
+          PYTHONPATH=supabase-sync python3 -m pytest supabase-sync/tests deploy/tests -q
+          python3 -m py_compile deploy/run_home_ssh.py deploy/home_ssh_release.py deploy/notify_home_deploy.py
+      - name: Build and package the exact commit, never credentials or databases
+        run: |
+          pnpm build
+          python3 deploy/package_home_release.py --sha "$GITHUB_SHA" --output "$RUNNER_TEMP/aurelia-release.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: home-release-${{ github.sha }}
+          path: ${{ runner.temp }}/aurelia-release.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+      - name: State deployment gate explicitly
+        if: ${{ github.ref == 'refs/heads/main' && vars.HOME_SSH_DEPLOY_ENABLED != 'true' }}
+        run: echo 'Production SSH deployment is disabled. Configure and verify Home first; this run does NOT update Home.' >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: validate
+    if: ${{ github.ref == 'refs/heads/main' && (vars.HOME_SSH_DEPLOY_ENABLED == 'true' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'preflight')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: home-production
+    permissions:
+      contents: read
+      actions: read
+    env:
+      HOME_SSH_HOST: ${{ secrets.HOME_SSH_HOST }}
+      HOME_SSH_PORT: ${{ secrets.HOME_SSH_PORT }}
+      HOME_SSH_USER: ${{ secrets.HOME_SSH_USER }}
+      HOME_SSH_PRIVATE_KEY: ${{ secrets.HOME_SSH_PRIVATE_KEY }}
+      HOME_SSH_KNOWN_HOSTS: ${{ secrets.HOME_SSH_KNOWN_HOSTS }}
+      DEPLOY_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'deploy' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: home-release-${{ github.sha }}
+          path: ${{ runner.temp }}/home-release
+      - name: Deploy or check only the approved Home football service
+        run: |
+          python3 deploy/run_home_ssh.py \
+            --mode "$DEPLOY_MODE" --sha "$GITHUB_SHA" \
+            --run-id "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --archive "$RUNNER_TEMP/home-release/aurelia-release.tar.gz" \
+            --receipt-out "$RUNNER_TEMP/home-deployment-receipt.json"
+      - name: Record deployment evidence
+        if: ${{ success() }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path(os.environ['RUNNER_TEMP']) / 'home-deployment-receipt.json'
+          receipt = json.loads(p.read_text())
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write(f"Home result: **{receipt['status']}**\n\n")
+              if receipt['status'] == 'deployed':
+                  f.write(f"Running commit: `{receipt['releaseSha']}`; research policy verified.\n")
+              else:
+                  f.write('Read-only preflight: no service restart or release switch performed.\n')
+          PY
+      - name: Send one deployment-status notification, not a prediction card
+        if: ${{ always() && env.DEPLOY_MODE == 'deploy' && vars.HOME_TELEGRAM_NOTIFY_ENABLED == 'true' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DEPLOY_OUTCOME: ${{ job.status }}
+        run: |
+          python3 deploy/notify_home_deploy.py \
+            --status "$DEPLOY_OUTCOME" --sha "$GITHUB_SHA" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --deployment-receipt "$RUNNER_TEMP/home-deployment-receipt.json" \
+            --receipt-out "$RUNNER_TEMP/home-telegram-receipt.json"
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: home-deployment-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/home-deployment-receipt.json
+            ${{ runner.temp }}/home-telegram-receipt.json
+          if-no-files-found: warn
+          retention-days: 30

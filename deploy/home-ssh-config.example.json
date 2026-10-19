@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "project": "aurelia-football",
+  "deploy_root": "",
+  "service": "",
+  "service_user": "",
+  "environment_file": "",
+  "node_binary": "",
+  "pnpm_binary": "",
+  "python_binary": "",
+  "health_url": "http://127.0.0.1:3100/api/deployment/health",
+  "rollback_health_url": "",
+  "shared_links": []
+}
