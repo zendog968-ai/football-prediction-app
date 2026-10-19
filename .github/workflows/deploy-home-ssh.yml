@@ -64,10 +64,12 @@ jobs:
           python3 -m pip install -r supabase-sync/requirements.txt PyYAML==6.0.2
       - name: Run complete tests and type checks
         run: |
-          pnpm test
+          pnpm exec vitest run --config vitest.ci.config.ts
           pnpm check
           PYTHONPATH=supabase-sync python3 -m pytest supabase-sync/tests deploy/tests -q
           python3 -m py_compile deploy/run_home_ssh.py deploy/home_ssh_release.py deploy/notify_home_deploy.py
+      - name: State live credential checks are not part of PR validation
+        run: echo 'Live API-Football status, Telegram getMe and Supabase credential integration tests are intentionally NOT run here. Offline unit tests do not prove production connectivity.' >> "$GITHUB_STEP_SUMMARY"
       - name: Build and package the exact commit, never credentials or databases
         run: |
           pnpm build

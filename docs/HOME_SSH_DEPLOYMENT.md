@@ -8,7 +8,7 @@
 
 ## 部署鏈
 
-1. `main` push 或手動執行：完整 Vitest、TypeScript、Python 同步器與部署安全測試。
+1. `main` push 或手動執行：離線 Vitest、TypeScript、Python 同步器與部署安全測試。PR 不取得正式密鑰；API-Football、Telegram、Supabase 三項真實憑證整合測試另行執行，不以假密鑰冒充驗證。
 2. 使用專案鎖定的 pnpm 及 Node 22 建置，封裝同一 commit 的程式及 `dist`；不封裝 `.env`、資料庫、模型 pickle、SSH 私鑰或 `node_modules`。
 3. GitHub Environment `home-production` 的專用 SSH 身分，使用預先確認的主機公鑰嚴格驗證連線。
 4. 非 root 發布用戶讀取主機 root 持有的 `/etc/aurelia-football-deploy.json`，先核對**唯一足球服務**的用戶、工作目錄、Node 執行路徑、Python PATH、環境檔及上一版本可用性。
