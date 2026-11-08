@@ -2,7 +2,7 @@
 import React from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
@@ -23,7 +23,7 @@ vi.mock("@/lib/trpc", () => ({
               predictedScore: "2-1",
               recommendation: null,
               confidence: 2,
-              predictionUpdatedAt: "2026-08-15T10:00:00Z",
+              predictionUpdatedAt: "2026-08-15T18:00:00Z",
               hasPrediction: true,
               compactMarkets: [
                 { market: "主客和 (1X2)", selection: "主勝", probability: 0.58 },
@@ -52,7 +52,8 @@ vi.mock("@/lib/trpc", () => ({
 import MatchFeed from "./MatchFeed";
 
 describe("MatchFeed compact research format", () => {
-  afterEach(() => cleanup());
+  beforeEach(()=>{vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(new Date("2026-08-15T18:30:00Z"));});
+  afterEach(() => {cleanup();vi.useRealTimers();});
 
   it("renders the minimal market table and three scorelines only after a card is opened", async () => {
     const user = userEvent.setup();
@@ -60,6 +61,8 @@ describe("MatchFeed compact research format", () => {
 
     await user.click(screen.getByRole("button", { name: /Example Home.*Example Away/ }));
     expect(screen.getByText("盤口種類")).toBeTruthy();
+    expect(screen.getByTestId("match-diagnostics")).toBeTruthy();
+    expect(screen.getByText(/實際歷史樣本/)).toBeTruthy();
     expect(screen.getByText("主客和 (1X2)")).toBeTruthy();
     expect(screen.getByText("入球大細 1.5")).toBeTruthy();
     expect(screen.getByText("大 2.5")).toBeTruthy();

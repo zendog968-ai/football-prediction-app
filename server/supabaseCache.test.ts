@@ -32,7 +32,9 @@ describe("英冠Supabase研究卡快取", () => {
     expect(card?.awaySampleMatches).toBe(10);
     expect(card?.leagueSampleMatches).toBe(105);
     expect(card?.hasPrediction).toBe(true);
-    expect(card?.awayWin).toBe(.45);
+    expect(card?.awayWin).toBeCloseTo(0.45, 1);
+    expect(card?.probabilitySource).toBe("q4-poisson-parameter-reconstruction");
+    expect((card?.homeWin ?? 0)+(card?.draw ?? 0)+(card?.awayWin ?? 0)).toBeCloseTo(1,10);
     expect(card?.calibrationStatus).toBe("uncalibrated");
     expect(card?.confidence).toBe(0);
   });
@@ -49,7 +51,7 @@ describe("Supabase繁中翻譯與讓球盤資料契約", () => {
         if (url.includes("fixtures?")) return [{ fixture_id: 991, league_name: "Premier League", event_time: "2026-08-19T12:30:00Z", home_team: "Manchester United", away_team: "Arsenal", status: "NS", updated_at: "2026-08-18T10:00:00Z" }];
         if (url.includes("ai_predictions?")) return [{ fixture_id: 991, home_win_prob: 0.51, draw_prob: 0.27, away_win_prob: 0.22, predicted_score: "2-1", recommendation: "\n[AURELIA_META]{\"h\":1.54,\"a\":0.92,\"s\":\"隊史\"}", confidence: 4, updated_at: "2026-08-18T10:00:00Z" }];
         if (url.includes("odds_snapshots?")) return [
-          { fixture_id: 991, market_type: "HDC", handicap: "Home -0.5", home_odds: 1.91, away_odds: 1.89, snapshot_time: "2026-08-18T10:00:00Z" },
+          { id: 1001, fixture_id: 991, market_type: "HDC", handicap: "Home -0.5", home_odds: 1.91, away_odds: 1.89, snapshot_time: "2026-08-18T10:00:00Z" },
         ];
         if (url.includes("team_translations?")) return [
           { english_name: "Manchester United", name_zh_hk: "曼聯", name_zh_tw: "曼徹斯特聯" },
@@ -85,8 +87,8 @@ describe("Supabase繁中翻譯與讓球盤資料契約", () => {
         if (url.includes("fixtures?")) return [{ fixture_id: 992, league_name: "Liga MX", event_time: "2026-09-20T03:00:00Z", home_team: "Club America", away_team: "Guadalajara Chivas", status: "NS", updated_at: "2026-09-19T10:00:00Z" }];
         if (url.includes("ai_predictions?")) return [{ fixture_id: 992, home_win_prob: 0.48, draw_prob: 0.28, away_win_prob: 0.24, predicted_score: "2-1", recommendation: "\n[AURELIA_META]{\"h\":1.62,\"a\":1.08,\"s\":\"隊史\"}", confidence: 3, updated_at: "2026-09-19T10:00:00Z" }];
         if (url.includes("odds_snapshots?")) return [
-          { fixture_id: 992, market_type: "HDC | Bet365", handicap: "Home -0.5", home_odds: 1.91, away_odds: null, snapshot_time: "2026-09-19T10:00:00Z" },
-          { fixture_id: 992, market_type: "HDC | Bet365", handicap: "Away +0.5", home_odds: null, away_odds: 1.89, snapshot_time: "2026-09-19T10:00:00Z" },
+          { id: 1002, fixture_id: 992, market_type: "HDC | Bet365", handicap: "Home -0.5", home_odds: 1.91, away_odds: null, snapshot_time: "2026-09-19T10:00:00Z" },
+          { id: 1002, fixture_id: 992, market_type: "HDC | Bet365", handicap: "Away +0.5", home_odds: null, away_odds: 1.89, snapshot_time: "2026-09-19T10:00:00Z" },
         ];
         return [];
       },

@@ -1,11 +1,13 @@
 import React, { useMemo, useState } from "react";
 import { CalendarDays, ChevronDown, Clock3, ShieldAlert, Sparkles } from "lucide-react";
 import { trpc } from "@/lib/trpc";
-import { localizeTeamName } from "@shared/teamDisplay";
+import { formatTranslatedTeamDisplay, localizeTeamName } from "@shared/teamDisplay";
 import { localizeLeagueName } from "@shared/leagueDisplay";
 
+import { MatchDiagnostics, predictionDisplayState, useResearchNow } from "@/components/MatchFeed";
+
 const pct = (value: number) => `${Math.round(value * 100)}%`;
-const labelTime = (value: string) => new Intl.DateTimeFormat("zh-HK", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
+const labelTime = (value: string) => new Intl.DateTimeFormat("zh-HK", { timeZone: "Asia/Hong_Kong", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
 const labelDate = (value: Date) => new Intl.DateTimeFormat("zh-HK", { month: "short", day: "numeric", weekday: "short" }).format(value);
 const initials = (team: string) => team.split(/\s+/).map(part => part[0]).join("").slice(0, 2).toUpperCase();
 const hktDay = (value: Date | string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value));
@@ -16,10 +18,11 @@ function CompactTable({ item }: { item: { compactMarkets: Array<{ market: string
     const found = item.compactMarkets.find(entry => entry.market === market);
     return <tr key={market} className="border-t border-white/10"><td className="py-2 pr-2 text-zinc-400">{market}</td><td className="py-2 pr-2 text-zinc-100">{found ? <><div>{found.selection}</div>{found.distribution && <div className="mt-0.5 text-[10px] text-zinc-500">全贏 {pct(found.distribution.fullWin)}｜半贏 {pct(found.distribution.halfWin)}｜走盤 {pct(found.distribution.push)}｜半輸 {pct(found.distribution.halfLoss)}｜全輸 {pct(found.distribution.fullLoss)}</div>}</> : "資料不足"}</td><td className="py-2 text-right text-emerald-300">{found ? pct(found.probability) : "—"}</td></tr>;
   };
-  return <div className="space-y-4 text-xs"><table className="w-full border-collapse"><thead className="text-left text-[10px] uppercase tracking-[.12em] text-zinc-500"><tr><th className="pb-2">盤口種類</th><th className="pb-2">預測選項</th><th className="pb-2 text-right">命中機率</th></tr></thead><tbody>{row("主客和 (1X2)")}{row("入球大細 1.5")}{row("入球大細 2.5")}{row("入球大細 3.5")}{row("入球大細 4.5")}{row("讓球盤 (Handicap)")}{row("亞洲讓球 0.25")}{row("亞洲讓球 0.75")}{row("亞洲讓球 1.25")}{row("亞洲讓球 1.75")}</tbody></table><div><div className="mb-2 font-bold text-emerald-300">【最高機率波膽 Top 3】</div><ol className="space-y-1 text-zinc-300">{[0, 1, 2].map(index => <li key={index}>{index + 1}. {item.topScorelines[index] ? `${item.topScorelines[index]!.score}：${pct(item.topScorelines[index]!.probability)}` : "資料不足"}</li>)}</ol></div></div>;
+  return <div className="space-y-4 text-xs"><table className="w-full border-collapse"><thead className="text-left text-[10px] uppercase tracking-[.12em] text-zinc-500"><tr><th className="pb-2">盤口種類</th><th className="pb-2">預測選項</th><th className="pb-2 text-right">研究機率</th></tr></thead><tbody>{row("主客和 (1X2)")}{row("入球大細 1.5")}{row("入球大細 2.5")}{row("入球大細 3.5")}{row("入球大細 4.5")}{row("讓球盤 (Handicap)")}{row("亞洲讓球 0.25")}{row("亞洲讓球 0.75")}{row("亞洲讓球 1.25")}{row("亞洲讓球 1.75")}</tbody></table><div><div className="mb-2 font-bold text-emerald-300">【最高機率波膽 Top 3】</div><ol className="space-y-1 text-zinc-300">{[0, 1, 2].map(index => <li key={index}>{index + 1}. {item.topScorelines[index] ? `${item.topScorelines[index]!.score}：${pct(item.topScorelines[index]!.probability)}` : "資料不足"}</li>)}</ol></div></div>;
 }
 
 export default function MatchFeed() {
+  const now=useResearchNow();
   const [league, setLeague] = useState("全部");
   const [dayOffset, setDayOffset] = useState(0);
   const [openId, setOpenId] = useState<number | null>(null);
@@ -32,9 +35,9 @@ export default function MatchFeed() {
     return matchesLeague && matchesDay;
   });
   const fallbackFixtures = (query.data?.fixtures || []).filter(item => league === "全部" || localizeLeagueName(item.leagueName).includes(league));
-  const fixtures = dayFixtures.length ? dayFixtures : fallbackFixtures;
-  const isFallback = dayFixtures.length === 0 && fallbackFixtures.length > 0;
-  const leagueTabs = ["全部", "英超", "西甲", "歐聯", "歐霸", "日職", "美職"];
+  const fixtures = dayFixtures;
+  const isFallback = false;
+  const leagueTabs = ["全部", "英超", "西甲", "德甲", "德乙", "英冠", "墨超", "巴甲", "歐聯", "歐霸", "日職", "美職", "瑞超", "挪超"];
 
   return <main className="min-h-screen bg-[#121212] pb-24 text-zinc-100">
     <header className="sticky top-0 z-20 border-b border-white/10 bg-[#121212]/95 px-4 py-4 backdrop-blur xl:px-8">
@@ -44,13 +47,14 @@ export default function MatchFeed() {
     </header>
     <section className="mx-auto max-w-5xl px-4 pt-6 xl:px-8">
       <div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 text-sm text-zinc-400"><CalendarDays size={15}/>{isFallback ? "最新抓取賽事清單" : dayOffset === 0 ? "今日已同步賽事" : labelDate(days.find(d => d.offset === dayOffset)!.date)}</div><span className="text-xs text-zinc-600">30秒自動更新</span></div>
+      <p className="mb-4 text-xs leading-5 text-zinc-400">未校準研究；高信心、EV與投注建議停用。資料範圍：未來48小時內的研究允許聯賽，不等於全庫賽事。最後同步：{query.data?.lastSyncAt ? new Date(query.data.lastSyncAt).toLocaleString("zh-HK",{timeZone:"Asia/Hong_Kong"})+" HKT" : "未取得"}。</p>
       {query.isLoading ? <div className="rounded-2xl bg-[#1e1e1e] p-6 text-sm text-zinc-500">正在讀取同步賽程…</div> : fixtures.length ? <div className="space-y-3">{fixtures.map(item => <article key={item.fixtureId} className="overflow-hidden rounded-2xl border border-white/5 bg-[#1e1e1e] shadow-xl">
         <button className="w-full p-4 text-left" onClick={() => setOpenId(openId === item.fixtureId ? null : item.fixtureId)}>
-          <div className="flex items-center justify-between text-[11px] font-bold text-zinc-500"><span>{localizeLeagueName(item.leagueName)}</span><span className="flex items-center gap-1"><Clock3 size={13}/>{labelTime(item.eventTime)} · 未開賽</span></div>
-          <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3"><div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-xs font-black text-emerald-300">{initials(item.homeTeam)}</span><span className="font-bold leading-tight">{localize(item.homeTeam)}</span></div><div className="rounded-lg bg-black/30 px-3 py-1 text-center font-serif text-lg text-emerald-300">{item.hasPrediction ? item.predictedScore || "—" : "待同步"}</div><div className="flex items-center justify-end gap-3 text-right"><span className="font-bold leading-tight">{localize(item.awayTeam)}</span><span className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-xs font-black text-amber-200">{initials(item.awayTeam)}</span></div></div>
+          <div className="flex items-center justify-between text-[11px] font-bold text-zinc-500"><span>{localizeLeagueName(item.leagueName)}</span><span className="flex items-center gap-1"><Clock3 size={13}/>{labelTime(item.eventTime)} HKT · 未開賽</span></div>
+          <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3"><div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-xs font-black text-emerald-300">{initials(item.homeTeam)}</span><span className="font-bold leading-tight">{formatTranslatedTeamDisplay(item.homeTeam,item.homeTeamTranslation ?? undefined)}</span></div><div className="rounded-lg bg-black/30 px-3 py-1 text-center font-serif text-lg text-emerald-300">{predictionDisplayState(item,now).available ? item.predictedScore || "—" : "資料不足"}</div><div className="flex items-center justify-end gap-3 text-right"><span className="font-bold leading-tight">{formatTranslatedTeamDisplay(item.awayTeam,item.awayTeamTranslation ?? undefined)}</span><span className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-xs font-black text-amber-200">{initials(item.awayTeam)}</span></div></div>
           <div className="mt-3 flex justify-end text-xs text-zinc-500"><ChevronDown className={`transition ${openId === item.fixtureId ? "rotate-180" : ""}`} size={14}/></div>
         </button>
-        {openId === item.fixtureId && <div className="border-t border-white/10 bg-black/20 p-4"><CompactTable item={item}/></div>}
+        {openId === item.fixtureId && <div className="border-t border-white/10 bg-black/20 p-4"><MatchDiagnostics item={item} now={now} predictionState={predictionDisplayState(item,now)}/>{predictionDisplayState(item,now).available ? <><p className="my-3 text-xs text-emerald-200">主勝 {pct(item.homeWin)} · 和局 {pct(item.draw)} · 客勝 {pct(item.awayWin)}</p><CompactTable item={item}/></> : <p className="mt-3 text-xs text-amber-200">不顯示未通過驗證的機率與波膽。</p>}</div>}
       </article>)}</div> : <div className="rounded-2xl border border-dashed border-white/10 bg-[#1e1e1e] p-8 text-center text-sm text-zinc-500"><ShieldAlert className="mx-auto mb-3" size={22}/>目前沒有已同步賽事。<p className="mt-2 text-xs">最後同步：{query.data?.lastSyncAt ? new Date(query.data.lastSyncAt).toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong" }) : "未提供"}</p><button onClick={() => query.refetch()} className="mt-4 rounded-lg bg-emerald-400 px-4 py-2 text-xs font-bold text-zinc-950">手動重新讀取同步資料</button></div>}
     </section>
   </main>;

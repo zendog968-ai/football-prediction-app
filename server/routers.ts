@@ -7,7 +7,7 @@ import { getCupOverview, getEuropaOverview, getLeagueMetadata, getPrediction, ge
 import { getPerformanceOverview, hasValidPerformanceOverview } from "./performance";
 import { cruzeiroFlamengoSpotlight, hasValidSpotlight } from "./spotlight";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { configureTelegramWebhook, ensureResearchSchedules, getResearchNotificationStatus } from "./telegramResearch";
+import { configureTelegramWebhook, ensureResearchSchedules, getResearchNotificationStatus, formatLocalizedResearchCard } from "./telegramResearch";
 import { getSupabaseUpcomingCache } from "./supabaseCache";
 
 export const appRouter = router({
@@ -84,6 +84,13 @@ export const appRouter = router({
       }
     }),
     upcomingCache: publicProcedure.query(async () => getSupabaseUpcomingCache()),
+    researchPreview: publicProcedure.query(async () => {
+      const payload = await getSupabaseUpcomingCache();
+      const start = Date.now();
+      const valid = payload.fixtures.filter(row => row.hasPrediction && row.topScorelines.length === 3 && Date.parse(row.eventTime) > start && Date.parse(row.eventTime) < start + 24 * 3600000)
+        .sort((a,b) => Date.parse(a.eventTime)-Date.parse(b.eventTime)).slice(0,3);
+      return { generatedAt: payload.loadedAt, fixtureIds: valid.map(row => row.fixtureId), cards: valid.map(formatLocalizedResearchCard), diagnostics: payload.diagnostics };
+    }),
   }),
   performance: router({
     overview: publicProcedure.input(z.object({

@@ -447,11 +447,42 @@ def insert_matches(connection: sqlite3.Connection, records: list[dict[str, Any]]
         "home_odds", "draw_odds", "away_odds", "odds_source",
         "source_url", "fetched_at",
     ]
+    # Release snapshots may already contain Parquet/cup rows. Never silently ignore
+    # a primary-key collision or contradictory result; only exact event/result reuse.
+    identity_columns = ["league_code", "season", "match_date", "home_team", "away_team"]
+    evidence_columns = ["home_goals", "away_goals", "result"]
+    existing = {}
+    ids = {}
+    for row in connection.execute("SELECT match_id, " + ", ".join(identity_columns + evidence_columns) + " FROM matches"):
+        key = tuple(row[1:6]); evidence = tuple(row[6:9])
+        # Double fixtures on the same date can have different scores; preserve the
+        # exact seven-column UNIQUE key rather than merging distinct matches.
+        full_key = key + evidence[:2]
+        existing[full_key] = evidence
+        ids[row[0]] = full_key
+    pending = []
+    skipped = 0
+    for record in records:
+        key = tuple(record[column] for column in identity_columns)
+        evidence = tuple(record[column] for column in evidence_columns)
+        full_key = key + evidence[:2]
+        if record["match_id"] in ids and ids[record["match_id"]] != full_key:
+            raise ValueError("Match ID collision has incompatible event/result evidence")
+        if full_key in existing:
+            if existing[full_key] != evidence:
+                raise ValueError("Duplicate event/result has inconsistent outcome label")
+            skipped += 1
+            continue
+        existing[full_key] = evidence
+        ids[record["match_id"]] = full_key
+        pending.append(record)
     placeholders = ", ".join("?" for _ in columns)
     connection.executemany(
         f"INSERT INTO matches ({', '.join(columns)}) VALUES ({placeholders})",
-        [tuple(record[column] for column in columns) for record in records],
+        [tuple(record[column] for column in columns) for record in pending],
     )
+    if skipped:
+        logging.info("Skipped %s already verified identical event/result rows", skipped)
 
 
 def compute_team_stats(connection: sqlite3.Connection) -> None:

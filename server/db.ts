@@ -1,17 +1,44 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
+import { createPool, type Pool } from "mysql2";
 import { InsertUser, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
+function createUtcPool(databaseUrl: string): Pool {
+  // Driver serialization and server-side CURRENT_TIMESTAMP must use the same
+  // time basis. timezone: 'Z' alone does not set MySQL's session time_zone.
+  const pool = createPool({ uri: databaseUrl, timezone: "Z" });
+  const acquire = pool.getConnection.bind(pool);
+  pool.getConnection = (callback) => {
+    acquire((error, connection) => {
+      if (error) {
+        callback(error, connection);
+        return;
+      }
+      // Gate every checkout, including new/reconnected pooled connections and
+      // transaction clients. Do not expose a session until UTC setup succeeds.
+      connection.query("SET SESSION time_zone = '+00:00'", (setupError) => {
+        if (setupError) connection.destroy();
+        callback(setupError, connection);
+      });
+    });
+  };
+  return pool;
+}
+
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
+    let pool: Pool | undefined;
     try {
-      _db = drizzle(process.env.DATABASE_URL);
-    } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
+      pool = createUtcPool(process.env.DATABASE_URL);
+      _db = drizzle(pool);
+    } catch {
+      pool?.end(() => undefined);
+      // Connection errors can contain connection details; never log the URI.
+      console.warn("[Database] Failed to initialize UTC connection pool");
       _db = null;
     }
   }

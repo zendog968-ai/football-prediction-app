@@ -11,12 +11,13 @@ import { serveStatic, setupVite } from "./vite";
 import { handleScheduledResearch, handleTelegramWebhook } from "../telegramResearch";
 import { handleScheduledAllLeagueSync } from "../allLeagueSync";
 import { registerAdminConfigRoutes } from "../adminConfig";
+import { handleScheduledWeeklyModelReport } from "../weeklyModelReport";
 import { registerDeploymentHealthRoute } from "../deploymentHealth";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
     const server = net.createServer();
-    server.listen(port, () => {
+    server.listen(port, process.env.HOST || "127.0.0.1", () => {
       server.close(() => resolve(true));
     });
     server.on("error", () => resolve(false));
@@ -42,6 +43,7 @@ async function startServer() {
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   // External Telegram updates are authenticated with Telegram's webhook secret.
+  app.get("/api/integrations/telegram/webhook", (_req,res) => res.json({ok:true,service:"telegram-webhook",inboundAudit:true}));
   app.post("/api/integrations/telegram/webhook", (req, res) => {
     void handleTelegramWebhook(req, res).catch(error => {
       console.error("Telegram webhook processing failed", error instanceof Error ? error.name : "unknown");
@@ -53,6 +55,7 @@ async function startServer() {
   app.post("/api/scheduled/research-day", (req, res) => void handleScheduledResearch(req, res, "day_digest"));
   app.post("/api/scheduled/research-evening", (req, res) => void handleScheduledResearch(req, res, "evening_digest"));
   app.post("/api/scheduled/all-league-sync", (req, res) => void handleScheduledAllLeagueSync(req, res));
+  app.post("/api/scheduled/model-drift-weekly", (req,res) => void handleScheduledWeeklyModelReport(req,res));
   registerAdminConfigRoutes(app);
   // tRPC API
   app.use(
@@ -76,7 +79,7 @@ async function startServer() {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 
-  server.listen(port, () => {
+  server.listen(port, process.env.HOST || "127.0.0.1", () => {
     console.log(`Server running on http://localhost:${port}/`);
   });
 }

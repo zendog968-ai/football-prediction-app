@@ -20,9 +20,16 @@ import {
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Link } from "wouter";
+import MatchFeed, { MatchDiagnostics, useResearchNow } from "@/components/MatchFeed";
 
 type Forecast = {
   prediction_as_of: string;
+  predictionUpdatedAt?: string | null;
+  dataQualityReason?: string | null;
+  researchSource?: string | null;
+  homeHistoryMatches?: number | null;
+  awayHistoryMatches?: number | null;
+  leagueHistoryMatches?: number | null;
   league_code: string;
   league_name: string;
   home_team: string;
@@ -75,17 +82,6 @@ function timestampLabel(value: string | null | undefined) {
 function marketImpliedProbability(value: string) {
   const odds = Number(value);
   return Number.isFinite(odds) && odds > 1 ? 1 / odds : null;
-}
-
-function cacheResearchPolicyLabel(policy: {
-  calibrationStatus?: string | null;
-  highConfidenceEnabled?: boolean | null;
-  bettingAdviceEnabled?: boolean | null;
-}) {
-  const calibration = policy.calibrationStatus === "uncalibrated" ? "未校準研究" : "校準狀態未提供（按未校準處理）";
-  const confidence = policy.highConfidenceEnabled === false ? "高信心篩選停用" : "高信心篩選停用（狀態未提供）";
-  const betting = policy.bettingAdviceEnabled === false ? "投注建議停用" : "投注建議停用（狀態未提供）";
-  return `${calibration} · ${confidence} · ${betting}`;
 }
 
 function TeamSearch({
@@ -182,6 +178,7 @@ function OddsInput({ label, value, onChange }: { label: string; value: string; o
 }
 
 export default function Home() {
+  const now = useResearchNow();
   const [leagueCode, setLeagueCode] = useState("BRA1");
   const [homeTeam, setHomeTeam] = useState("");
   const [awayTeam, setAwayTeam] = useState("");
@@ -269,7 +266,7 @@ export default function Home() {
             <div className="relative flex h-full flex-col">
               <div className="flex items-start justify-between gap-4"><div><div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-200"><BarChart3 size={14} />未校準研究輸出</div><h2 className="mt-3 font-serif text-3xl">{display ? `${display.home_team} vs ${display.away_team}` : "等待你的對戰組合"}</h2></div><div className="rounded-xl border border-white/10 bg-white/5 p-2 text-emerald-300"><ShieldCheck size={19} /></div></div>
               {display ? <div className="mt-7 grid gap-3"><ProbabilityCard label="主勝" team={display.home_team} value={display.probabilities.home_win} tone="emerald" /><ProbabilityCard label="和局" team="平局" value={display.probabilities.draw} tone="slate" /><ProbabilityCard label="客勝" team={display.away_team} value={display.probabilities.away_win} tone="amber" /></div> : <div className="my-auto py-10"><div className="grid h-18 w-18 place-items-center rounded-[1.5rem] border border-white/10 bg-white/[0.04] text-amber-200"><Target size={30} /></div><p className="mt-5 max-w-sm text-sm leading-7 text-slate-300">選定兩隊後，系統會展開未校準的賽果機率、歷史樣本與特徵訊號。</p><div className="mt-7 space-y-3 rounded-3xl border border-white/[0.07] bg-white/[0.025] p-4"><div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[.18em] text-slate-500"><span>Research field · uncalibrated</span><span>H · D · A</span></div><div className="space-y-2.5">{[["主勝", "w-3/5", "bg-emerald-400"], ["和局", "w-[34%]", "bg-slate-400"], ["客勝", "w-[47%]", "bg-amber-300"]].map(([label, width, color]) => <div key={label} className="flex items-center gap-3"><span className="w-7 text-[10px] font-bold text-slate-500">{label}</span><div className="h-1 flex-1 overflow-hidden rounded-full bg-white/10"><div className={`h-full rounded-full ${width} ${color}`} /></div></div>)}</div></div></div>}
-              {display && <>{display.lean && <div className="mt-5"><ResearchLean lean={display.lean} dcAvailable={display.diagnostics.dc_available} /></div>}<div className="mt-5 flex items-center gap-2 text-xs text-slate-400"><Clock3 size={14} />歷史資料截點：{display.prediction_as_of}</div><div className="mt-4 rounded-2xl border border-amber-200/20 bg-amber-200/[0.06] p-4 text-xs leading-6 text-slate-300" data-testid="research-disclaimer"><div className="flex items-center gap-2 font-bold text-amber-100"><BadgeInfo size={14} />未校準研究模式</div><p className="mt-2">此處保留16個已驗證範圍內的模型主／和／客機率與歷史資料截點，但目前顯示未經校準驗證，不應視為命中率、保證或模型公平賠率。</p><p className="mt-2 text-slate-400">高信心篩選已停用；投注建議、投注EV與模型公平賠率已停用。下方僅可將輸入市場賠率換算為隱含機率，並與模型機率獨立並列作研究對照。</p></div></>}
+              {display && <>{display.lean && <div className="mt-5"><ResearchLean lean={display.lean} dcAvailable={display.diagnostics.dc_available} /></div>}<div className="mt-5 flex items-center gap-2 text-xs text-slate-400"><Clock3 size={14} />歷史資料截點：{display.prediction_as_of}</div><MatchDiagnostics item={{ diagnostics: display.diagnostics, predictionAsOf: display.prediction_as_of, predictionUpdatedAt: display.predictionUpdatedAt, dataQualityReason: display.dataQualityReason, researchSource: display.researchSource, homeHistoryMatches: display.homeHistoryMatches, awayHistoryMatches: display.awayHistoryMatches, leagueHistoryMatches: display.leagueHistoryMatches }} now={now} /><div className="mt-4 rounded-2xl border border-amber-200/20 bg-amber-200/[0.06] p-4 text-xs leading-6 text-slate-300" data-testid="research-disclaimer"><div className="flex items-center gap-2 font-bold text-amber-100"><BadgeInfo size={14} />未校準研究模式</div><p className="mt-2">此處保留16個已驗證範圍內的模型主／和／客機率與歷史資料截點，但目前顯示未經校準驗證，不應視為命中率、保證或模型公平賠率。</p><p className="mt-2 text-slate-400">高信心篩選已停用；投注建議、投注EV與模型公平賠率已停用。下方僅可將輸入市場賠率換算為隱含機率，並與模型機率獨立並列作研究對照。</p></div></>}
             </div>
           </div>
         </section>
@@ -277,7 +274,14 @@ export default function Home() {
 
         <section className="mt-8 overflow-hidden rounded-[2rem] bg-[#07131f] p-5 text-slate-100 shadow-2xl sm:p-8" data-testid="supabase-cache-board">
           <div className="flex flex-col gap-5 border-b border-white/10 pb-6"><div className="flex items-start justify-between gap-4"><div><div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.22em] text-emerald-300"><Activity size={14}/> Supabase cache · Live research board</div><h2 className="mt-2 font-serif text-3xl">賽事研究中心</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">以Supabase同步快取優先呈現，每30秒自動核對。快取以未校準研究模式顯示模型機率與實際歷史樣本；高信心篩選與投注建議均已停用。</p></div><span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-[10px] font-bold text-emerald-200">{supabaseUpcomingQuery.data?.available ? "未校準快取" : "快取確認中"}</span></div><div className="flex gap-2 overflow-x-auto pb-1">{["全部", "英超", "西甲", "歐霸盃", "日職", "美職"].map(label => <button key={label} onClick={() => setFixtureLeagueFilter(label)} className={`shrink-0 rounded-full px-4 py-2 text-xs font-bold transition ${fixtureLeagueFilter === label ? "bg-emerald-400 text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>{label}</button>)}</div></div>
-          {(() => { const fixtures = (supabaseUpcomingQuery.data?.fixtures || []).filter(item => fixtureLeagueFilter === "全部" || item.leagueName.includes(fixtureLeagueFilter)); const selected = fixtures.find(item => item.fixtureId === selectedFixtureId) || fixtures[0]; return fixtures.length ? <div className="mt-6 grid gap-5 xl:grid-cols-[1.35fr_.65fr]"><div className="space-y-3">{fixtures.map(item => <button key={item.fixtureId} onClick={() => setSelectedFixtureId(item.fixtureId)} className={`w-full rounded-2xl border p-4 text-left transition ${(selected?.fixtureId === item.fixtureId) ? "border-emerald-300 bg-emerald-300/10" : "border-white/10 bg-white/[.035] hover:bg-white/[.07]"}`}><div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[.16em] text-slate-400"><span>{item.leagueName}</span><span>{timestampLabel(item.eventTime)}</span></div><div className="mt-3 flex items-center justify-between gap-3"><div className="font-semibold">{item.homeTeam}</div><div className="rounded-lg bg-white/10 px-3 py-1 font-serif text-lg">{item.predictedScore || "—"}</div><div className="text-right font-semibold">{item.awayTeam}</div></div><div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs"><span className="rounded-lg bg-emerald-400/10 py-2 text-emerald-200">🟢 {percent(item.homeWin)}</span><span className="rounded-lg bg-amber-300/10 py-2 text-amber-100">🟡 {percent(item.draw)}</span><span className="rounded-lg bg-rose-400/10 py-2 text-rose-200">🔴 {percent(item.awayWin)}</span></div><div className="mt-3 rounded-lg border border-white/10 bg-black/10 px-3 py-2 text-[11px] text-slate-300">歷史樣本：{item.homeSampleMatches ?? "—"} 場 vs {item.awaySampleMatches ?? "—"} 場{item.researchSource?.includes("聯賽平均") ? " · 聯賽平均回退" : ""}</div><div className="mt-3 text-xs text-slate-400">研究模式：{cacheResearchPolicyLabel(item)}</div></button>)}</div><aside className="rounded-2xl border border-white/10 bg-white/[.035] p-5">{selected ? <><div className="text-[10px] font-bold uppercase tracking-[.18em] text-emerald-300">Match details</div><h3 className="mt-2 text-lg font-bold">{selected.homeTeam} vs {selected.awayTeam}</h3><p className="mt-1 text-xs text-slate-400">{selected.leagueName} · {timestampLabel(selected.eventTime)}</p><div className="mt-3 rounded-xl border border-amber-200/15 bg-amber-200/[.06] px-3 py-2 text-xs text-amber-100">歷史樣本：主隊 {selected.homeSampleMatches ?? "未提供"} 場 · 客隊 {selected.awaySampleMatches ?? "未提供"} 場 · 聯賽 {selected.leagueSampleMatches ?? "未提供"} 場{selected.researchSource?.includes("聯賽平均") ? " · 已觸發聯賽平均回退" : ""}</div><div className="mt-6 space-y-3">{[["主勝",selected.homeWin,"bg-emerald-400"],["和局",selected.draw,"bg-amber-300"],["客勝",selected.awayWin,"bg-rose-400"]].map(([label,value,color]) => <div key={String(label)}><div className="mb-1 flex justify-between text-xs"><span>{String(label)}</span><span>{percent(value as number)}</span></div><div className="h-2 overflow-hidden rounded-full bg-white/10"><div className={`h-full rounded-full ${String(color)}`} style={{width:`${(value as number)*100}%`}}/></div></div>)}</div><div className="mt-6 rounded-xl border border-white/10 bg-black/20 p-3 text-xs leading-5 text-slate-300"><strong className="text-white">研究摘要</strong><br/>精準比分：{selected.predictedScore || "資料不足"}<br/>研究狀態：{selected.calibrationStatus === "uncalibrated" ? "未校準研究" : "校準狀態未提供（按未校準處理）"}<br/>高信心篩選：停用<br/>投注建議：停用<br/>盤口：已同步盤口將隨下一次快取更新顯示。</div></> : <p className="text-sm text-slate-400">點選賽事卡片查看研究詳情。</p>}</aside></div> : <p className="mt-6 rounded-2xl border border-dashed border-white/15 p-5 text-sm text-slate-400">{supabaseUpcomingQuery.data?.available ? "未來24小時暫無具完整同步研究資料的賽事。" : supabaseUpcomingQuery.data?.reason || "快取資料確認中。"}</p>})()}
+          {supabaseUpcomingQuery.error && <p className="mt-4 text-xs text-amber-100" role="alert">快取讀取失敗：{supabaseUpcomingQuery.error.message}</p>}
+          <p className="mt-4 text-xs text-slate-400">快取讀取：{timestampLabel(supabaseUpcomingQuery.data?.loadedAt)} · 最後賽程同步：{timestampLabel(supabaseUpcomingQuery.data?.lastSyncAt)}（不等同預測更新）</p>
+          {supabaseUpcomingQuery.data?.diagnostics && <p className="mt-2 text-xs leading-5 text-slate-400" data-testid="cache-diagnostics">快取診斷：賽事 {supabaseUpcomingQuery.data.diagnostics.fixtureCount ?? "未提供"} · 有效預測 {supabaseUpcomingQuery.data.diagnostics.validPredictions ?? "未提供"} · 賠率查詢錯誤 {supabaseUpcomingQuery.data.diagnostics.oddsQueryErrors ?? "未提供"} · 賠率資料列 {supabaseUpcomingQuery.data.diagnostics.oddsRows ?? "未提供"} · 最新預測 {timestampLabel(supabaseUpcomingQuery.data.diagnostics.lastPredictionAt)} · 最新賠率 {timestampLabel(supabaseUpcomingQuery.data.diagnostics.lastOddsAt)}{supabaseUpcomingQuery.data.diagnostics.truncated ? " · 查詢結果不完整" : ""}</p>}
+          {(() => {
+            const fixtures = (supabaseUpcomingQuery.data?.fixtures || []).filter(item => fixtureLeagueFilter === "全部" || item.leagueName.includes(fixtureLeagueFilter));
+            return fixtures.length ? <MatchFeed fixtures={fixtures} selectedFixtureId={selectedFixtureId} onSelect={setSelectedFixtureId} now={now} />
+              : <p className="mt-6 rounded-2xl border border-dashed border-white/15 p-5 text-sm text-slate-400">{supabaseUpcomingQuery.data?.available ? "目前篩選範圍內沒有已同步賽事。" : supabaseUpcomingQuery.data?.reason || "快取資料確認中。"}</p>;
+          })()}
         </section>
 
         <section className="mt-8 grid gap-8 lg:grid-cols-[1.05fr_.95fr]">
