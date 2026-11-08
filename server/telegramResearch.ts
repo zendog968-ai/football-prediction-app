@@ -1,3 +1,7 @@
+import { __resetSupabaseUpcomingCacheForTests } from "./supabaseCache";
+export { parseDictionaryCommand, parseDictionaryApproveCommand } from "./telegramHomeCommands";
+import { telegramDictionaryForAdmin, telegramApproveForAdmin } from "./telegramHomeCommands";
+import { telegramInboundEvents } from "../drizzle/schema";
 import { buildTelegramWebhookUrl, formatTelegramRuntimeHeader } from "./telegramWebhookConfig";
 import { predictionIsFresh } from "./predictionFreshness";
 import { formatResearchSamples, hasSufficientResearchSamples, RESEARCH_POLICY_NOTICE } from "./researchPolicy";
@@ -183,7 +187,7 @@ function displayHandicapQuote(quote: CachedHandicapQuote | null | undefined): st
   return `⚖️ 【實時讓球盤】${source} [${quote.homeSelection} @${quote.homeOdds.toFixed(2)} / ${quote.awaySelection} @${quote.awayOdds.toFixed(2)}]`;
 }
 
-export function formatLocalizedResearchCard(item: Pick<CachedUpcomingFixture, "leagueName" | "leagueTranslation" | "eventTime" | "homeTeam" | "homeTeamTranslation" | "awayTeam" | "awayTeamTranslation" | "homeWin" | "draw" | "awayWin" | "compactMarkets" | "topScorelines" | "handicapQuote"> & Partial<Pick<CachedUpcomingFixture, "researchSource" | "homeSampleMatches" | "awaySampleMatches" | "leagueSampleMatches">>): string {
+export function formatLocalizedResearchCard(item: Pick<CachedUpcomingFixture, "leagueName" | "leagueTranslation" | "eventTime" | "homeTeam" | "homeTeamTranslation" | "awayTeam" | "awayTeamTranslation" | "homeWin" | "draw" | "awayWin" | "compactMarkets" | "topScorelines" | "handicapQuote"> & Partial<Pick<CachedUpcomingFixture, "researchSource" | "homeSampleMatches" | "awaySampleMatches" | "leagueSampleMatches" | "oddsStatus" | "predictionUpdatedAt" | "probabilitySource">>): string {
   const percent = (value: number) => Number.isFinite(value) && value >= 0 && value <= 1 ? `${(value * 100).toFixed(1)}%` : "資料不足";
   const total = item.compactMarkets.find(row => row.market === "入球大細 2.5");
   const over = total && (/^大(?:\s|$)/.test(total.selection) || /^over\b/i.test(total.selection)) ? total.probability : total ? 1 - total.probability : null;
@@ -203,7 +207,10 @@ export function formatLocalizedResearchCard(item: Pick<CachedUpcomingFixture, "l
       ? "🚨 【數據警告】目前僅使用聯賽平均，缺少兩隊獨立歷史攻防；不建議參考讓球盤。"
       : null,
     `🛡️ 【雙重機率】1X: ${percent(item.homeWin + item.draw)} | X2: ${percent(item.draw + item.awayWin)}`,
-    displayHandicapQuote(item.handicapQuote),
+    item.handicapQuote ? displayHandicapQuote(item.handicapQuote) + `（抓取 ${formatHktKickoff(item.handicapQuote.capturedAt ?? "")}；供應商更新 ${item.handicapQuote.sourceUpdatedAt ? formatHktKickoff(item.handicapQuote.sourceUpdatedAt) : "未提供"}）`
+      : `⚖️ 【實時讓球盤】${item.oddsStatus === "query_failed" ? "查詢故障，並非確認市場未開盤" : item.oddsStatus === "stale" ? "快照超過30分鐘，已隱藏水位" : item.oddsStatus === "outside_near_window" ? "未進入12小時近開賽盤口更新範圍" : "暫無可驗證HKJC／亞洲盤口"}；不以模型讓球代替市場水位。`,
+    item.predictionUpdatedAt ? `【預測更新】${formatHktKickoff(item.predictionUpdatedAt)}` : null,
+    item.probabilitySource === "q4-poisson-parameter-reconstruction" ? "【機率精度】按已保存q4模型參數重建；參數保留4位小數。" : null,
     `🎯 【模型勝率預測】主勝 ${percent(item.homeWin)} | 和局 ${percent(item.draw)} | 客勝 ${percent(item.awayWin)}`,
     `🔥 【大小球】${over === null || under === null ? "資料不足" : `大 2.5 (${percent(over)}) | 小 2.5 (${percent(under)})`}`,
     "---",
@@ -367,11 +374,12 @@ async function apiFootball<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function verifyApiFootballReadiness(): Promise<void> {
+export async function verifyApiFootballReadiness(options: { requireMlsOdds?: boolean } = {}): Promise<void> {
   const status = await apiFootball<ApiFootballStatus>("/status");
   if (apiErrorCount(status) > 0 || status.response?.subscription?.active !== true || (status.response?.requests?.limit_day ?? 0) < 1000) {
     throw new Error("API-Football帳戶未通過授權或額度健康檢查；研究摘要已安全停止。");
   }
+  if (!options.requireMlsOdds) return; // One league lacking odds must not halt other research or settlement.
   const mls = LEAGUES.MLS;
   const mlsOdds = await apiFootball<ApiFootballOddsResponse>(`/odds?league=${mls.apiLeagueId}&season=${mls.season}`);
   if (apiErrorCount(mlsOdds) > 0 || !Array.isArray(mlsOdds.response) || mlsOdds.response.length === 0) {
@@ -1381,7 +1389,7 @@ export async function runSettlementDigest(): Promise<{ digestId: number; settled
   return { digestId, settled };
 }
 
-export async function handleTelegramWebhook(req: Request, res: Response): Promise<void> {
+async function handleTelegramWebhookCore(req: Request, res: Response): Promise<void> {
   const suppliedSecret = req.get("x-telegram-bot-api-secret-token") || "";
   const expectedSecret = requireSecret(ENV.telegramWebhookSecret, "Telegram Webhook Secret");
   if (!isSameSecret(suppliedSecret, expectedSecret)) {
@@ -1424,8 +1432,28 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     await sendTelegramMessage(String(chatId), "Aurelia Football研究通知已啟用。你會收到經資料品質檢核的研究摘要與賽後統計；回覆 /stop 可停止通知。所有內容僅供研究，並非投注或資金建議。");
   } else if (text === "/help") {
     await sendTelegramMessage(String(chatId), TELEGRAM_HELP_MESSAGE);
+  } else if (text === "/dict") {
+    await sendTelegramMessage(String(chatId),await telegramDictionaryForAdmin(String(chatId),message?.text)); __resetSupabaseUpcomingCacheForTests();
+  } else if (text === "/approve") {
+    await sendTelegramMessage(String(chatId),await telegramApproveForAdmin(String(chatId),message?.text)); __resetSupabaseUpcomingCacheForTests();
+  } else if (text === "/health") {
+    const cache=await getSupabaseUpcomingCache();
+    await sendTelegramMessage(String(chatId),`【足球資料健康】\n有效研究：${cache.fixtures.filter(row=>row.hasPrediction).length}/${cache.fixtures.length}\n最後同步：${cache.lastSyncAt ? formatHktKickoff(cache.lastSyncAt) : "未取得"}\n研究模式；未完成前瞻校準。\n${cache.diagnostics?.warnings?.join("、") || "未見查詢警告"}`);
+  } else if (text === "/jobs" || text === "/sys_status") {
+    await sendTelegramMessage(String(chatId),process.env.FOOTBALL_OPERATIONS_OWNER === "home" ? "【Home足球排程】\n資料同步：每15分鐘（全量賽程每6小時）\n預測摘要：每日09:10／17:10 HKT\n官方結算：每15分鐘；只發新結算\n研究健康：星期一09:20 HKT\n每日Home健康：09:00 HKT\n同一key不重送；Telegram接受不等於手機已讀。" : JSON.stringify(await getResearchNotificationStatus()));
+  } else if (text === "/inbound") {
+    if (String(chatId)!==ENV.telegramAdminChatId) await sendTelegramMessage(String(chatId),"無權限");
+    else {const rows=await db.select().from(telegramInboundEvents).orderBy(desc(telegramInboundEvents.receivedAt)).limit(10);await sendTelegramMessage(String(chatId),["【入站稽核】",...rows.map(row=>`${formatHktKickoff(row.receivedAt)}｜${row.command}｜${row.status}`)].join("\n"));}
   } else if (text === "/trend") {
     await sendTelegramMessage(String(chatId), await telegramTrendForRequest(message?.text));
+  } else if (text === "/today") {
+    const cache=await getSupabaseUpcomingCache();
+    const filters=(message?.text ?? "").replace(/^\/today(?:@\w+)?/i,"").trim().split(/\s+/).filter(Boolean);
+    const today=new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Hong_Kong"});
+    const rows=cache.fixtures.filter(row=>new Date(row.eventTime).toLocaleDateString("en-CA",{timeZone:"Asia/Hong_Kong"})===today && (!filters.length || filters.some(name=>formatLeagueDisplay(row.leagueName,undefined,row.leagueTranslation ?? undefined).includes(name) || row.leagueName.toLowerCase().includes(name.toLowerCase()))));
+    await sendTelegramMessage(String(chatId),formatCachedUpcoming(rows));
+  } else if (text === "/predict") {
+    const result=await telegramTeamResearch(req,(message?.text ?? "").replace(/^\/predict(?:@\w+)?/i,"/team"));await sendTelegramMessage(String(chatId),result.text,result.buttons);
   } else if (text === "/upcoming" || text === "/report") {
     await sendTelegramMessage(String(chatId), await telegramUpcoming());
   } else if (text === "/team") {
@@ -1448,6 +1476,23 @@ export async function handleTelegramWebhook(req: Request, res: Response): Promis
     }
   }
   res.status(200).json({ ok: true });
+}
+
+export async function handleTelegramWebhook(req: Request, res: Response): Promise<void> {
+  const secret = req.get("x-telegram-bot-api-secret-token") || "";
+  if (!isSameSecret(secret, requireSecret(ENV.telegramWebhookSecret, "Telegram Webhook Secret")) || !Number.isSafeInteger(req.body?.update_id) || req.body.update_id < 0) { await handleTelegramWebhookCore(req,res); return; }
+  const db = await getDb(); if (!db) throw new Error("入站稽核資料庫暫時不可用");
+  const updateId = String(req.body.update_id);
+  const chat = req.body.message?.chat?.id ?? req.body.callback_query?.message?.chat?.id;
+  const raw = normalizeTelegramCommand(req.body.message?.text);
+  const command = req.body.callback_query ? "callback_query" : raw?.startsWith("/") ? raw.slice(0,64) : "team_lookup";
+  try { await db.insert(telegramInboundEvents).values({telegramUpdateId:updateId,chatId:chat ? String(chat) : null,command,status:"received",receivedAt:new Date()}); }
+  catch(error) {
+    const e=error as {code?:string,cause?:{code?:string}};
+    if((e.code ?? e.cause?.code)==="ER_DUP_ENTRY") {res.status(200).json({ok:true,duplicate:true});return;} throw error;
+  }
+  try { await handleTelegramWebhookCore(req,res); await db.update(telegramInboundEvents).set({status:"processed",handledAt:new Date()}).where(eq(telegramInboundEvents.telegramUpdateId,updateId)); }
+  catch(error) { await db.update(telegramInboundEvents).set({status:"failed",handledAt:new Date(),errorSummary:error instanceof Error ? error.name : "ProcessingError"}).where(eq(telegramInboundEvents.telegramUpdateId,updateId)); throw error; }
 }
 
 export async function configureTelegramWebhook(request: Request): Promise<{ webhookUrl: string }> {
@@ -1498,6 +1543,7 @@ export async function handleScheduledResearch(req: Request, res: Response, kind:
     }
     const db = await getDb();
     if (!db) throw new Error("資料庫暫時無法使用。");
+    if (process.env.FOOTBALL_OPERATIONS_OWNER === "home") {res.json({ok:true,skipped:"home-worker-owner"});return;}
     const job = (await db.select().from(researchScheduleJobs).where(and(eq(researchScheduleJobs.scheduleCronTaskUid, user.taskUid), eq(researchScheduleJobs.kind, kind))).limit(1))[0];
     if (!job) {
       res.json({ ok: true, skipped: "orphan" });

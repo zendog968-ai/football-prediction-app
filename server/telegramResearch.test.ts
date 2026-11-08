@@ -168,7 +168,7 @@ describe("Telegram系統指令", () => {
     expect(text).toContain("⚽️ 【Example Home】 vs 【Example Away】");
     const noQuote = formatCachedUpcoming([{ ...base, handicapQuote: null }], new Date("2026-08-15T00:00:00Z"));
     expect(noQuote).toContain("主勝 60.0%");
-    expect(noQuote).toContain("沒有完整主客兩邊實際盤口");
+    expect(noQuote).toContain("不以模型讓球代替市場水位");
     expect(formatCachedUpcoming([{ ...base, homeSampleMatches: null }], new Date("2026-08-15T00:00:00Z"))).toBe("");
     expect(formatCachedUpcoming([{ ...base, homeSampleMatches: 4 }], new Date("2026-08-15T00:00:00Z"))).toBe("");
   });

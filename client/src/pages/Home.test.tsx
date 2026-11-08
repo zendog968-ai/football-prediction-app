@@ -40,7 +40,7 @@ const forecastResult = {
 const mutationSpy = vi.fn();
 const telegramWebhookSpy = vi.fn();
 const telegramSchedulesSpy = vi.fn();
-const mockState = vi.hoisted(() => ({ teamsLoading: false, forecastError: null as { message: string } | null }));
+const mockState = vi.hoisted(() => ({ teamsLoading: false, forecastError: null as { message: string } | null, cacheMode: "fresh" as "fresh" | "stale" | "invalid" | "missing" }));
 const expandedLeagueTeams = vi.hoisted(() => ({
   MLS: ["Atlanta United", "Los Angeles Galaxy"],
   J1: ["Kawasaki Frontale", "Urawa Reds"],
@@ -112,7 +112,7 @@ vi.mock("@/lib/trpc", () => ({
             source: "Supabase cache",
             loadedAt: "2026-08-15T10:00:00Z",
             available: true,
-            fixtures: [{ fixtureId: 9001, leagueName: "MLS", eventTime: "2026-08-15T20:00:00Z", homeTeam: "Cache Home", awayTeam: "Cache Away", homeWin: 0.62, draw: 0.21, awayWin: 0.17, predictedScore: "2-1", recommendation: null, calibrationStatus: "uncalibrated" as const, highConfidenceEnabled: false as const, bettingAdviceEnabled: false as const, confidence: 0, homeSampleMatches: 48, awaySampleMatches: 46, leagueSampleMatches: 1900, predictionUpdatedAt: "2026-08-15T10:00:00Z" }],
+            fixtures: [{ fixtureId: 9001, leagueName: "MLS", eventTime: new Date(Date.now() + 6 * 3600000).toISOString(), homeTeam: "Cache Home", awayTeam: "Cache Away", homeWin: mockState.cacheMode === "invalid" ? Number.NaN : 0.62, draw: 0.21, awayWin: 0.17, predictedScore: "2-1", recommendation: null, calibrationStatus: "uncalibrated" as const, highConfidenceEnabled: false as const, bettingAdviceEnabled: false as const, confidence: 0, homeSampleMatches: 48, awaySampleMatches: 46, leagueSampleMatches: 1900, homeHistoryMatches: mockState.cacheMode === "missing" ? null : 38, awayHistoryMatches: 36, leagueHistoryMatches: 1900, predictionUpdatedAt: new Date(Date.now() - (mockState.cacheMode === "stale" ? 3 * 3600000 : 30 * 60000)).toISOString(), hasPrediction: true, dataQualityReason: mockState.cacheMode === "stale" ? "prediction_stale" : "ok", oddsStatus: "not_available", odds: null, researchSource: "poisson-v4-shrink10-research（未校準；無市場融合）" }],
           },
           isLoading: false,
         }),
@@ -159,6 +159,7 @@ describe("Home prediction workflow", () => {
     telegramSchedulesSpy.mockClear();
     mockState.teamsLoading = false;
     mockState.forecastError = null;
+    mockState.cacheMode = "fresh";
   });
 
   it("filters teams, submits a forecast and writes the query to session history", async () => {
@@ -198,13 +199,37 @@ describe("Home prediction workflow", () => {
     const cache = screen.getByTestId("supabase-cache-board");
     expect(cache.textContent).toContain("Supabase cache");
     expect(screen.getByText("Cache Home vs Cache Away")).toBeTruthy();
-    expect(cache.textContent).toContain("🟢 62.0%");
-    expect(cache.textContent).toContain("歷史樣本：48 場 vs 46 場");
+    expect(cache.textContent).toContain("主勝 62.0%");
+    expect(cache.textContent).toContain("實際歷史樣本：主隊 38 場 · 客隊 36 場");
+    expect(cache.textContent).toContain("模型有效樣本（不等同實際歷史）：主隊 48 場 · 客隊 46 場");
+    expect(cache.textContent).toMatch(/更新年齡：(29|30) 分鐘/);
+    expect(cache.textContent).toContain("未提供可用賠率");
     expect(cache.textContent).toContain("未校準");
     expect(cache.textContent).toContain("高信心篩選停用");
     expect(cache.textContent).toContain("投注建議停用");
     expect(cache.textContent).not.toContain("⭐⭐⭐⭐");
     expect(cache.textContent).not.toContain("研究傾向：主勝");
+  });
+
+  it.each(["stale", "invalid"] as const)("hides %s cache probabilities and scorelines but keeps reasons visible", mode => {
+    mockState.cacheMode = mode;
+    render(<Home />);
+    const text = screen.getByTestId("supabase-cache-board").textContent;
+    expect(text).not.toContain("62.0%");
+    expect(text).not.toContain("2-1");
+    expect(text).not.toContain("NaN");
+    expect(text).toContain(mode === "stale" ? "預測過期" : "機率資料無效");
+    expect(text).toContain("賠率狀態");
+    expect(text).toContain("實際歷史樣本");
+  });
+
+  it("never substitutes effective sample count when actual home history is missing", () => {
+    mockState.cacheMode = "missing";
+    render(<Home />);
+    const text = screen.getByTestId("supabase-cache-board").textContent;
+    expect(text).toContain("實際歷史樣本：主隊 未提供");
+    expect(text).toContain("模型有效樣本（不等同實際歷史）：主隊 48 場");
+    expect(text).toContain("預測資料截點：未提供（不以更新時間代替）");
   });
 
   it("clears stored session history", async () => {

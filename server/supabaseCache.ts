@@ -1,6 +1,10 @@
+import { getDb } from "./db";
+import { teamNameTranslations } from "../drizzle/schema";
+import { inArray } from "drizzle-orm";
+import { readOperationsSnapshot } from "./operationsSnapshot";
 import { predictionIsFresh, snapshotIsFresh } from "./predictionFreshness";
 import { hasSufficientResearchSamples, RESEARCH_POLICY } from "./researchPolicy";
-import { handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
+import { outcomeProbabilities, handicapSelectionProbability, handicapWinDistribution, highestOutcome, mainstreamTotals, topScorelines, type CompactMarketRow, type ScorelineProbability } from "@shared/compactResearch";
 import { ENV } from "./_core/env";
 
 type CachedMarketSelection = { selection: string; odds: number | null };
@@ -17,11 +21,22 @@ export type CachedHandicapQuote = {
   awaySelection: string;
   awayOdds: number;
   capturedAt: string | null;
+  sourceUpdatedAt?: string | null;
 };
 
 export type CachedUpcomingFixture = {
   fixtureId: number;
   leagueName: string;
+  leagueId?: number;
+  homeHistoryMatches?: number | null;
+  awayHistoryMatches?: number | null;
+  leagueHistoryMatches?: number | null;
+  predictionAsOf?: string | null;
+  homeTeamId?: number;
+  awayTeamId?: number;
+  dataQualityReason?: string;
+  oddsStatus?: string;
+  probabilitySource?: string;
   leagueTranslation?: CachedTranslation | null;
   eventTime: string;
   homeTeam: string;
@@ -55,13 +70,14 @@ export type CachedUpcomingFixture = {
 };
 
 export type SupabaseUpcomingCache = {
-  source: "Supabase cache";
+  source: "Supabase cache" | "Home bounded operations (Supabase mirror)";
   loadedAt: string;
   available: boolean;
   reason?: string;
   fallback?: boolean;
   lastSyncAt?: string | null;
   fixtures: CachedUpcomingFixture[];
+  diagnostics?: { fixtureCount: number; validPredictions: number; oddsQueryErrors: number; oddsRows: number; localSnapshot: boolean; lastPredictionAt: string | null; lastOddsAt: string | null; schemaVersion: string; truncated: boolean; warnings: string[]; metadataStatus?: "valid" | "invalid"; schemaStatus?: "compatible"; scope?: string };
 };
 
 const CACHE_MS = 30_000;
@@ -107,6 +123,7 @@ type HandicapSnapshotCandidate = {
   line: number;
   odds: number;
   capturedAt: string | null;
+  sourceUpdatedAt?: string | null;
 };
 
 function parseHandicapCandidate(snapshot: Record<string, unknown>): HandicapSnapshotCandidate[] {
@@ -131,6 +148,7 @@ function parseHandicapCandidate(snapshot: Record<string, unknown>): HandicapSnap
     line,
     odds: (side === "Home" ? homeOdds : awayOdds)!,
     capturedAt,
+    ...(typeof snapshot.provider_updated_at === "string" ? {sourceUpdatedAt: snapshot.provider_updated_at} : {}),
   });
   const oppositeOdds = side === "Home" ? awayOdds : homeOdds;
   if (oppositeOdds !== null) candidates.push({
@@ -141,6 +159,7 @@ function parseHandicapCandidate(snapshot: Record<string, unknown>): HandicapSnap
     line: -line,
     odds: oppositeOdds,
     capturedAt,
+    ...(typeof snapshot.provider_updated_at === "string" ? {sourceUpdatedAt: snapshot.provider_updated_at} : {}),
   });
   return candidates;
 }
@@ -163,6 +182,7 @@ function pairHandicapSnapshots(rows: Array<Record<string, unknown>>): Map<number
       awaySelection: displayHandicapSelection("Away", away.line),
       awayOdds: away.odds,
       capturedAt: home.capturedAt,
+      ...(home.sourceUpdatedAt ? {sourceUpdatedAt: home.sourceUpdatedAt} : {}),
     });
   }
   return result;
@@ -179,7 +199,7 @@ function parseResearchMetadata(value: unknown) {
     const metadata: Record<string, unknown> = Array.isArray(tuple) && tuple.length === 5
       && tuple.slice(0, 2).every(value => typeof value === "number" && Number.isFinite(value) && value >= 0.2 && value <= 4.5)
       && tuple.slice(2).every(value => typeof value === "number" && Number.isSafeInteger(value) && value >= 0)
-      ? { s: "Q4", c: "u", h: tuple[0], a: tuple[1], home_sample_matches: tuple[2], away_sample_matches: tuple[3], league_sample_matches: tuple[4] }
+      ? { s: "Q4", c: "u", h: tuple[0], a: tuple[1], home_sample_matches: tuple[2], away_sample_matches: tuple[3], league_sample_matches: tuple[4], decoded_q4: true }
       : parsed;
     if (metadata && Array.isArray(metadata.n) && metadata.n.length === 3) {
       metadata.home_sample_matches = metadata.home_sample_matches ?? metadata.n[0];
@@ -222,6 +242,7 @@ async function queryRows(path: string): Promise<Array<Record<string, unknown>>> 
       Authorization: `Bearer ${ENV.supabaseSecretKey}`,
       Accept: "application/json",
     },
+    signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new Error(`Supabase cache query failed (${response.status})`);
   const payload = await response.json();
@@ -244,8 +265,13 @@ function chunks<T>(items: T[], size: number): T[][] {
 }
 
 async function queryFixtureRelatedRows(select: string, ids: number[]): Promise<Array<Record<string, unknown>>> {
-  const rows = await Promise.all(chunks(ids, 150).map(group => queryRows(`${select}&fixture_id=in.(${group.join(",")})`)));
-  return rows.flat();
+  const rows: Array<Record<string, unknown>> = [];
+  const groups = chunks(ids, 100);
+  for (let i = 0; i < groups.length; i += 4) {
+    const batch = await Promise.all(groups.slice(i, i + 4).map(group => queryRows(`${select}&fixture_id=in.(${group.join(",")})&limit=1000`)));
+    rows.push(...batch.flat());
+  }
+  return rows;
 }
 
 function recordText(row: Record<string, unknown>, keys: string[]): string | null {
@@ -282,7 +308,7 @@ async function queryOptionalTranslationRows(table: string): Promise<Array<Record
 
 export function safeCacheProjection(payload: SupabaseUpcomingCache, now = Date.now()): SupabaseUpcomingCache {
   return { ...payload, fixtures: payload.fixtures.map(row => {
-    const fresh = row.hasPrediction && predictionIsFresh(row.predictionUpdatedAt, row.eventTime, now)
+    const fresh = row.hasPrediction && [row.homeWin,row.draw,row.awayWin].every(v => Number.isFinite(v) && v>=0 && v<=1) && Math.abs(row.homeWin+row.draw+row.awayWin-1)<0.001 && predictionIsFresh(row.predictionUpdatedAt, row.eventTime, now)
       && hasSufficientResearchSamples(row.homeSampleMatches, row.awaySampleMatches, row.leagueSampleMatches);
     const quote = row.handicapQuote;
     const odds = row.odds;
@@ -299,6 +325,8 @@ export function safeCacheProjection(payload: SupabaseUpcomingCache, now = Date.n
       bettingAdviceEnabled: false as const,
       confidence: 0, // The legacy star field is not calibrated confidence.
       hasPrediction: fresh,
+      dataQualityReason: fresh ? row.dataQualityReason ?? "ok" : row.dataQualityReason && row.dataQualityReason !== "ok" ? row.dataQualityReason : "prediction_stale_or_insufficient",
+      oddsStatus: quote && snapshotIsFresh(quote.capturedAt, now) ? "verified" : row.oddsStatus === "verified" ? "stale" : row.oddsStatus,
       compactMarkets: fresh ? row.compactMarkets.filter(m => !(m.market.startsWith("亞洲讓球") || m.market === "讓球盤 (Handicap)") || Boolean(quote && snapshotIsFresh(quote.capturedAt, now))) : [],
       topScorelines: fresh ? row.topScorelines : [],
       handicapQuote: quote && snapshotIsFresh(quote.capturedAt, now) ? quote : null,
@@ -311,20 +339,60 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
   if (!force && cache && cache.expiresAt > Date.now()) return safeCacheProjection(cache.payload);
   const loadedAt = new Date().toISOString();
   try {
-    const now = encodeURIComponent(new Date().toISOString());
-    const fixtures = await queryPagedRows(`fixtures?select=fixture_id,league_name,event_time,home_team,away_team,status,updated_at&event_time=gte.${now}&order=event_time.asc`);
+    const startAt = new Date();
+    const now = encodeURIComponent(startAt.toISOString());
+    const endAt = encodeURIComponent(new Date(startAt.getTime() + 48 * 3600000).toISOString());
+    const local = await readOperationsSnapshot();
+    // Bounded two-day window, 5,000 rows. Unlike the old first-300 cutoff this covers busy matchdays.
+    let remoteFixturesFailed = false;
+    const remoteFixtures = local ? [] : await queryPagedRows(`fixtures?select=fixture_id,league_name,event_time,home_team,away_team,status,updated_at&event_time=gte.${now}&event_time=lt.${endAt}&order=event_time.asc,fixture_id.asc`, 1000, 5).catch(error => { if (!local) throw error; remoteFixturesFailed = true; return []; });
+    const fixtureMap = new Map(remoteFixtures.map(row => [Number(row.fixture_id), row]));
+    for (const row of local?.fixtures ?? []) fixtureMap.set(Number(row.fixture_id), row);
+    const fixtures = Array.from(fixtureMap.values()).filter(row => Date.parse(String(row.event_time)) > startAt.getTime() && Date.parse(String(row.event_time)) < startAt.getTime() + 48 * 3600000);
     const ids = fixtures.map(row => Number(row.fixture_id)).filter(Number.isInteger);
+    let oddsQueryErrors = 0;
+    let oddsTruncated = false;
+    const diagnosticsWarnings: string[] = [...(local?.warnings ?? []), ...(remoteFixturesFailed ? ["SUPABASE_FIXTURES_QUERY_FAILED_LOCAL_AVAILABLE"] : [])];
     if (ids.length === 0) {
       const payload: SupabaseUpcomingCache = { source: "Supabase cache", loadedAt, available: true, fixtures: [], lastSyncAt: null };
       cache = { expiresAt: Date.now() + CACHE_MS, payload };
       return safeCacheProjection(payload);
     }
-    const [predictions, oddsSnapshots, teamTranslationRows, leagueTranslationRows] = await Promise.all([
-      queryFixtureRelatedRows("ai_predictions?select=fixture_id,home_win_prob,draw_prob,away_win_prob,predicted_score,recommendation,confidence,updated_at", ids),
-      queryFixtureRelatedRows("odds_snapshots?select=fixture_id,market_type,handicap,home_odds,draw_odds,away_odds,snapshot_time&order=snapshot_time.desc", ids),
-      queryOptionalTranslationRows(ENV.supabaseTeamTranslationsTable),
-      queryOptionalTranslationRows(ENV.supabaseLeagueTranslationsTable),
+    const [remotePredictions, teamTranslationRows, leagueTranslationRows] = await Promise.all([
+      local ? Promise.resolve([]) : queryFixtureRelatedRows("ai_predictions?select=fixture_id,home_win_prob,draw_prob,away_win_prob,predicted_score,recommendation,confidence,updated_at", ids).catch(() => { diagnosticsWarnings.push("SUPABASE_PREDICTIONS_QUERY_FAILED"); return []; }),
+      local ? (async () => {
+        const db=await getDb(); if(!db) return [];
+        const names=Array.from(new Set(fixtures.flatMap(row=>[String(row.home_team),String(row.away_team)]))).slice(0,200);
+        const rows=await db.select().from(teamNameTranslations).where(inArray(teamNameTranslations.englishName,names));
+        return rows.map(row=>({english_name:row.englishName,name_zh_hk:row.traditionalName}));
+      })().catch(()=>{diagnosticsWarnings.push("LOCAL_TRANSLATIONS_UNAVAILABLE");return [];}) : queryOptionalTranslationRows(ENV.supabaseTeamTranslationsTable),
+      local ? Promise.resolve([]) : queryOptionalTranslationRows(ENV.supabaseLeagueTranslationsTable),
     ]);
+    const predictionMap = new Map(remotePredictions.map(row => [Number(row.fixture_id), row]));
+    for (const row of local?.predictions ?? []) {
+      const existing = predictionMap.get(Number(row.fixture_id));
+      if (!existing || Date.parse(String(row.updated_at)) >= Date.parse(String(existing.updated_at))) predictionMap.set(Number(row.fixture_id), row);
+    }
+    const predictions = Array.from(predictionMap.values());
+    let oddsSnapshots: Record<string, unknown>[] = local?.odds ?? [];
+    if (!local) {
+      try {
+        // Scan the recent primary-key window, not an unindexed fixture+time conjunction.
+        const latest = await queryRows("odds_snapshots?select=id&order=id.desc&limit=1");
+        let cursor = Number(latest[0]?.id) + 1;
+        const floor = Math.max(0, cursor - 250000);
+        const result: Record<string, unknown>[] = [];
+        const wanted = new Set(ids);
+        for (let page = 0; page < 3 && Number.isSafeInteger(cursor); page++) {
+          const batch = await queryRows(`odds_snapshots?select=id,fixture_id,market_type,handicap,home_odds,draw_odds,away_odds,snapshot_time&id=gte.${floor}&id=lt.${cursor}&order=id.desc&limit=1000`);
+          result.push(...batch.filter(row => wanted.has(Number(row.fixture_id))));
+          if (batch.length < 1000 || batch.every(row => Date.parse(String(row.snapshot_time)) < startAt.getTime() - 30 * 60000)) break;
+          cursor = Number(batch.at(-1)?.id);
+          if (page === 2) oddsTruncated = true;
+        }
+        oddsSnapshots = result;
+      } catch { oddsQueryErrors++; diagnosticsWarnings.push("ODDS_QUERY_FAILED"); }
+    }
     const teamTranslations = translationIndex(teamTranslationRows, ["english_name", "team_name", "name"]);
     const leagueTranslations = translationIndex(leagueTranslationRows, ["english_name", "league_name", "name"]);
     const byFixture = new Map(predictions.map(row => [Number(row.fixture_id), row]));
@@ -377,9 +445,9 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
     const rows = fixtures.flatMap((fixture): CachedUpcomingFixture[] => {
       const fixtureId = Number(fixture.fixture_id);
       const prediction = byFixture.get(fixtureId);
-      const homeWin = normalizeProbability(prediction?.home_win_prob);
-      const draw = normalizeProbability(prediction?.draw_prob);
-      const awayWin = normalizeProbability(prediction?.away_win_prob);
+      let homeWin = normalizeProbability(prediction?.home_win_prob);
+      let draw = normalizeProbability(prediction?.draw_prob);
+      let awayWin = normalizeProbability(prediction?.away_win_prob);
       const { recommendation, metadata } = parseResearchMetadata(prediction?.recommendation);
       const expectedHomeGoals = normalizeExpectedGoals(metadata?.expected_home_goals ?? metadata?.h) ?? null;
       const expectedAwayGoals = normalizeExpectedGoals(metadata?.expected_away_goals ?? metadata?.a) ?? null;
@@ -388,6 +456,15 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       const researchSource = sourceCode === "Q4"
         ? "poisson-v4-shrink10-research（未校準；無市場融合）"
         : "舊版研究來源未校準／未核實；不宣稱市場融合";
+      // q4 stores the sufficient Poisson parameters at four decimals. Recompute the SAME
+      // 25x25 independent-Poisson grid rather than normalising unknown corrupted 1X2 rows.
+      // Non-q4 formats never receive this recovery; provenance is exposed to callers.
+      let probabilitySource = "stored-1x2";
+      const reconstructed = sourceCode === "Q4" && metadata?.decoded_q4 === true ? outcomeProbabilities(expectedHomeGoals, expectedAwayGoals) : null;
+      if (reconstructed) {
+        homeWin = reconstructed.homeWin; draw = reconstructed.draw; awayWin = reconstructed.awayWin;
+        probabilitySource = "q4-poisson-parameter-reconstruction";
+      }
       const handicap = handicapByFixture.get(fixtureId);
       const handicap025 = handicap025ByFixture.get(fixtureId);
       const handicap075 = handicap075ByFixture.get(fixtureId);
@@ -421,6 +498,16 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       if (!Number.isInteger(fixtureId) || !eventTime || !homeTeam || !awayTeam) return [];
       return [{
         fixtureId,
+        leagueId: typeof fixture.league_id === "number" ? fixture.league_id : undefined,
+        homeHistoryMatches: sourceCode === "Q4" ? normalizeSampleCount(metadata?.home_sample_matches) : null,
+        awayHistoryMatches: sourceCode === "Q4" ? normalizeSampleCount(metadata?.away_sample_matches) : null,
+        leagueHistoryMatches: sourceCode === "Q4" ? normalizeSampleCount(metadata?.league_sample_matches) : null,
+        predictionAsOf: typeof prediction?.prediction_as_of === "string" ? prediction.prediction_as_of : null,
+        homeTeamId: typeof fixture.home_team_id === "number" ? fixture.home_team_id : undefined,
+        awayTeamId: typeof fixture.away_team_id === "number" ? fixture.away_team_id : undefined,
+        probabilitySource,
+        oddsStatus: oddsQueryErrors ? "query_failed" : oddsTruncated ? "partial_query" : handicapQuote ? snapshotIsFresh(handicapQuote.capturedAt) ? "verified" : "stale" : local?.odds_status?.[String(fixtureId)] ?? "not_available",
+        dataQualityReason: !prediction ? "no_prediction" : sourceCode !== "Q4" ? "unverified_model_version" : !hasSufficientResearchSamples(normalizeSampleCount(metadata?.home_sample_matches), normalizeSampleCount(metadata?.away_sample_matches), normalizeSampleCount(metadata?.league_sample_matches)) ? "insufficient_samples" : !predictionIsFresh(prediction.updated_at, eventTime) ? "prediction_stale" : homeWin === null || draw === null || awayWin === null || Math.abs(homeWin + draw + awayWin - 1) >= 0.001 ? "invalid_probability" : "ok",
         leagueName,
         leagueTranslation: leagueTranslations.get(leagueName.toLocaleLowerCase()) ?? null,
         eventTime,
@@ -448,7 +535,7 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
     }).sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime());
     const lastSyncAt = fixtures.map(row => typeof row.updated_at === "string" ? row.updated_at : null).filter(Boolean).sort().at(-1) ?? null;
     const payload: SupabaseUpcomingCache = {
-      source: "Supabase cache",
+      source: local ? "Home bounded operations (Supabase mirror)" : "Supabase cache",
       loadedAt,
       available: true,
       fixtures: rows,
@@ -457,6 +544,13 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
         return diff >= 0 && diff <= 24 * 60 * 60_000;
       }),
       lastSyncAt,
+      diagnostics: {
+        fixtureCount: rows.length, validPredictions: rows.filter(row => row.hasPrediction && hasSufficientResearchSamples(row.homeSampleMatches,row.awaySampleMatches,row.leagueSampleMatches)).length,
+        oddsQueryErrors, oddsRows: oddsSnapshots.length, localSnapshot: Boolean(local),
+        lastPredictionAt: predictions.map(row => String(row.updated_at ?? "")).sort().at(-1) ?? null,
+        lastOddsAt: oddsSnapshots.map(row => String(row.snapshot_time ?? "")).sort().at(-1) ?? null,
+        schemaVersion: "q4-v1", metadataStatus: rows.some(row=>row.dataQualityReason === "invalid_probability" || row.dataQualityReason === "unverified_model_version") ? "invalid" : "valid", schemaStatus: "compatible", scope: local ? "verified-research-leagues-48h" : "supabase-catalog-48h", truncated: remoteFixtures.length >= 5000 || oddsTruncated, warnings: diagnosticsWarnings,
+      },
     };
     cache = { expiresAt: Date.now() + CACHE_MS, payload };
     return safeCacheProjection(payload);

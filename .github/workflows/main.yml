@@ -19,6 +19,7 @@ permissions:
 
 jobs:
   sync:
+    if: ${{ vars.FOOTBALL_OPERATIONS_OWNER != 'home' || (github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:

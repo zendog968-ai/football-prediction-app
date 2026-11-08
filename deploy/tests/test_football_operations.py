@@ -1,0 +1,69 @@
+import importlib.util, pathlib, sys, json, sqlite3, urllib.error
+from unittest.mock import patch
+import pytest
+ROOT=pathlib.Path(__file__).resolve().parents[2]
+spec=importlib.util.spec_from_file_location('football_ops',ROOT/'deploy/football_operations.py')
+m=importlib.util.module_from_spec(spec);sys.modules[spec.name]=m;spec.loader.exec_module(m)
+
+@pytest.fixture
+def store(tmp_path,monkeypatch):
+    monkeypatch.setattr(m,'STATE',tmp_path)
+    monkeypatch.setenv('TELEGRAM_BOT_TOKEN','test-not-real')
+    monkeypatch.setenv('TELEGRAM_CHAT_ID','123')
+    monkeypatch.setenv('API_FOOTBALL_KEY','test-not-real')
+    con=m.db_open();yield con;con.close()
+
+def test_send_once_atomic_and_suppressed(store):
+    class Receipt:
+        def __enter__(self):return self
+        def __exit__(self,*_):pass
+        def read(self,*_):return b'{"ok":true,"result":{"message_id":88}}'
+    with patch.object(m.urllib.request,'urlopen',return_value=Receipt()) as send:
+        assert m.send_once(store,'day:1','test')['message_id']==88
+        assert m.send_once(store,'day:1','changed')['status']=='skipped_existing'
+        assert send.call_count==1
+    row=store.execute('SELECT status,body,sha256 FROM deliveries').fetchone()
+    assert row==('accepted','test',m.digest('test'))
+
+def test_uncertain_delivery_not_automatically_retried(store):
+    with patch.object(m.urllib.request,'urlopen',side_effect=TimeoutError()) as send:
+        assert m.send_once(store,'one','test')['status']=='uncertain'
+        assert m.send_once(store,'one','test')['status']=='skipped_existing'
+        assert send.call_count==1
+
+def test_reject_oversized_complete_message_before_attempt(store):
+    with pytest.raises(ValueError):m.send_once(store,'huge','x'*3901)
+    assert store.execute('SELECT COUNT(*) FROM deliveries').fetchone()[0]==0
+
+def test_only_same_bookmaker_complete_line():
+    def row(book,side,odd):return {'bookmaker_id':book,'bookmaker_name':str(book),'market_code':'HDC','selection':side,'decimal_odds':odd}
+    assert m.limit_odds([row(8,'Home -0.75',1.9),row(7,'Away +0.75',1.9)])==[]
+    rows=m.limit_odds([row(8,'Home -0.75',1.9),row(8,'Away +0.75',2.0)])
+    assert len(rows)==2 and {r['bookmaker_id'] for r in rows}=={8}
+
+def test_primary_snapshot_sha_is_immutable(store):
+    p={'fixture_id':7,'home':0.4,'draw':0.3,'away':0.3}
+    args=(7,'2026-11-08T00:00:00+00:00','2026-11-09T00:00:00+00:00',m.canonical(p),m.digest(p))
+    store.execute('INSERT INTO predictions VALUES(?,?,?,?,?)',args)
+    store.execute('INSERT OR IGNORE INTO predictions VALUES(?,?,?,?,?)',args[:-2]+('changed','x'))
+    assert store.execute('SELECT body,sha256 FROM predictions').fetchone()==args[-2:]
+
+def test_api_budget_stops_before_network(store):
+    store.execute('INSERT INTO api_usage VALUES(?,6000)',(m.now().date().isoformat(),));store.commit()
+    client=m.CachedClient('test',store)
+    with patch.object(m.ApiFootballClient,'_get') as network:
+        with pytest.raises(RuntimeError,match='BUDGET'):client._get('fixtures',id=17)
+        network.assert_not_called()
+
+def test_unaccepted_lock_not_settled(store):
+    fixture={'home_win_probability':0.4,'draw_probability':0.3,'away_win_probability':0.3}
+    store.execute('INSERT INTO locked_forecasts VALUES(?,?,?,?,?)',(7,'uncertain',m.canonical(fixture),m.digest(fixture),'2026-01-01T00:00:00+00:00'))
+    store.execute('INSERT INTO deliveries(k,status,prepared_at,body,sha256) VALUES(?,?,?,?,?)',('uncertain','uncertain','2026-01-01T00:00:00+00:00','test','hash'));store.commit()
+    with patch.object(m.CachedClient,'_get') as get:
+        m.settle(store)
+        get.assert_not_called()
+
+def test_atomic_state_permissions(tmp_path):
+    p=tmp_path/'state.json';m.atomic(p,{'schema_version':1})
+    assert json.loads(p.read_text())=={'schema_version':1}
+    assert p.stat().st_mode&0o777==0o640
