@@ -77,7 +77,7 @@ export type SupabaseUpcomingCache = {
   fallback?: boolean;
   lastSyncAt?: string | null;
   fixtures: CachedUpcomingFixture[];
-  diagnostics?: { fixtureCount: number; validPredictions: number; oddsQueryErrors: number; oddsRows: number; localSnapshot: boolean; lastPredictionAt: string | null; lastOddsAt: string | null; schemaVersion: string; truncated: boolean; warnings: string[] };
+  diagnostics?: { fixtureCount: number; validPredictions: number; oddsQueryErrors: number; oddsRows: number; localSnapshot: boolean; lastPredictionAt: string | null; lastOddsAt: string | null; schemaVersion: string; truncated: boolean; warnings: string[]; metadataStatus?: "valid" | "invalid"; schemaStatus?: "compatible"; scope?: string };
 };
 
 const CACHE_MS = 30_000;
