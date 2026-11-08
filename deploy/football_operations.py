@@ -65,14 +65,18 @@ def limit_odds(rows):
     books=collections.defaultdict(list)
     for row in rows: books[(row['bookmaker_id'],row['bookmaker_name'])].append(row)
     for _,group in sorted(books.items(),key=lambda kv:(0 if kv[0][0]==8 else 1,kv[0][0])):
-        hdc=[r for r in group if r['market_code']=='HDC']
+        hdc=[r for r in group if r['market_code']=='HDC' and r.get('line_convention')=='team-v2']
+        pairs=[]
         chosen=[]
         for h in hdc:
             try: side,line=h['selection'].split();line=float(line)
             except (ValueError,AttributeError):continue
             if side.lower()!='home':continue
             away=next((a for a in hdc if a['selection'].lower().startswith('away ') and abs(float(a['selection'].split()[1])+line)<1e-8),None)
-            if away: chosen=[h,away];break
+            if away and 0.98 <= 1/float(h['decimal_odds'])+1/float(away['decimal_odds']) <= 1.35:
+                pairs.append([h,away])
+        if pairs:
+            chosen=min(pairs,key=lambda p:abs(math.log(float(p[0]['decimal_odds'])/float(p[1]['decimal_odds']))))
         totals=[r for r in group if r['market_code']=='TOTALS' and r['selection'] in ('Over 2.5','Under 2.5')]
         hda=[r for r in group if r['market_code']=='HDA' and r['selection'] in ('Home','Draw','Away')]
         if chosen:return hda+totals+chosen
@@ -96,6 +100,21 @@ def local_odds_mirror(rows,fixtures):
         conn.commit()
     finally:conn.close()
 
+def forecast_window_dates(t):
+    t=t.astimezone(dt.timezone.utc)
+    end=t+dt.timedelta(hours=48)-dt.timedelta(microseconds=1)
+    return [(t.date()+dt.timedelta(days=i)).isoformat() for i in range((end.date()-t.date()).days+1)]
+
+def projected_odds_history(con,t):
+    # Raw, source-timestamped immutable captures, not synthesized trend points.
+    rows=con.execute('SELECT body FROM odds_rows WHERE captured_at>=? ORDER BY captured_at DESC LIMIT 2500',((t-dt.timedelta(hours=1)).isoformat(),)).fetchall()
+    projected=[]
+    for body, in rows:
+        raw=json.loads(body)
+        if raw['market_code']=='HDC' and raw.get('line_convention')!='team-v2':continue
+        projected.extend({**p,'provider_updated_at':raw.get('source_updated_at')} for p in odds_to_existing_schema([raw]))
+    return projected
+
 def refresh(con):
     response=requests.get('https://v3.football.api-sports.io/status',headers={'x-apisports-key':os.environ['API_FOOTBALL_KEY']},timeout=15)
     response.raise_for_status(); status=response.json()
@@ -103,7 +122,7 @@ def refresh(con):
     if status.get('errors') or account.get('subscription',{}).get('active') is not True: raise RuntimeError('PROVIDER_ACCOUNT_NOT_READY')
     if int(quota.get('limit_day',0))-int(quota.get('current',0)) < 500: raise RuntimeError('PROVIDER_QUOTA_RESERVE')
     settings=Settings.from_env();client=CachedClient(settings.api_football_key,con);store=SupabaseStore.from_settings(settings)
-    t=now(); dates=[(t.date()+dt.timedelta(days=i)).isoformat() for i in range(2)]
+    t=now(); dates=forecast_window_dates(t)
     raw=[]
     for date in dates:raw.extend(client.fixtures_by_date(date))
     raw=list({r['fixture']['id']:r for r in raw}.values())
@@ -146,7 +165,7 @@ def refresh(con):
     if raw_odds:
         try:local_odds_mirror(raw_odds,fixture_rows)
         except Exception as e:warnings.append('LOCAL_TREND_MIRROR_FAILED:'+type(e).__name__)
-    payload={'schema_version':1,'generated_at':t.isoformat(),'fixtures':[{**fixture_to_existing_schema(f),'league_id':f['league_id'],'season':f['season'],'home_team_id':f['home_team_id'],'away_team_id':f['away_team_id']} for f in future], 'predictions':predictions,'odds':odds,'odds_status':statuses,
+    payload={'schema_version':1,'generated_at':t.isoformat(),'fixtures':[{**fixture_to_existing_schema(f),'league_id':f['league_id'],'season':f['season'],'home_team_id':f['home_team_id'],'away_team_id':f['away_team_id']} for f in future], 'predictions':predictions,'odds':projected_odds_history(con,t),'odds_status':statuses,
              'counts':{'fixtures':len(future),'predictions':len(predictions),'odds_rows':len(odds),'api_calls':client.calls},'warnings':warnings}
     atomic(STATE/'latest.json',payload)
     con.execute('DELETE FROM cached_api WHERE saved_at<?',(time.time()-7*86400,));con.commit()

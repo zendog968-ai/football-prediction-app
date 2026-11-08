@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+import re
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -139,12 +140,24 @@ def normalize_odds(raw: list[dict[str, Any]], fixture_row: dict[str, Any], captu
                         continue
                     if odds <= 1 or not isinstance(selection, str):
                         continue
+                    provider_selection = selection
+                    if market_code == "HDC":
+                        match = re.fullmatch(r"(Home|Away)\s+([+-]?\d+(?:\.\d+)?)", selection.strip(), re.I)
+                        if not match:
+                            continue
+                        side = match.group(1).capitalize()
+                        line = float(match.group(2))
+                        if side == "Away":
+                            line = -line  # API-Football values are in HOME-reference perspective.
+                        selection = f"{side} {line:+g}"
                     rows.append({
+                        "provider_selection": provider_selection,
+                        "line_convention": "team-v2" if market_code == "HDC" else None,
                         "api_fixture_id": fixture_row["api_fixture_id"],
                         "bookmaker_id": bookmaker_id,
                         "bookmaker_name": bookmaker_name,
                         "market_code": market_code,
-                        "market_name": market_name,
+                        "market_name": "Asian Handicap [team-v2]" if market_code == "HDC" else market_name,
                         "selection": selection,
                         "decimal_odds": odds,
                         "source_updated_at": update,

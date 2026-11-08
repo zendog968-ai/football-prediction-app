@@ -65,7 +65,7 @@ def odds_to_existing_schema(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         mapped.append({
             "fixture_id": fixture_id,
-            "market_type": f"{market} | {bookmaker}",
+            "market_type": f"{'HDC2' if market == 'HDC' and row.get('line_convention') == 'team-v2' else market} | {bookmaker}",
             "handicap": selection,
             "home_odds": row["decimal_odds"] if key.startswith(("home", "over")) else None,
             "draw_odds": None,

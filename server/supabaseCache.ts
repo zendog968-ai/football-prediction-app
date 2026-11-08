@@ -22,6 +22,7 @@ export type CachedHandicapQuote = {
   awayOdds: number;
   capturedAt: string | null;
   sourceUpdatedAt?: string | null;
+  bookmakerName?: string;
 };
 
 export type CachedUpcomingFixture = {
@@ -124,6 +125,7 @@ type HandicapSnapshotCandidate = {
   odds: number;
   capturedAt: string | null;
   sourceUpdatedAt?: string | null;
+  bookmakerName?: string;
 };
 
 function parseHandicapCandidate(snapshot: Record<string, unknown>): HandicapSnapshotCandidate[] {
@@ -133,9 +135,11 @@ function parseHandicapCandidate(snapshot: Record<string, unknown>): HandicapSnap
   if (!Number.isInteger(fixtureId) || !(marketType.startsWith("HDC") || marketType.startsWith("HKJC_HDC"))) return [];
   const match = /^(Home|Away)\s+([+-]?\d+(?:\.\d+)?)$/i.exec(selection);
   if (!match) return [];
-  const line = Number(match[2]);
+  let line = Number(match[2]);
   if (!Number.isFinite(line)) return [];
   const side = match[1]!.toLowerCase() === "home" ? "Home" : "Away";
+  if (/^HDC\s*\|/.test(marketType) && side === "Away") line = -line; // legacy raw API home-reference
+
   const homeOdds = normalizeOdds(snapshot.home_odds);
   const awayOdds = normalizeOdds(snapshot.away_odds);
   const candidates: HandicapSnapshotCandidate[] = [];
@@ -174,9 +178,10 @@ function pairHandicapSnapshots(rows: Array<Record<string, unknown>>): Map<number
       && item.marketType === home.marketType
       && item.capturedAt === home.capturedAt
       && Math.abs(item.line + home.line) < 0.000001);
-    if (!away) continue;
+    if (!away || 1/home.odds + 1/away.odds < 0.98 || 1/home.odds + 1/away.odds > 1.35) continue;
     result.set(home.fixtureId, {
       source: home.marketType.startsWith("HKJC_HDC") ? "HKJC" : "API-Football Asian Handicap",
+      ...(home.marketType.startsWith("HDC2 |") ? {bookmakerName: home.marketType.split("|")[1]!.trim()} : {}),
       homeSelection: displayHandicapSelection("Home", home.line),
       homeOdds: home.odds,
       awaySelection: displayHandicapSelection("Away", away.line),

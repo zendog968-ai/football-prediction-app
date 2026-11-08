@@ -143,6 +143,32 @@ class DailyResultSyncTests(unittest.TestCase):
         self.assertTrue(any("衝突" in failure for failure in decision["failures"]))
         self.assertTrue(any("未對齊比例" in failure for failure in decision["failures"]))
 
+    def test_exact_original_date_and_names_precede_lossy_alias(self):
+        with build_database() as c:
+            c.executemany('INSERT INTO matches VALUES (?,?,?,?,?,?,?,?)',[
+                ('exact','UEL','2026-08-14','CSKA Sofia','Maccabi Tel Aviv',0,1,'A'),
+                ('alias','UEL','2026-08-14','PFC CSKA Sofia','Maccabi Tel Aviv',0,1,'A')])
+            ensure_sync_schema(c)
+            stats=reconcile(c,[SourceResult('UEL','2026-08-14','CSKA Sofia','Maccabi Tel Aviv',0,1,'UEFA EL')],'sha',False)
+            self.assertEqual(stats['ambiguous'],0)
+            self.assertEqual(c.execute('SELECT candidate_match_id FROM result_sync_audit').fetchone()[0],'exact')
+    def test_duplicate_exact_identity_remains_ambiguous_without_score_selection(self):
+        with build_database() as c:
+            c.executemany('INSERT INTO matches VALUES (?,?,?,?,?,?,?,?)',[
+                ('one','UEL','2026-08-14','CSKA Sofia','Maccabi Tel Aviv',0,1,'A'),
+                ('two','UEL','2026-08-14','CSKA Sofia','Maccabi Tel Aviv',2,1,'H')])
+            ensure_sync_schema(c)
+            stats=reconcile(c,[SourceResult('UEL','2026-08-14','CSKA Sofia','Maccabi Tel Aviv',0,1,'UEFA EL')],'sha',False)
+            self.assertEqual(stats['ambiguous'],1)
+    def test_exact_match_score_conflict_not_hidden_by_alias(self):
+        with build_database() as c:
+            c.executemany('INSERT INTO matches VALUES (?,?,?,?,?,?,?,?)',[
+                ('exact','UEL','2026-08-14','CSKA Sofia','Maccabi Tel Aviv',2,1,'H'),
+                ('alias','UEL','2026-08-14','PFC CSKA Sofia','Maccabi Tel Aviv',0,1,'A')])
+            ensure_sync_schema(c)
+            stats=reconcile(c,[SourceResult('UEL','2026-08-14','CSKA Sofia','Maccabi Tel Aviv',0,1,'UEFA EL')],'sha',False)
+            self.assertEqual(stats['conflict'],1)
+
 
 if __name__ == "__main__":
     unittest.main()
