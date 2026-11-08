@@ -67,3 +67,18 @@ def test_atomic_state_permissions(tmp_path):
     p=tmp_path/'state.json';m.atomic(p,{'schema_version':1})
     assert json.loads(p.read_text())=={'schema_version':1}
     assert p.stat().st_mode&0o777==0o640
+
+
+def test_48h_window_includes_partial_third_utc_date():
+    assert m.forecast_window_dates(m.dt.datetime(2026,11,8,3,0,tzinfo=m.dt.timezone.utc)) == ['2026-11-08','2026-11-09','2026-11-10']
+    assert m.forecast_window_dates(m.dt.datetime(2026,11,8,0,0,tzinfo=m.dt.timezone.utc)) == ['2026-11-08','2026-11-09']
+
+def test_odds_history_keeps_only_real_hour_capture_rows(store):
+    t=m.dt.datetime(2026,11,8,3,0,tzinfo=m.dt.timezone.utc)
+    def raw(age):
+        return {'api_fixture_id':7,'bookmaker_id':8,'bookmaker_name':'Bet365','market_code':'HDC','market_name':'Asian Handicap','selection':'Home -0.5','decimal_odds':1.91,'captured_at':(t-m.dt.timedelta(minutes=age)).isoformat(),'source_updated_at':(t-m.dt.timedelta(minutes=age+2)).isoformat()}
+    for age in [10,40,70]:
+        row=raw(age);store.execute('INSERT INTO odds_rows VALUES(?,?,?,?)',(m.digest(row),7,row['captured_at'],m.canonical(row)))
+    got=m.projected_odds_history(store,t)
+    assert len(got)==2
+    assert all(r['provider_updated_at'] for r in got)

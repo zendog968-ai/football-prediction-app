@@ -135,17 +135,23 @@ def find_candidate(connection: sqlite3.Connection, record: SourceResult) -> list
     match_date = date.fromisoformat(record.match_date)
     rows = connection.execute(
         """
-        SELECT match_id, home_team, away_team, home_goals, away_goals
+        SELECT match_id, match_date, home_team, away_team, home_goals, away_goals
         FROM matches
         WHERE league_code = ? AND match_date BETWEEN ? AND ?
         """,
         (record.league_code, (match_date - timedelta(days=1)).isoformat(), (match_date + timedelta(days=1)).isoformat()),
     ).fetchall()
-    return [
-        row for row in rows
-        if canonical_name(row["home_team"]) == canonical_name(record.home_team)
-        and canonical_name(row["away_team"]) == canonical_name(record.away_team)
-    ]
+    # Stronger identity first, independent of scores: original source names/date.
+    # A duplicated exact identity remains ambiguous; never pick a matching score.
+    exact = [row for row in rows if row["match_date"] == record.match_date
+             and row["home_team"] == record.home_team and row["away_team"] == record.away_team]
+    if exact:
+        return exact
+    normalized = [row for row in rows
+                  if canonical_name(row["home_team"]) == canonical_name(record.home_team)
+                  and canonical_name(row["away_team"]) == canonical_name(record.away_team)]
+    same_date = [row for row in normalized if row["match_date"] == record.match_date]
+    return same_date or normalized
 
 
 def write_audit(connection: sqlite3.Connection, record: SourceResult, snapshot_sha: str, action: str, reason: str | None, candidate_match_id: str | None, synced_at: str) -> None:
