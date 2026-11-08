@@ -381,3 +381,16 @@ class FootballDataHealthTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InflightLoadedTimeTests(unittest.TestCase):
+    def test_loaded_during_request_is_not_clock_skew(self):
+        end=NOW+dt.timedelta(seconds=1)
+        summary={'cache_loaded':{'status':'future','at_utc':(NOW+dt.timedelta(milliseconds=500)).isoformat()},'latest_odds':{'status':'future'}}
+        result=health.reconcile_inflight_cache_time(summary,NOW,end)
+        self.assertEqual(result['cache_loaded']['status'],'fresh')
+        self.assertEqual(result['latest_odds']['status'],'future')
+    def test_genuine_future_cache_timestamp_remains_invalid(self):
+        summary={'cache_loaded':{'status':'future','at_utc':(NOW+dt.timedelta(minutes=1)).isoformat()}}
+        result=health.reconcile_inflight_cache_time(summary,NOW,NOW+dt.timedelta(seconds=1))
+        self.assertEqual(result['cache_loaded']['status'],'future')
