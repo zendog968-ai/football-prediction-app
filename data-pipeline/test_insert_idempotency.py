@@ -26,4 +26,14 @@ class InsertIdempotencyTests(unittest.TestCase):
     def test_distinct_events_remain_distinct(self):
         m.insert_matches(self.con,[self.row,{**self.row,'match_id':'other','match_date':'2026-09-02'}]);self.assertEqual(self.count(),2)
 
+    def test_same_event_id_accent_only_preserves_original(self):
+        m.insert_matches(self.con,[self.row])
+        m.insert_matches(self.con,[{**self.row,'home_team':'Álpha','away_team':'Béta'}])
+        self.assertEqual(self.count(),1)
+        self.assertEqual(self.con.execute('SELECT home_team FROM matches').fetchone()[0],'Alpha')
+    def test_accent_alias_must_not_hide_changed_score(self):
+        m.insert_matches(self.con,[self.row])
+        with self.assertRaisesRegex(ValueError,'collision'):
+            m.insert_matches(self.con,[{**self.row,'home_team':'Álpha','home_goals':2}])
+
 if __name__=='__main__':unittest.main()

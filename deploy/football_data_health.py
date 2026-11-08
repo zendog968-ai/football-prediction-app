@@ -143,7 +143,7 @@ def freshness(value: object, now: dt.datetime, max_age: float, source: str) -> d
         age = (now - stamp).total_seconds()
         return {"status": "fresh" if age <= max_age else "stale",
                 "at_utc": stamp.isoformat(), "age_seconds": round(age, 3), "source": source}
-    return {"status": status, "at_utc": None, "age_seconds": None, "source": source}
+    return {"status": status, "at_utc": stamp.isoformat() if status == "future" and stamp is not None else None, "age_seconds": None, "source": source}
 
 
 def unwrap_cache(payload: object) -> dict:
@@ -262,13 +262,25 @@ def summarize_cache(payload: object, now: dt.datetime, sync_max_age: float, odds
     }
 
 
+def reconcile_inflight_cache_time(summary: dict, started: dt.datetime, ended: dt.datetime) -> dict:
+    # The API can build a fresh cache after the parent probe clock was sampled.
+    # Only a loadedAt proven to occur INSIDE this HTTP request is reconciled.
+    loaded = summary.get('cache_loaded', {})
+    stamp = parse_timestamp(loaded.get('at_utc'))
+    if loaded.get('status') == 'future' and stamp is not None and started <= stamp <= ended:
+        summary['cache_loaded'] = freshness(stamp.isoformat(), ended, 120, 'api_cache_loaded_at')
+    return summary
+
+
 def endpoint_summary(base_url: str, kind: str, timeout: float, now: dt.datetime,
                      sync_max_age: float, odds_max_age: float) -> dict:
     try:
+        request_started = dt.datetime.now(UTC)
         _, payload = fetch_json(validate_base_url(base_url) + ENDPOINTS[kind], timeout)
+        request_ended = dt.datetime.now(UTC)
         if kind == "deployment":
             return summarize_deployment(payload)
-        return summarize_cache(payload, now, sync_max_age, odds_max_age)
+        return reconcile_inflight_cache_time(summarize_cache(payload, now, sync_max_age, odds_max_age), request_started, request_ended)
     except ProbeFailure as error:
         code = str(error)
         result = {"ok": False, "error_code": code}

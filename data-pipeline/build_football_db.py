@@ -467,6 +467,19 @@ def insert_matches(connection: sqlite3.Connection, records: list[dict[str, Any]]
         evidence = tuple(record[column] for column in evidence_columns)
         full_key = key + evidence[:2]
         if record["match_id"] in ids and ids[record["match_id"]] != full_key:
+            # Same authoritative event ID may correct ONLY team-name accents/case.
+            # Preserve the immutable old spelling/source; changed score/date/event fails.
+            import unicodedata
+            def name_key(value):
+                return " ".join("".join(c for c in unicodedata.normalize("NFKD", value)
+                                       if not unicodedata.combining(c)).casefold().split())
+            saved = ids[record["match_id"]]
+            same_event = (saved[:3] == full_key[:3] and saved[5:] == full_key[5:]
+                          and name_key(saved[3]) == name_key(full_key[3])
+                          and name_key(saved[4]) == name_key(full_key[4]))
+            if same_event and existing[saved] == evidence:
+                skipped += 1
+                continue
             raise ValueError("Match ID collision has incompatible event/result evidence")
         if full_key in existing:
             if existing[full_key] != evidence:
