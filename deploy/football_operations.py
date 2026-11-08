@@ -108,11 +108,15 @@ def forecast_window_dates(t):
 def projected_odds_history(con,t):
     # Raw, source-timestamped immutable captures, not synthesized trend points.
     rows=con.execute('SELECT body FROM odds_rows WHERE captured_at>=? ORDER BY captured_at DESC LIMIT 2500',((t-dt.timedelta(hours=1)).isoformat(),)).fetchall()
-    projected=[]
+    grouped={}
     for body, in rows:
         raw=json.loads(body)
         if raw['market_code']=='HDC' and raw.get('line_convention')!='team-v2':continue
-        projected.extend({**p,'provider_updated_at':raw.get('source_updated_at')} for p in odds_to_existing_schema([raw]))
+        key=(raw['api_fixture_id'],raw['bookmaker_id'],raw['captured_at'],raw.get('source_updated_at'))
+        grouped.setdefault(key,[]).append(raw)
+    projected=[]
+    for key, group in grouped.items():
+        projected.extend({**p,'provider_updated_at':key[3]} for p in odds_to_existing_schema(group))
     return projected
 
 def refresh(con):

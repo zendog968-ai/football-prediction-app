@@ -363,7 +363,7 @@ function pairedAsianHandicapQuote(rows: AsianHandicapSnapshot[]): CachedHandicap
 }
 
 function hasRelevantMarket(name: string): boolean {
-  return name === "Asian Handicap" || name === "Goals Over/Under";
+  return name === "Asian Handicap" || name === "Asian Handicap [team-v2]" || name === "Goals Over/Under";
 }
 
 function apiErrorCount(payload: { errors?: Record<string, unknown> | unknown[] }): number {
@@ -788,18 +788,18 @@ type StoredTrendSnapshot = {
   capturedAt: Date;
 };
 
-function summarizeTrendRows(rows: StoredTrendSnapshot[]): string {
+export function summarizeTrendRows(rows: StoredTrendSnapshot[]): string {
   const byMarketBookmaker = new Map<string, StoredTrendSnapshot[]>();
   for (const row of rows) {
-    const key = `${row.marketName}:${row.bookmakerId}`;
+    const key = `${row.marketName}:${row.bookmakerId}:${row.selection}`;
     byMarketBookmaker.set(key, [...(byMarketBookmaker.get(key) || []), row]);
   }
   const bestForMarket = new Map<string, StoredTrendSnapshot[]>();
   for (const group of Array.from(byMarketBookmaker.values())) {
     const sorted = [...group].sort((a, b) => a.capturedAt.getTime() - b.capturedAt.getTime());
-    const current = bestForMarket.get(sorted[0]!.marketName);
+    const current = bestForMarket.get(`${sorted[0]!.marketName}:${sorted[0]!.selection}`);
     if (!current || sorted.length > current.length || (sorted.length === current.length && sorted.at(-1)!.capturedAt > current.at(-1)!.capturedAt)) {
-      bestForMarket.set(sorted[0]!.marketName, sorted);
+      bestForMarket.set(`${sorted[0]!.marketName}:${sorted[0]!.selection}`, sorted);
     }
   }
   return Array.from(bestForMarket.values()).map((group: StoredTrendSnapshot[]) => {
@@ -810,7 +810,9 @@ function summarizeTrendRows(rows: StoredTrendSnapshot[]): string {
       ? renderOddsTrend(group.map((row: StoredTrendSnapshot) => Number(row.decimalOdds))) ?? "初盤基準建立中"
       : `線位跳盤：${opening.selection} → ${latest.selection}`;
     const anomaly = assessMarketAnomaly(group.map((row: StoredTrendSnapshot) => ({ selection: row.selection, decimalOdds: Number(row.decimalOdds) })));
-    return `${latest.marketName}｜${latest.bookmakerName}\n${latest.selection} @${Number(latest.decimalOdds).toFixed(2)}\n走勢圖：${trend}${anomaly ? `\n${anomaly}` : ""}`;
+    const parsed = parseAsianHandicapSelection(latest.selection);
+    const displaySelection = latest.marketName === "Asian Handicap" && parsed?.side === "Away" ? formatAsianHandicapSelection("Away", -parsed.line) : latest.selection;
+    return `${latest.marketName}｜${latest.bookmakerName}\n${displaySelection} @${Number(latest.decimalOdds).toFixed(2)}\n走勢圖：${trend}${anomaly ? `\n${anomaly}` : ""}`;
   }).join("\n\n");
 }
 
