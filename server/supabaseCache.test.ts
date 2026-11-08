@@ -87,8 +87,8 @@ describe("Supabase繁中翻譯與讓球盤資料契約", () => {
         if (url.includes("fixtures?")) return [{ fixture_id: 992, league_name: "Liga MX", event_time: "2026-09-20T03:00:00Z", home_team: "Club America", away_team: "Guadalajara Chivas", status: "NS", updated_at: "2026-09-19T10:00:00Z" }];
         if (url.includes("ai_predictions?")) return [{ fixture_id: 992, home_win_prob: 0.48, draw_prob: 0.28, away_win_prob: 0.24, predicted_score: "2-1", recommendation: "\n[AURELIA_META]{\"h\":1.62,\"a\":1.08,\"s\":\"隊史\"}", confidence: 3, updated_at: "2026-09-19T10:00:00Z" }];
         if (url.includes("odds_snapshots?")) return [
-          { id: 1002, fixture_id: 992, market_type: "HDC | Bet365", handicap: "Home -0.5", home_odds: 1.91, away_odds: null, snapshot_time: "2026-09-19T10:00:00Z" },
-          { id: 1002, fixture_id: 992, market_type: "HDC | Bet365", handicap: "Away +0.5", home_odds: null, away_odds: 1.89, snapshot_time: "2026-09-19T10:00:00Z" },
+          { id: 1002, fixture_id: 992, market_type: "HDC2 | Bet365", handicap: "Home -0.5", home_odds: 1.91, away_odds: null, snapshot_time: "2026-09-19T10:00:00Z" },
+          { id: 1002, fixture_id: 992, market_type: "HDC2 | Bet365", handicap: "Away +0.5", home_odds: null, away_odds: 1.89, snapshot_time: "2026-09-19T10:00:00Z" },
         ];
         return [];
       },
@@ -98,6 +98,7 @@ describe("Supabase繁中翻譯與讓球盤資料契約", () => {
     const cache = await getSupabaseUpcomingCache(true);
     expect(cache.fixtures[0]?.handicapQuote).toEqual({
       source: "API-Football Asian Handicap",
+      bookmakerName: "Bet365",
       homeSelection: "Home -0.5",
       homeOdds: 1.91,
       awaySelection: "Away +0.5",
@@ -119,4 +120,21 @@ describe("webhook cutover rejects legacy forecasts", () => {
     expect(row.hasPrediction).toBe(false); expect(Number.isNaN(row.homeWin)).toBe(true);
     expect(row.compactMarkets).toEqual([]); expect(row.topScorelines).toEqual([]);
   });
+});
+
+
+it("舊API主隊視角完整盤線不會錯配兩邊高水位", async () => {
+  vi.stubGlobal("fetch",vi.fn(async(input: URL|string)=>({ok:true,json:async()=>{
+    const url=String(input);
+    if(url.includes("fixtures?"))return [{fixture_id:77,league_name:"J1 League",event_time:"2026-08-15T11:00:00Z",home_team:"Machida Zelvia",away_team:"Sanfrecce Hiroshima",status:"NS",updated_at:"2026-08-15T10:00:00Z"}];
+    if(url.includes("odds_snapshots?"))return [
+      {id:1003,fixture_id:77,market_type:"HDC | Bet365",handicap:"Home -1.25",home_odds:5.50,away_odds:null,snapshot_time:"2026-08-15T10:00:00Z"},
+      {id:1003,fixture_id:77,market_type:"HDC | Bet365",handicap:"Away +1.25",home_odds:null,away_odds:4.00,snapshot_time:"2026-08-15T10:00:00Z"},
+      {id:1003,fixture_id:77,market_type:"HDC | Bet365",handicap:"Away -1.25",home_odds:null,away_odds:1.15,snapshot_time:"2026-08-15T10:00:00Z"}];
+    return [];
+  }})));
+  const quote=(await getSupabaseUpcomingCache(true)).fixtures[0]?.handicapQuote;
+  expect(quote?.homeSelection).toBe("Home -1.25");
+  expect(quote?.awaySelection).toBe("Away +1.25");
+  expect(quote?.awayOdds).toBe(1.15);
 });

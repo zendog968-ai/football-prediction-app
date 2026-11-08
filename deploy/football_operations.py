@@ -65,14 +65,18 @@ def limit_odds(rows):
     books=collections.defaultdict(list)
     for row in rows: books[(row['bookmaker_id'],row['bookmaker_name'])].append(row)
     for _,group in sorted(books.items(),key=lambda kv:(0 if kv[0][0]==8 else 1,kv[0][0])):
-        hdc=[r for r in group if r['market_code']=='HDC']
+        hdc=[r for r in group if r['market_code']=='HDC' and r.get('line_convention')=='team-v2']
+        pairs=[]
         chosen=[]
         for h in hdc:
             try: side,line=h['selection'].split();line=float(line)
             except (ValueError,AttributeError):continue
             if side.lower()!='home':continue
             away=next((a for a in hdc if a['selection'].lower().startswith('away ') and abs(float(a['selection'].split()[1])+line)<1e-8),None)
-            if away: chosen=[h,away];break
+            if away and 0.98 <= 1/float(h['decimal_odds'])+1/float(away['decimal_odds']) <= 1.35:
+                pairs.append([h,away])
+        if pairs:
+            chosen=min(pairs,key=lambda p:abs(math.log(float(p[0]['decimal_odds'])/float(p[1]['decimal_odds']))))
         totals=[r for r in group if r['market_code']=='TOTALS' and r['selection'] in ('Over 2.5','Under 2.5')]
         hda=[r for r in group if r['market_code']=='HDA' and r['selection'] in ('Home','Draw','Away')]
         if chosen:return hda+totals+chosen
@@ -107,6 +111,7 @@ def projected_odds_history(con,t):
     projected=[]
     for body, in rows:
         raw=json.loads(body)
+        if raw['market_code']=='HDC' and raw.get('line_convention')!='team-v2':continue
         projected.extend({**p,'provider_updated_at':raw.get('source_updated_at')} for p in odds_to_existing_schema([raw]))
     return projected
 

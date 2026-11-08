@@ -1,4 +1,5 @@
 const TRADITIONAL_TEAM_NAMES: Record<string, string> = {
+  "Machida Zelvia": "町田澤維亞",
   "Manchester United": "曼聯",
   "Manchester City": "曼城",
   "Arsenal": "阿仙奴",

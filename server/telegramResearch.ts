@@ -183,8 +183,10 @@ export function formatHktKickoff(value: Date | string): string {
 
 function displayHandicapQuote(quote: CachedHandicapQuote | null | undefined): string {
   if (!quote || !Number.isFinite(quote.homeOdds) || !Number.isFinite(quote.awayOdds)) return "⚖️ 【實時讓球盤】資料不足（沒有完整主客兩邊實際盤口）";
-  const source = quote.source === "HKJC" ? "HKJC" : quote.source;
-  return `⚖️ 【實時讓球盤】${source} [${quote.homeSelection} @${quote.homeOdds.toFixed(2)} / ${quote.awaySelection} @${quote.awayOdds.toFixed(2)}]`;
+  const source = (quote.source === "HKJC" ? "HKJC" : quote.source) + (quote.bookmakerName ? `｜${quote.bookmakerName}` : "");
+  const providerAge = quote.sourceUpdatedAt ? Date.now()-Date.parse(quote.sourceUpdatedAt) : 0;
+  const label = providerAge > 30*60*1000 ? "亞洲盤快照（非即時）" : "實時讓球盤";
+  return `⚖️ 【${label}】${source} [${quote.homeSelection} @${quote.homeOdds.toFixed(2)} / ${quote.awaySelection} @${quote.awayOdds.toFixed(2)}]`;
 }
 
 export function formatLocalizedResearchCard(item: Pick<CachedUpcomingFixture, "leagueName" | "leagueTranslation" | "eventTime" | "homeTeam" | "homeTeamTranslation" | "awayTeam" | "awayTeamTranslation" | "homeWin" | "draw" | "awayWin" | "compactMarkets" | "topScorelines" | "handicapQuote"> & Partial<Pick<CachedUpcomingFixture, "researchSource" | "homeSampleMatches" | "awaySampleMatches" | "leagueSampleMatches" | "oddsStatus" | "predictionUpdatedAt" | "probabilitySource">>): string {
@@ -334,8 +336,12 @@ function formatAsianHandicapSelection(side: "Home" | "Away", line: number): stri
 
 function pairedAsianHandicapQuote(rows: AsianHandicapSnapshot[]): CachedHandicapQuote | null {
   const candidates = rows
-    .filter(row => row.marketName === "Asian Handicap")
-    .map(row => ({ row, parsed: parseAsianHandicapSelection(row.selection), odds: Number(row.decimalOdds) }))
+    .filter(row => row.marketName === "Asian Handicap" || row.marketName === "Asian Handicap [team-v2]")
+    .map(row => {
+      const parsed = parseAsianHandicapSelection(row.selection);
+      if (parsed?.side === "Away" && row.marketName === "Asian Handicap") parsed.line = -parsed.line;
+      return {row, parsed, odds: Number(row.decimalOdds)};
+    })
     .filter((item): item is { row: AsianHandicapSnapshot; parsed: { side: "Home" | "Away"; line: number }; odds: number } => Boolean(item.parsed) && Number.isFinite(item.odds) && item.odds > 1)
     .sort((left, right) => right.row.capturedAt.getTime() - left.row.capturedAt.getTime());
   for (const home of candidates.filter(item => item.parsed.side === "Home")) {
@@ -343,7 +349,7 @@ function pairedAsianHandicapQuote(rows: AsianHandicapSnapshot[]): CachedHandicap
       && item.row.bookmakerName === home.row.bookmakerName
       && item.row.capturedAt.getTime() === home.row.capturedAt.getTime()
       && Math.abs(item.parsed.line + home.parsed.line) < 0.000001);
-    if (!away) continue;
+    if (!away || 1/home.odds + 1/away.odds < 0.98 || 1/home.odds + 1/away.odds > 1.35) continue;
     return {
       source: "API-Football Asian Handicap",
       homeSelection: formatAsianHandicapSelection("Home", home.parsed.line),

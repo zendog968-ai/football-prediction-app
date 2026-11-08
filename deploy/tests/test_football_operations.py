@@ -36,7 +36,7 @@ def test_reject_oversized_complete_message_before_attempt(store):
     assert store.execute('SELECT COUNT(*) FROM deliveries').fetchone()[0]==0
 
 def test_only_same_bookmaker_complete_line():
-    def row(book,side,odd):return {'bookmaker_id':book,'bookmaker_name':str(book),'market_code':'HDC','selection':side,'decimal_odds':odd}
+    def row(book,side,odd):return {'bookmaker_id':book,'bookmaker_name':str(book),'market_code':'HDC','line_convention':'team-v2','selection':side,'decimal_odds':odd}
     assert m.limit_odds([row(8,'Home -0.75',1.9),row(7,'Away +0.75',1.9)])==[]
     rows=m.limit_odds([row(8,'Home -0.75',1.9),row(8,'Away +0.75',2.0)])
     assert len(rows)==2 and {r['bookmaker_id'] for r in rows}=={8}
@@ -76,9 +76,25 @@ def test_48h_window_includes_partial_third_utc_date():
 def test_odds_history_keeps_only_real_hour_capture_rows(store):
     t=m.dt.datetime(2026,11,8,3,0,tzinfo=m.dt.timezone.utc)
     def raw(age):
-        return {'api_fixture_id':7,'bookmaker_id':8,'bookmaker_name':'Bet365','market_code':'HDC','market_name':'Asian Handicap','selection':'Home -0.5','decimal_odds':1.91,'captured_at':(t-m.dt.timedelta(minutes=age)).isoformat(),'source_updated_at':(t-m.dt.timedelta(minutes=age+2)).isoformat()}
+        return {'api_fixture_id':7,'bookmaker_id':8,'bookmaker_name':'Bet365','market_code':'HDC','line_convention':'team-v2','market_name':'Asian Handicap [team-v2]','selection':'Home -0.5','decimal_odds':1.91,'captured_at':(t-m.dt.timedelta(minutes=age)).isoformat(),'source_updated_at':(t-m.dt.timedelta(minutes=age+2)).isoformat()}
     for age in [10,40,70]:
         row=raw(age);store.execute('INSERT INTO odds_rows VALUES(?,?,?,?)',(m.digest(row),7,row['captured_at'],m.canonical(row)))
     got=m.projected_odds_history(store,t)
     assert len(got)==2
     assert all(r['provider_updated_at'] for r in got)
+
+
+def test_actual_api_home_reference_converted_before_complete_pairing():
+    raw=[{'update':'2026-11-08T00:57:00Z','bookmakers':[{'id':8,'name':'Bet365','bets':[{'name':'Asian Handicap','values':[
+        {'value':'Home -1.25','odd':'5.50'}, {'value':'Away -1.25','odd':'1.15'},
+        {'value':'Home +1.25','odd':'1.23'}, {'value':'Away +1.25','odd':'4.00'},
+        {'value':'Home +0.25','odd':'1.78'}, {'value':'Away +0.25','odd':'2.02'}]}]}]}]
+    rows=m.normalize_odds(raw,{'api_fixture_id':7},m.dt.datetime(2026,11,8,3,0,tzinfo=m.dt.timezone.utc))
+    assert next(r for r in rows if r['provider_selection']=='Away -1.25')['selection']=='Away +1.25'
+    chosen=m.limit_odds(rows)
+    assert [(r['selection'],r['decimal_odds']) for r in chosen]==[('Home +0.25',1.78),('Away -0.25',2.02)]
+    assert all(r['market_type']=='HDC2 | Bet365' for r in m.odds_to_existing_schema(chosen))
+
+def test_mismatched_underround_pair_never_becomes_quote():
+    rows=[{'bookmaker_id':8,'bookmaker_name':'Bet365','market_code':'HDC','line_convention':'team-v2','selection':side,'decimal_odds':odd} for side,odd in [('Home -1.25',5.5),('Away +1.25',4.0)]]
+    assert m.limit_odds(rows)==[]

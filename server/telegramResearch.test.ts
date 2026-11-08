@@ -468,3 +468,13 @@ describe("盤路與資料品質閘門", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toContain("/status");
   });
 });
+
+
+it("供應商舊水位只標亞洲盤快照，且正確顯示町田及書商", () => {
+  vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(new Date("2026-11-08T03:40:00Z"));
+  const message=formatLocalizedResearchCard({leagueName:"J1 League",leagueTranslation:null,eventTime:"2026-11-08T05:00:00Z",homeTeam:"Machida Zelvia",homeTeamTranslation:null,awayTeam:"Sanfrecce Hiroshima",awayTeamTranslation:null,homeWin:.4,draw:.3,awayWin:.3,compactMarkets:[],topScorelines:[],handicapQuote:{source:"API-Football Asian Handicap",bookmakerName:"Bet365",homeSelection:"Home +0.25",homeOdds:1.78,awaySelection:"Away -0.25",awayOdds:2.02,capturedAt:"2026-11-08T03:40:00Z",sourceUpdatedAt:"2026-11-08T00:57:00Z"}});
+  expect(message).toContain("町田澤維亞 (Machida Zelvia)");
+  expect(message).toContain("亞洲盤快照（非即時）");
+  expect(message).toContain("Bet365");
+  expect(message).toContain("Home +0.25 @1.78 / Away -0.25 @2.02");
+});
