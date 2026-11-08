@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { summarizeTrendRows } from "./telegramResearch";
 import { formatFixtureDisplay } from "@shared/teamDisplay";
 import { assessMarketAnomaly, describeMarketMovement, extractNaturalLanguageTeamQuery, formatCachedUpcoming, formatHktKickoff, formatLiveTeamResearch, formatLocalizedResearchCard, formatSettlementBreakdown, formatTeamResearch, formatTelegramStatus, isKnownTeamAlias, modelAccuracy, normalizeTelegramCommand, parseTeamRequest, parseTrendRequest, probabilityBars, rankDailyPicks, renderOddsTrend, RESEARCH_SCHEDULES, selectDailyDigestPicks, settlementForScores, settlementScore, shouldSendSettlementDigest, suggestTeamFixtures, TELEGRAM_HELP_MESSAGE, toTelegramHtml, verifyApiFootballReadiness } from "./telegramResearch";
 
@@ -477,4 +478,22 @@ it("供應商舊水位只標亞洲盤快照，且正確顯示町田及書商", (
   expect(message).toContain("亞洲盤快照（非即時）");
   expect(message).toContain("Bet365");
   expect(message).toContain("Home +0.25 @1.78 / Away -0.25 @2.02");
+});
+
+
+it("同書商主客不同選項不混成線位跳盤", () => {
+ const rows=[
+  {selection:"Home +0.25",decimalOdds:"1.80",capturedAt:new Date("2026-11-08T03:00:00Z")},
+  {selection:"Away -0.25",decimalOdds:"2.00",capturedAt:new Date("2026-11-08T03:00:00Z")},
+  {selection:"Home +0.25",decimalOdds:"1.78",capturedAt:new Date("2026-11-08T03:30:00Z")},
+  {selection:"Away -0.25",decimalOdds:"2.02",capturedAt:new Date("2026-11-08T03:30:00Z")}
+ ].map(row=>({...row,apiFixtureId:7,leagueCode:"J1",homeTeamName:"Machida Zelvia",awayTeamName:"Sanfrecce Hiroshima",fixtureKickoffAt:new Date("2026-11-08T05:00:00Z"),bookmakerName:"Bet365",bookmakerId:8,marketName:"Asian Handicap [team-v2]"}));
+ const text=summarizeTrendRows(rows);
+ expect(text).toContain("Home +0.25 @1.78");expect(text).toContain("Away -0.25 @2.02");
+ expect(text).not.toContain("線位跳盤");
+});
+
+it("舊API Away主隊視角盤線顯示為真正客隊視角",()=>{
+ const text=summarizeTrendRows([{apiFixtureId:7,leagueCode:"J1",homeTeamName:null,awayTeamName:null,fixtureKickoffAt:new Date("2026-11-08T05:00:00Z"),bookmakerName:"Bet365",bookmakerId:8,marketName:"Asian Handicap",selection:"Away -1.25",decimalOdds:"1.15",capturedAt:new Date("2026-11-08T03:30:00Z")}]);
+ expect(text).toContain("Away +1.25 @1.15");expect(text).not.toContain("Away -1.25 @1.15");
 });

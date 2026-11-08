@@ -78,7 +78,7 @@ def test_odds_history_keeps_only_real_hour_capture_rows(store):
     def raw(age):
         return {'api_fixture_id':7,'bookmaker_id':8,'bookmaker_name':'Bet365','market_code':'HDC','line_convention':'team-v2','market_name':'Asian Handicap [team-v2]','selection':'Home -0.5','decimal_odds':1.91,'captured_at':(t-m.dt.timedelta(minutes=age)).isoformat(),'source_updated_at':(t-m.dt.timedelta(minutes=age+2)).isoformat()}
     for age in [10,40,70]:
-        row=raw(age);store.execute('INSERT INTO odds_rows VALUES(?,?,?,?)',(m.digest(row),7,row['captured_at'],m.canonical(row)))
+        row=raw(age);store.execute('INSERT INTO odds_rows(k,fixture_id,captured_at,body) VALUES(?,?,?,?)',(m.digest(row),7,row['captured_at'],m.canonical(row)))
     got=m.projected_odds_history(store,t)
     assert len(got)==2
     assert all(r['provider_updated_at'] for r in got)
@@ -98,3 +98,14 @@ def test_actual_api_home_reference_converted_before_complete_pairing():
 def test_mismatched_underround_pair_never_becomes_quote():
     rows=[{'bookmaker_id':8,'bookmaker_name':'Bet365','market_code':'HDC','line_convention':'team-v2','selection':side,'decimal_odds':odd} for side,odd in [('Home -1.25',5.5),('Away +1.25',4.0)]]
     assert m.limit_odds(rows)==[]
+
+
+def test_history_keeps_three_way_hda_in_same_capture(store):
+    t=m.dt.datetime(2026,11,8,4,tzinfo=m.dt.timezone.utc)
+    for side,odd in [('Home',2.2),('Draw',3.2),('Away',3.1)]:
+        raw={'api_fixture_id':7,'bookmaker_id':8,'bookmaker_name':'Bet365','market_code':'HDA','selection':side,'decimal_odds':odd,'captured_at':t.isoformat(),'source_updated_at':t.isoformat()}
+        store.execute('INSERT INTO odds_rows(k,fixture_id,captured_at,body) VALUES(?,?,?,?)',(m.digest(raw),7,t.isoformat(),m.canonical(raw)))
+    rows=m.projected_odds_history(store,t)
+    assert len(rows)==1
+    assert (rows[0]['home_odds'],rows[0]['draw_odds'],rows[0]['away_odds'])==(2.2,3.2,3.1)
+    assert rows[0]['provider_updated_at']==t.isoformat()

@@ -438,7 +438,7 @@ export async function getSupabaseUpcomingCache(force = false): Promise<SupabaseU
       const home = normalizeOdds(snapshot.home_odds);
       const draw = normalizeOdds(snapshot.draw_odds);
       const away = normalizeOdds(snapshot.away_odds);
-      if (home === null && draw === null && away === null) continue;
+      if (home === null || draw === null || away === null) continue;
       oddsByFixture.set(fixtureId, {
         home,
         draw,
